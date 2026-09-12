@@ -1,0 +1,13 @@
+[
+  {
+    "url": "https://mbta.example.com/red-line/davis-station",
+    "title": "MBTA Red Line — Davis Station",
+    "publisher": "MBTA (fixture)",
+    "source_type": "local_government",
+    "published_at": "2025-05-01T00:00:00Z",
+    "location_scope": "Somerville, MA",
+    "snippet": "Davis Square is served by the MBTA Red Line with direct access to Harvard Square, Kendall Square, and downtown Boston.",
+    "full_text": "Davis Station is served directly by the MBTA Red Line, giving Davis Square residents a one-seat ride to Harvard Square, Kendall Square, and downtown Boston. The square is also a hub for several bus routes and is considered highly bike-friendly.",
+    "claim_text": "Davis Square has direct MBTA Red Line access to Harvard Square and downtown Boston, and is considered highly bike-friendly."
+  }
+]

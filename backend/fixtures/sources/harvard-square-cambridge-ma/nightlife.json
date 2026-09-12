@@ -1,0 +1,24 @@
+[
+  {
+    "url": "https://bostonnightguide.example.com/harvard-square-bars",
+    "title": "Harvard Square Bars and Late-Night Venues",
+    "publisher": "Boston Night Guide (fixture)",
+    "source_type": "review_aggregator",
+    "published_at": "2025-05-20T00:00:00Z",
+    "location_scope": "Cambridge, MA",
+    "snippet": "Harvard Square has a modest but well-regarded selection of bars and live-music venues, most within walking distance of the T station.",
+    "full_text": "Review aggregation for the Harvard Square area shows a modest but well-regarded selection of bars, pubs, and small live-music venues, most concentrated within a few blocks of the Red Line station. Nightlife is quieter than in Boston's downtown core but consistently rated well for atmosphere.",
+    "claim_text": "Harvard Square has a modest, well-regarded selection of bars and live-music venues within walking distance of transit, though nightlife is quieter than downtown Boston."
+  },
+  {
+    "url": "https://cambridgeeventsdirectory.example.org/harvard-square-venues",
+    "title": "Cambridge Venue Directory: Harvard Square",
+    "publisher": "Cambridge Events Directory (fixture)",
+    "source_type": "business_directory",
+    "published_at": "2025-06-10T00:00:00Z",
+    "location_scope": "Cambridge, MA",
+    "snippet": "Listings show a cluster of bars, pubs, and a comedy club within the Harvard Square business district.",
+    "full_text": "The Cambridge Events Directory lists a cluster of bars, pubs, and a comedy club within the Harvard Square business district, several of which host regular live music or trivia nights popular with the local student population.",
+    "claim_text": "Harvard Square has a modest, well-regarded selection of bars and live-music venues within walking distance of transit, though nightlife is quieter than downtown Boston."
+  }
+]

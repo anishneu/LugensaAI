@@ -1,0 +1,13 @@
+[
+  {
+    "url": "https://somervillema.example.gov/housing/davis-square-report",
+    "title": "Davis Square Housing Snapshot",
+    "publisher": "City of Somerville Housing Office (fixture)",
+    "source_type": "local_government",
+    "published_at": "2025-09-05T00:00:00Z",
+    "location_scope": "Somerville, MA",
+    "snippet": "Rents near Davis Square are somewhat lower than Harvard Square but still above the Massachusetts state average.",
+    "full_text": "The Somerville Housing Office reports that average rents near Davis Square run somewhat lower than comparable listings near Harvard Square, though still above the Massachusetts state average, with one-bedroom units commonly shared by two or more tenants to reduce individual cost.",
+    "claim_text": "Rents near Davis Square are somewhat lower than Harvard Square but still above the Massachusetts state average."
+  }
+]

@@ -1,0 +1,24 @@
+[
+  {
+    "url": "https://massbudgetindex.example.org/cambridge-2025",
+    "title": "Massachusetts Regional Cost of Living Index",
+    "publisher": "Mass Budget Index (fixture)",
+    "source_type": "news",
+    "published_at": "2025-09-01T00:00:00Z",
+    "location_scope": "Cambridge, MA",
+    "snippet": "Cambridge, including the Harvard Square area, ranks well above the national average on overall cost of living, driven primarily by housing costs.",
+    "full_text": "The Massachusetts Regional Cost of Living Index places Cambridge, including the Harvard Square area, well above the national average overall, with housing the dominant driver. Groceries and transportation costs are closer to the state average, partially offsetting elevated rent.",
+    "claim_text": "Overall cost of living near Harvard Square is well above the national average, driven mainly by housing costs."
+  },
+  {
+    "url": "https://studentbudgettips.example.net/harvard-square-2022",
+    "title": "Budgeting Near Harvard Square as a Student",
+    "publisher": "Student Budget Tips (fixture)",
+    "source_type": "blog",
+    "published_at": "2022-03-01T00:00:00Z",
+    "location_scope": "Cambridge, MA",
+    "snippet": "Students near Harvard Square commonly cut costs by using a meal plan and relying on transit instead of owning a car.",
+    "full_text": "A budgeting guide aimed at students living near Harvard Square recommends using a university meal plan and relying on the MBTA rather than car ownership as the two most effective ways to offset the neighborhood's high cost of living.",
+    "claim_text": "Students commonly offset Harvard Square's high cost of living by using a meal plan and relying on public transit instead of owning a car."
+  }
+]
