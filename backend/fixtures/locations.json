@@ -1,0 +1,32 @@
+[
+  {
+    "aliases": [
+      "harvard square",
+      "harvard square, cambridge, ma",
+      "harvard square, cambridge",
+      "harvard square cambridge ma"
+    ],
+    "name": "Harvard Square",
+    "city": "Cambridge",
+    "region": "MA",
+    "country": "US",
+    "slug": "harvard-square-cambridge-ma",
+    "latitude": 42.3736,
+    "longitude": -71.119
+  },
+  {
+    "aliases": [
+      "davis square",
+      "davis square, somerville, ma",
+      "davis square, somerville",
+      "davis square somerville ma"
+    ],
+    "name": "Davis Square",
+    "city": "Somerville",
+    "region": "MA",
+    "country": "US",
+    "slug": "davis-square-somerville-ma",
+    "latitude": 42.3967,
+    "longitude": -71.1224
+  }
+]

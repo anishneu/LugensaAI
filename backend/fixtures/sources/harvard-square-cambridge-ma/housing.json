@@ -1,0 +1,24 @@
+[
+  {
+    "url": "https://cambridgema.example.gov/housing/student-housing-report-2025",
+    "title": "Cambridge Student Housing Report",
+    "publisher": "City of Cambridge Housing Division (fixture)",
+    "source_type": "local_government",
+    "published_at": "2025-11-10T00:00:00Z",
+    "location_scope": "Cambridge, MA",
+    "snippet": "Average studio rent near Harvard Square runs $2,200-$2,800/month; several buildings offer student-aligned academic-year leases.",
+    "full_text": "The City of Cambridge's housing division reports that average studio apartment rent within a half-mile of Harvard Square ranges from $2,200 to $2,800 per month as of late 2025. Several nearby buildings offer 9- or 10-month leases aligned with the academic calendar, aimed at Harvard and Lesley University students.",
+    "claim_text": "Studio apartments near Harvard Square typically rent for $2,200-$2,800/month, and some buildings offer student-aligned academic-year leases."
+  },
+  {
+    "url": "https://bostonrentwatch.example.org/cambridge-harvard-square-2025",
+    "title": "Harvard Square Rent Trends",
+    "publisher": "Boston Rent Watch (fixture)",
+    "source_type": "news",
+    "published_at": "2025-08-22T00:00:00Z",
+    "location_scope": "Cambridge, MA",
+    "snippet": "Rents around Harvard Square remain among the highest in the Boston metro area, driven by proximity to Harvard University.",
+    "full_text": "A 2025 review of Boston-area rental listings found that Harvard Square commands some of the highest per-square-foot rents in the metro region, largely due to walkability to Harvard University and the MBTA Red Line. Shared apartments split among 3-4 roommates were the most common strategy students used to manage costs.",
+    "claim_text": "Studio apartments near Harvard Square typically rent for $2,200-$2,800/month, and some buildings offer student-aligned academic-year leases."
+  }
+]

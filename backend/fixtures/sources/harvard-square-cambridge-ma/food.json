@@ -1,0 +1,24 @@
+[
+  {
+    "url": "https://cambridgeeats.example.org/harvard-square-guide",
+    "title": "Harvard Square Dining Guide",
+    "publisher": "Cambridge Eats (fixture)",
+    "source_type": "review_aggregator",
+    "published_at": "2025-07-01T00:00:00Z",
+    "location_scope": "Cambridge, MA",
+    "snippet": "Harvard Square offers a dense mix of casual, student-budget-friendly restaurants alongside higher-end dining options.",
+    "full_text": "Harvard Square's dining scene ranges from casual, student-budget-friendly spots — pizza, bubble tea, and fast-casual chains — to a smaller number of higher-end restaurants, giving students a wide range of price points within walking distance.",
+    "claim_text": "Harvard Square offers a dense mix of student-budget-friendly restaurants and cafes alongside higher-end dining options."
+  },
+  {
+    "url": "https://regionalculturemag.example.net/new-england-town-squares",
+    "title": "New England Town Squares Roundup",
+    "publisher": "Regional Culture Magazine (fixture)",
+    "source_type": "blog",
+    "published_at": "2024-11-05T00:00:00Z",
+    "location_scope": "New England",
+    "snippet": "A broad regional roundup of notable New England town squares and their general character.",
+    "full_text": "This roundup surveys several notable New England town squares for their historic architecture and general regional character, touching only briefly on any individual square's amenities.",
+    "claim_text": "Harvard Square offers a dense mix of student-budget-friendly restaurants and cafes alongside higher-end dining options."
+  }
+]

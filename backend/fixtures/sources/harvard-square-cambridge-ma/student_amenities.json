@@ -1,0 +1,24 @@
+[
+  {
+    "url": "https://harvardlibrary.example.edu/visitor-access",
+    "title": "Harvard Library Public and Student Access",
+    "publisher": "Harvard Library (fixture)",
+    "source_type": "academic",
+    "published_at": "2025-09-01T00:00:00Z",
+    "location_scope": "Cambridge, MA",
+    "snippet": "Harvard Square sits adjacent to multiple Harvard libraries and student study spaces, several of which allow visiting-student access.",
+    "full_text": "Harvard Square is directly adjacent to several Harvard University libraries, including Widener and Lamont, both of which offer extensive study space. A number of cafes and coworking-style spaces in the square are also popular with students from nearby Lesley University and other Cambridge-area schools.",
+    "claim_text": "Harvard Square offers extensive student-oriented study space, both through adjacent university libraries and nearby cafes."
+  },
+  {
+    "url": "https://cambridgeguide.example.org/harvard-square-student-life",
+    "title": "Student Life Guide: Harvard Square",
+    "publisher": "Cambridge Neighborhood Guide (fixture)",
+    "source_type": "blog",
+    "published_at": "2025-07-12T00:00:00Z",
+    "location_scope": "Cambridge, MA",
+    "snippet": "The square hosts bookstores, student-discount cafes, and a dense concentration of study-friendly spaces.",
+    "full_text": "Beyond the university libraries, Harvard Square hosts several long-running independent bookstores, a number of cafes offering student discounts, and a dense concentration of study-friendly seating, making it a popular out-of-classroom study destination for students across the Boston area.",
+    "claim_text": "Harvard Square offers extensive student-oriented study space, both through adjacent university libraries and nearby cafes."
+  }
+]

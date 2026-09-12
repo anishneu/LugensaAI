@@ -1,0 +1,24 @@
+[
+  {
+    "url": "https://cambridgema.example.gov/police/annual-crime-report-2025",
+    "title": "Cambridge Police Department Annual Crime Report",
+    "publisher": "Cambridge Police Department (fixture)",
+    "source_type": "local_government",
+    "published_at": "2025-06-01T00:00:00Z",
+    "location_scope": "Cambridge, MA",
+    "snippet": "Violent crime near Harvard Square remains low relative to the wider Boston metro area; property crime, mainly bicycle theft, is the most common issue.",
+    "full_text": "The Cambridge Police Department's annual report notes that violent crime rates in the Harvard Square area remain low compared to the broader Boston metro area. The most commonly reported issue in the neighborhood is property crime, particularly bicycle theft, which the department attributes to the area's high foot and bike traffic.",
+    "claim_text": "Violent crime near Harvard Square is low relative to the Boston metro area, though bicycle theft is a commonly reported property crime."
+  },
+  {
+    "url": "https://localsafetywatch.example.net/cambridge-harvard-square",
+    "title": "Neighborhood Safety Snapshot: Harvard Square",
+    "publisher": "Local Safety Watch (fixture)",
+    "source_type": "news",
+    "published_at": "2025-04-18T00:00:00Z",
+    "location_scope": "Cambridge, MA",
+    "snippet": "Residents and students generally describe Harvard Square as safe to walk through at night, given heavy foot traffic and lighting.",
+    "full_text": "A neighborhood safety review found that residents and students generally describe Harvard Square as safe to walk through even at night, citing consistently heavy foot traffic, well-lit streets, and a visible police presence near the T station.",
+    "claim_text": "Violent crime near Harvard Square is low relative to the Boston metro area, though bicycle theft is a commonly reported property crime."
+  }
+]

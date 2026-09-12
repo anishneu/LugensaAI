@@ -1,0 +1,24 @@
+[
+  {
+    "url": "https://mbta.example.com/red-line/harvard-station",
+    "title": "MBTA Red Line — Harvard Station",
+    "publisher": "MBTA (fixture)",
+    "source_type": "local_government",
+    "published_at": "2025-05-01T00:00:00Z",
+    "location_scope": "Cambridge, MA",
+    "snippet": "Harvard Square is served directly by the MBTA Red Line, with frequent service to downtown Boston and connections to bus routes.",
+    "full_text": "Harvard Station sits at the center of Harvard Square and is served by the MBTA Red Line, providing direct subway access to downtown Boston, South Station, and Kendall Square. The station is also a major hub for MBTA bus routes serving Cambridge, Somerville, and Arlington, and the surrounding area is rated highly walkable and bikeable.",
+    "claim_text": "Harvard Square has direct MBTA Red Line subway access plus a major bus hub, and the area is considered highly walkable and bikeable."
+  },
+  {
+    "url": "https://cambridgema.example.gov/transportation/commuting-report",
+    "title": "Cambridge Commuting Patterns",
+    "publisher": "City of Cambridge Transportation Office (fixture)",
+    "source_type": "local_government",
+    "published_at": "2025-02-15T00:00:00Z",
+    "location_scope": "Cambridge, MA",
+    "snippet": "A majority of Cambridge residents near Harvard Square commute by transit, foot, or bicycle rather than by car.",
+    "full_text": "According to the Cambridge Transportation Office's most recent commuting survey, the majority of residents living near Harvard Square commute by public transit, walking, or bicycle. Car ownership is comparatively low in the neighborhood, reflecting strong transit and bike infrastructure.",
+    "claim_text": "Harvard Square has direct MBTA Red Line subway access plus a major bus hub, and the area is considered highly walkable and bikeable."
+  }
+]
