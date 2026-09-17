@@ -2,28 +2,78 @@
 
 The research pipeline described in [`docs/architecture.md`](../docs/architecture.md). By
 default it runs fully free and mostly offline: fixture-backed tools, rule-based planning,
-keyword retrieval, local SQLite storage. Setting `ANTHROPIC_API_KEY` and/or `TAVILY_API_KEY`
-opts into LLM-backed reasoning and live web search respectively (independent of each other);
-having `sentence-transformers` installed opts into hybrid semantic retrieval automatically. See
-below for all three.
+keyword retrieval, local SQLite storage. Setting `ANTHROPIC_API_KEY`/`OLLAMA_ENABLED` and/or
+`TAVILY_API_KEY` opts into LLM-backed reasoning and live web search respectively (independent of
+each other); having `sentence-transformers` installed opts into hybrid semantic retrieval
+automatically. See below for all of these.
 
 ## What this does and doesn't do
 
-**Does:** resolve a location, decompose a question into research topics (adaptively — a
+**Does:** resolve a location — either of the two curated fixture neighborhoods instantly, or any
+other real point of interest via live geocoding (`NominatimLocationResolverTool`, free, opt-out
+via `DISABLE_LIVE_GEOCODING=1`) — decompose a question into research topics (adaptively — a
 nightlife-only question does not trigger housing research), retrieve and score evidence
 (lexically, and semantically if available), extract claims and link them to the evidence that
 supports them, verify those claims (including a coarse cross-source contradiction check), and
-synthesize a transparent, cited answer with a full execution trace. Claim verification is always
-a fixed, deterministic step — never LLM-backed, and it never moves in the pipeline — regardless
-of which other components are in use (see `docs/research-workflow.md`).
+synthesize a transparent, cited answer — a direct summary, key findings, and question-organized
+details, not just a claims list — with a full execution trace. Claim verification is always a
+fixed, deterministic step — never LLM-backed, and it never moves in the pipeline — regardless of
+which other components are in use (see `docs/research-workflow.md`).
 
-**Doesn't:** real geocoding (location resolution is still fixture/alias-based), or a second,
-broadened search attempt when a topic comes back empty. Both are flagged explicitly where
-relevant rather than silently assumed away.
+**Doesn't:** a second, broadened search attempt when a per-topic research search comes back
+empty — it stays as originally queried, and the gap is recorded in `limitations` rather than
+silently retried. (The independent live feed is a different, deliberately regional query from the
+start — see below — not a fallback triggered by an empty result.)
 
 **Fixture data is synthetic.** Everything under `fixtures/` was written for this project to test
 the pipeline. It does not describe real, current conditions at Harvard Square or Davis Square and
 must not be treated as such outside local development.
+
+## Overview synthesis: evidence in, reasoning, an answer out
+
+Early on, the Overview was gated entirely behind atomic claim extraction: no successfully
+extracted claim meant no answer, just "insufficient evidence" — even when real, useful evidence
+had been collected. Two changes fixed this:
+
+1. **`LLMClaimExtractor` grounds claims by more than trusting a citation.** The LLM is asked to
+   cite the evidence id/topic it used, and that citation is used directly when it validates. When
+   it doesn't (a smaller model reliably fails this exact instruction — e.g. citing a source name
+   it noticed inside the passage, like `"FBI Uniform Crime Reporting data"`, instead of the
+   literal `[evidence_id]` token it was shown), `_best_matching_evidence()` recovers grounding
+   deterministically: it checks the claim's own wording against the real evidence text via
+   lexical overlap, and only keeps the claim if that independent check clears a high bar. Either
+   way, a claim's grounding is *checked*, never assumed from the LLM's self-report.
+2. **`Synthesizer.synthesize()` sees the full evidence, not only claims that survived extraction.**
+   `LLMSynthesizer`'s prompt is given verified claims *and* raw, per-topic evidence excerpts
+   (labeled by source type, publisher, and date), with instructions to reason across both:
+   prefer concrete facts/numbers, treat review/forum content as opinion rather than fact, present
+   a "contradicted" claim as unresolved disagreement, never state a fact the evidence doesn't
+   support, and — for safety/incident questions specifically — never claim something "hasn't
+   happened" or "is safe" from a mere absence of search hits; say what the sources checked did
+   and didn't turn up, with the time window, instead. `TemplateSynthesizer` (the free, non-LLM
+   fallback) does the deterministic version of the same idea: for a topic with evidence but no
+   claim, it quotes the single most relevant *and* credible excerpt (blending relevance with a
+   source-type quality score) rather than reporting only a gap.
+
+Both synthesizers still never get to invent a limitation — coverage gaps, per-claim caveats, and
+the contradiction-detection caveat are computed in code (`deterministic_limitations()`) and
+appended regardless of what either synthesizer wrote.
+
+## Live feed: regional, not location-specific
+
+`GET /api/live-feed` (`TavilyLiveFeedTool`) is a separate, unverified surface: "what's happening
+recently in the broader area", independent of both the Q&A pipeline and the specific selected
+place. It's deliberately not "what's being said about this exact business" — a single POI (one
+Starbucks branch, one specific cafe) rarely has anything published about it by name in the last
+week, so both the search query and the relevance filter are anchored on the area (the selected
+place's city, or region if no city is known — derived dynamically, never hardcoded) rather than
+the place's own name. The relevance check also requires that anchor to appear in a result's title,
+or be repeated in its body — a single passing mention (e.g. a national sports thread that
+name-checks a city once) isn't enough to count as regional activity. Results are deduplicated by
+URL and sorted newest-first; the frontend paginates the returned list (5 items/page, up to 3 pages
+shown) without any extra requests per page. Every fetch (initial load, manual refresh, or the
+frontend's periodic auto-refresh) is one real, billed Tavily search — see the frontend's refresh
+interval in `frontend/README.md` before making it more aggressive.
 
 ## Setup
 
@@ -156,18 +206,24 @@ without an `ANTHROPIC_API_KEY`) are written up in that doc.
 
 ```
 app/
-  models/       Pydantic schemas shared by every layer
-  core/         config (incl. .env loading), LLMService + AnthropicLLMService, shared LLM JSON parsing
-  tools/        LocationResolver / WebSearch / PageRetrieval interfaces + fixture and Tavily implementations
+  models/       Pydantic schemas shared by every layer (incl. PlaceCandidate for live POI search)
+  core/         config (incl. .env loading), LLMService + AnthropicLLMService + OllamaLLMService,
+                shared LLM JSON parsing
+  tools/        LocationResolver / WebSearch / PageRetrieval interfaces + fixture, Tavily, and
+                Nominatim (POI geocoding/search, TavilyLiveFeedTool) implementations, plus
+                FallbackLocationResolver (composite.py)
   planning/     topic taxonomy + KeywordResearchPlanner + LLMResearchPlanner
   retrieval/    EvidenceRetriever interface + keyword, semantic, and hybrid implementations
   evidence/     EvidenceRepository (in-memory, SQLite) + evidence enrichment (quality/recency)
-  synthesis/    claim extraction (fixture- or LLM-based) + answer synthesis (template- or LLM-based)
+  synthesis/    claim extraction (fixture- or LLM-based, with deterministic grounding recovery for
+                the LLM path) + answer synthesis (template- or LLM-based, from claims *and* raw
+                evidence — see "Overview synthesis" below)
   verification/ checks every claim against the evidence store before it can be marked "supported",
                 plus a deterministic cross-claim contradiction check (always non-LLM)
   agents/       LocationResearchAgent — orchestrates the bounded lifecycle, plus the default-agent
                 factory (auto-selects rule-based/fixture vs. LLM-backed/live components per API key)
-  api/          FastAPI route
+  api/          FastAPI routes, incl. /api/places/search (live POI autocomplete) and
+                /api/live-feed (independent, region-scoped recent activity)
 fixtures/       synthetic locations + source documents, keyed by location slug and topic id
 evaluation/     the benchmark from docs/evaluation.md, actually runnable (`run_benchmark.py`)
 tests/          pytest suite: planner, retrieval (keyword/semantic/hybrid), evidence repository

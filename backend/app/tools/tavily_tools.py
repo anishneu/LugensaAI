@@ -68,15 +68,22 @@ _TIMESTAMP_LINE_RE = re.compile(r"^\s*\[?\d{1,2}:\d{2}(?::\d{2})?\]?\s.*$", re.M
 _APP_STORE_LINE_RE = re.compile(r"^.*(app-store|play\.google\.com|Get our ?App).*$", re.MULTILINE | re.IGNORECASE)
 _NAV_MENU_LINE_RE = re.compile(r"^(?:[^\n|]*\|){3,}[^\n]*$", re.MULTILINE)
 _BULLET_NAV_BLOCK_RE = re.compile(r"(?:^[ \t]*[*•]\s.{0,60}$\n?){3,}", re.MULTILINE)
+# Travel/review-aggregator breadcrumb nav (TripAdvisor and similar) — a line
+# naming several of these categories together is never real review content,
+# regardless of exact spacing/concatenation from how the page was scraped
+# (e.g. "BostonThings to DoHotelsRestaurantsCruisesForums").
+_TRAVEL_NAV_KEYWORD = r"(?:Things to Do|Hotels?|Restaurants?|Cruises?|Forums?|Vacation Rentals?|Flights?|Vacation Packages?)"
+_TRAVEL_NAV_LINE_RE = re.compile(rf"^.*(?:{_TRAVEL_NAV_KEYWORD}.*){{3,}}$", re.MULTILINE)
 _MULTI_BLANK_RE = re.compile(r"\n{3,}")
 _MULTI_SPACE_RE = re.compile(r"[ \t]{2,}")
 
 # Exact-match, case-insensitive: known UI chrome from specific platforms
-# (Facebook, Nextdoor, Zillow, ...) observed in real scraped results. A
-# denylist of known junk lines, rather than a generic "short line" filter —
-# a generic filter would also gut legitimate short-line content like a
-# crime-statistics table (numbers and place names are short lines too, and
-# those are exactly the kind of safety data this project wants surfaced).
+# (Facebook, Nextdoor, Zillow, TripAdvisor, ...) observed in real scraped
+# results. A denylist of known junk lines, rather than a generic "short
+# line" filter — a generic filter would also gut legitimate short-line
+# content like a crime-statistics table (numbers and place names are short
+# lines too, and those are exactly the kind of safety data this project
+# wants surfaced).
 _KNOWN_UI_JUNK_LINES = {
     "log in",
     "forgot account?",
@@ -85,6 +92,7 @@ _KNOWN_UI_JUNK_LINES = {
     "explore more",
     "explore video",
     "sign up",
+    "sign in",
     "create new account",
     "see more",
     "where is this data from?",
@@ -92,6 +100,20 @@ _KNOWN_UI_JUNK_LINES = {
     "see what verified neighbors are saying",
     "loadingloading...",
     "total monthly price",
+    "skip to main content",
+    "plan with ai",
+    "rewards",
+    "discover",
+    "review",
+    "usd",
+    "skip navigation",
+    "your browser is not supported for this experience.",
+    "we recommend using chrome, firefox, edge, or safari.",
+    "accessibility in boston",
+    "share",
+    "share on facebook",
+    "share on twitter",
+    "share on linkedin",
 }
 
 _MIN_USABLE_SNIPPET_LENGTH = 40
@@ -141,6 +163,7 @@ def _clean_text(text: str) -> str:
     cleaned = _MD_LINK_RE.sub(r"\1", cleaned)
     cleaned = _NAV_MENU_LINE_RE.sub("", cleaned)
     cleaned = _BULLET_NAV_BLOCK_RE.sub("", cleaned)
+    cleaned = _TRAVEL_NAV_LINE_RE.sub("", cleaned)
     cleaned = _HEADING_RE.sub("", cleaned)
     cleaned = _TIMESTAMP_LINE_RE.sub("", cleaned)
     cleaned = _APP_STORE_LINE_RE.sub("", cleaned)
@@ -173,21 +196,38 @@ def _is_relevant_to_location(item_text: str, location: Location) -> bool:
     return any(needle in haystack for needle in needles if needle)
 
 
-def _is_relevant_to_live_feed(item_text: str, location: Location) -> bool:
+def _region_label(location: Location) -> str:
+    """The broader area the live feed reports on -- dynamically derived
+    from whatever location was selected, never hardcoded to one city. A
+    POI's own city/region if known; only a bare place name (no city/region
+    at all) falls back to its own name, since there's nothing broader to
+    anchor on."""
+    return ", ".join(filter(None, [location.city, location.region])) or location.name
+
+
+def _region_anchor(location: Location) -> str:
+    return (location.city or location.region or location.name).lower()
+
+
+def _is_relevant_to_live_feed(title: str, body: str, location: Location) -> bool:
     """The live feed surfaces general regional activity -- a Reddit post, a
-    news article, anything freshly published near this place -- rather than
-    coverage of one exact business. Matching on `location.name` alone (as
-    `_is_relevant_to_location` does) breaks for a chain business like
-    "Starbucks": the name alone matches unrelated content about that chain
-    anywhere in the country, while genuinely relevant local chatter rarely
-    names one specific branch. The anchor that actually proves an item is
-    about the right place is its city (or region, if no city is known).
+    news article, anything freshly published in the broader area -- rather
+    than coverage of one exact business, so the anchor is always the area
+    (city, or region if no city is known), never a specific POI's name.
+
+    A single passing mention anywhere in a long body of text is too weak a
+    signal on its own -- real content, unrelated to the area, sometimes
+    name-checks a well-known city once in an aside (e.g. a national sports
+    thread mentioning a rival team's city). Requiring the anchor in the
+    title, or repeated in the body, distinguishes "this is actually about
+    the area" from "the area was mentioned in passing".
     """
-    haystack = item_text.lower()
-    anchor = location.city or location.region
-    if anchor:
-        return anchor.lower() in haystack
-    return location.name.lower() in haystack
+    anchor = _region_anchor(location)
+    if not anchor:
+        return True
+    if anchor in title.lower():
+        return True
+    return f"{title} {body}".lower().count(anchor) >= 2
 
 
 def _classify_source_type(url: str) -> SourceType:
@@ -328,8 +368,15 @@ class TavilyWebSearchTool(WebSearchTool):
 
 
 class TavilyLiveFeedTool:
-    """Recency-biased, topic-agnostic search: "what's currently being said
-    about this place" — independent of any specific research question.
+    """Recency-biased, topic-agnostic search: "what's happening recently in
+    this broader region" — deliberately independent of both the specific
+    selected place and any specific research question. A POI like one
+    Starbucks branch rarely has anything published about it by name in the
+    last week, and the point of this feed (unlike the Community tab, which
+    is about the exact selected place) is regional awareness, not coverage
+    of one business — so every query and relevance check here is anchored
+    on the area (city, or region if no city is known), never the place's own
+    name.
 
     Not part of the verified research pipeline: no per-topic planning, no
     claim extraction, no verification. `topic="live_feed"` on the resulting
@@ -338,7 +385,7 @@ class TavilyLiveFeedTool:
     before wiring this up to an aggressive auto-refresh interval.
     """
 
-    def __init__(self, api_key: str | None = None, max_results: int = 8, client: object | None = None) -> None:
+    def __init__(self, api_key: str | None = None, max_results: int = 20, client: object | None = None) -> None:
         self.raw_content_cache: dict[str, str] = {}
         self._max_results = max_results
 
@@ -358,22 +405,9 @@ class TavilyLiveFeedTool:
         self._client = TavilyClient(api_key=api_key)
 
     def fetch(self, location: Location) -> list[Evidence]:
-        location_label = f"{location.name}, {location.city}, {location.region}".strip(", ")
-        relevant = self._search_and_filter(location, f"{location_label} news reddit recent discussion")
+        region_label = _region_label(location)
+        query = f"{region_label} local news community reddit recent activity"
 
-        # A specific POI (one Starbucks branch, one restaurant) rarely has
-        # anything written about it by name in the last week -- fall back to
-        # an area-level query instead of showing nothing. This still passes
-        # through the same relevance filter (city/region, not the POI name),
-        # so it only ever surfaces content actually about the right place.
-        # One extra billed call, and only when the first query came up empty.
-        if not relevant and location.city:
-            area_label = ", ".join(filter(None, [location.city, location.region]))
-            relevant = self._search_and_filter(location, f"{area_label} news reddit recent discussion")
-
-        return relevant
-
-    def _search_and_filter(self, location: Location, query: str) -> list[Evidence]:
         try:
             response = self._client.search(
                 query=query,
@@ -392,11 +426,20 @@ class TavilyLiveFeedTool:
         # This *is* the "just show me what's relevant-ish nearby" surface —
         # unlike per-topic research search, there's no verified pipeline
         # downstream to catch an overly loose match, so the location filter
-        # here is not soft: a result that never mentions the place is
-        # dropped outright rather than shown with a caveat.
-        relevant = [c for c in candidates if _is_relevant_to_live_feed(f"{c.source_title} {c.text}", location)]
-        relevant.sort(key=lambda e: e.published_at or e.retrieved_at, reverse=True)
-        return relevant
+        # here is not soft: a result that never mentions the area is dropped
+        # outright rather than shown with a caveat.
+        relevant = [c for c in candidates if _is_relevant_to_live_feed(c.source_title, c.text, location)]
+
+        seen_urls: set[str] = set()
+        deduplicated: list[Evidence] = []
+        for item in relevant:
+            if item.source_url in seen_urls:
+                continue
+            seen_urls.add(item.source_url)
+            deduplicated.append(item)
+
+        deduplicated.sort(key=lambda e: e.published_at or e.retrieved_at, reverse=True)
+        return deduplicated
 
 
 class TavilyPageRetrievalTool(PageRetrievalTool):

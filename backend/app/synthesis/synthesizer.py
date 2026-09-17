@@ -23,8 +23,10 @@ own topics, preserving Milestone 1's behavior where the two always matched.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 
 from app.models.claim import Claim, ClaimStatus
+from app.models.evidence import Evidence
 from app.models.location import Location
 from app.models.plan import Priority, ResearchPlan
 
@@ -71,6 +73,24 @@ def deduplicate(items: list[str]) -> list[str]:
     return [item for item in items if not (item in seen or seen.add(item))]
 
 
+@dataclass
+class SynthesisResult:
+    """A synthesizer's full output.
+
+    `key_findings` and `details` exist alongside `summary`/`recommendation`
+    so an Overview can be a real, structured research answer (a short direct
+    answer, scannable bullet points, then a longer question-organized
+    elaboration) rather than one undifferentiated paragraph — see
+    `docs/research-workflow.md`.
+    """
+
+    summary: str
+    recommendation: str
+    limitations: list[str] = field(default_factory=list)
+    key_findings: list[str] = field(default_factory=list)
+    details: str = ""
+
+
 class Synthesizer(ABC):
     @abstractmethod
     def synthesize(
@@ -79,70 +99,124 @@ class Synthesizer(ABC):
         question: str,
         plan: ResearchPlan,
         claims: list[Claim],
+        evidence: list[Evidence],
         topics_with_evidence: set[str] | None = None,
-    ) -> tuple[str, str, list[str]]:
-        """Return (summary, recommendation, limitations)."""
+    ) -> SynthesisResult:
         raise NotImplementedError
 
 
+_SUBJECTIVE_SOURCE_TYPES = {"review_aggregator", "community_forum", "blog"}
+
+
 class TemplateSynthesizer(Synthesizer):
+    """Rule-based fallback: no reasoning, so it never infers anything beyond
+    what a claim or a directly-quoted evidence excerpt already says. When a
+    topic has evidence but claim extraction produced nothing for it (the
+    common case without an LLM key), it quotes the single most relevant
+    excerpt verbatim rather than reporting only a gap — clearly labeled as
+    an unverified excerpt, since no verification ran on it, but a real
+    quoted source beats an empty topic even in the free/no-LLM path.
+    """
+
     def synthesize(
         self,
         location: Location,
         question: str,
         plan: ResearchPlan,
         claims: list[Claim],
+        evidence: list[Evidence],
         topics_with_evidence: set[str] | None = None,
-    ) -> tuple[str, str, list[str]]:
+    ) -> SynthesisResult:
         covered_topic_ids = {c.claim_type for c in claims}
         evidence_topic_ids = topics_with_evidence if topics_with_evidence is not None else covered_topic_ids
+        evidence_by_topic: dict[str, list[Evidence]] = {}
+        for item in evidence:
+            evidence_by_topic.setdefault(item.topic, []).append(item)
 
-        summary_lines: list[str] = []
+        key_findings: list[str] = []
+        detail_blocks: list[str] = []
         ordered_topics = sorted(plan.topics, key=lambda t: _PRIORITY_ORDER[t.priority])
         for topic in ordered_topics:
+            label = topic.topic_id.replace("_", " ")
             topic_claims = [c for c in claims if c.claim_type == topic.topic_id]
-            if not topic_claims:
-                if topic.topic_id in evidence_topic_ids:
-                    summary_lines.append(
-                        f"{topic.topic_id}: evidence was found but no claims could be extracted from it."
-                    )
-                else:
-                    summary_lines.append(f"{topic.topic_id}: no evidence was found for this topic.")
+
+            if topic_claims:
+                lines: list[str] = []
+                for claim in topic_claims:
+                    if claim.status == ClaimStatus.SUPPORTED:
+                        key_findings.append(f"{label}: {claim.text}")
+                        lines.append(f"{claim.text} (supported by {len(claim.supporting_evidence_ids)} source(s)).")
+                    elif claim.status == ClaimStatus.CONTRADICTED:
+                        key_findings.append(f"{label}: sources disagree — {claim.text}")
+                        lines.append(
+                            f"{claim.text} — conflicts with another claim about this topic; treat as "
+                            "unresolved rather than trusting either side."
+                        )
+                    else:
+                        lines.append(f"{claim.text} — not confirmed by sufficient evidence.")
+                detail_blocks.append(f"{label.title()}: " + " ".join(lines))
                 continue
-            for claim in topic_claims:
-                if claim.status == ClaimStatus.SUPPORTED:
-                    summary_lines.append(
-                        f"{topic.topic_id}: {claim.text} "
-                        f"(supported by {len(claim.supporting_evidence_ids)} source(s))"
-                    )
-                elif claim.status == ClaimStatus.CONTRADICTED:
-                    summary_lines.append(
-                        f"{topic.topic_id}: {claim.text} — conflicts with another claim about this topic; "
-                        "treat as unresolved rather than trusting either side."
-                    )
-                else:
-                    summary_lines.append(f"{topic.topic_id}: {claim.text} — not confirmed by sufficient evidence.")
+
+            topic_evidence = evidence_by_topic.get(topic.topic_id, [])
+            if topic_evidence:
+                # Relevance alone can pick a highly-relevant but low-quality
+                # source (e.g. a marketing page classified as "other") over
+                # an equally relevant but far more credible one (e.g. a
+                # ".edu" page) -- blend in quality_score so credibility has
+                # a real say in which single excerpt gets quoted.
+                top = max(topic_evidence, key=lambda e: ((e.relevance_score or 0.0) + (e.quality_score or 0.0)) / 2)
+                excerpt = top.text if len(top.text) <= 220 else top.text[:220].rsplit(" ", 1)[0] + "…"
+                attribution = "customer/community opinion" if top.source_type in _SUBJECTIVE_SOURCE_TYPES else "a source"
+                key_findings.append(f"{label}: an unverified excerpt from {attribution} was found but not confirmed")
+                detail_blocks.append(
+                    f'{label.title()}: no claim could be confirmed automatically, but {attribution} '
+                    f'(published via {top.publisher or top.source_type}) said: "{excerpt}" — read the original '
+                    "before treating this as settled."
+                )
+            else:
+                key_findings.append(f"{label}: no evidence was found")
+                detail_blocks.append(f"{label.title()}: no evidence was found for this topic.")
 
         ratio = coverage_ratio(plan, claims)
-        if ratio == 0:
+        if ratio == 0 and not evidence:
+            summary = f"No evidence was collected for this question about {location.name}."
             recommendation = (
                 f"Insufficient evidence was collected to assess {location.name} against this question. "
                 "No recommendation can be made from the current sources."
             )
-        elif ratio >= 0.7:
+        elif ratio == 0:
+            summary = (
+                f"No claims could be automatically verified for {location.name} regarding this question, but "
+                f"{len(evidence)} source(s) were found — see the excerpts below and the Evidence tab for the "
+                "original, unprocessed material."
+            )
             recommendation = (
+                f"Automatic verification could not confirm any claims about {location.name} for this question. "
+                "Real sources were found (see Details/Evidence) but require manual review rather than an "
+                "automated recommendation."
+            )
+        elif ratio >= 0.7:
+            summary = (
                 f"Across most of the planned topics, the evidence reviewed points toward {location.name} "
-                "having generally supportive conditions for this question. This reflects only the sources "
-                "collected in this run and should not be treated as a universally correct or complete answer — "
-                "personal priorities and circumstances vary."
+                "having generally supportive conditions for this question."
+            )
+            recommendation = (
+                "This reflects only the sources collected in this run and should not be treated as a "
+                "universally correct or complete answer — personal priorities and circumstances vary."
             )
         else:
-            recommendation = (
+            summary = (
                 f"The evidence reviewed for {location.name} is mixed or incomplete: some planned topics are "
-                "well supported while others have little or no evidence. Treat this as a partial assessment "
-                "rather than a confident recommendation."
+                "well supported while others have little or no evidence."
             )
+            recommendation = "Treat this as a partial assessment rather than a confident recommendation."
 
-        summary = " ".join(summary_lines) if summary_lines else "No evidence was collected for this question."
+        details = "\n\n".join(detail_blocks)
         limitations = deduplicate(deterministic_limitations(plan, claims, topics_with_evidence))
-        return summary, recommendation, limitations
+        return SynthesisResult(
+            summary=summary,
+            recommendation=recommendation,
+            limitations=limitations,
+            key_findings=key_findings,
+            details=details,
+        )

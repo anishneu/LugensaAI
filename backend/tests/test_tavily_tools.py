@@ -1,5 +1,6 @@
 import pytest
 
+from app.models.location import Location
 from app.models.plan import Priority, ResearchTopic
 from app.tools.base import ToolConfigurationError, ToolExecutionError
 from app.tools.tavily_tools import (
@@ -207,6 +208,60 @@ def test_clean_text_drops_known_platform_ui_chrome():
     assert "Live Reels" not in cleaned
 
 
+def test_clean_text_drops_tripadvisor_style_breadcrumb_nav():
+    """Regression test for a real bug found live: a TripAdvisor-style review
+    aggregator page's whole top nav (Skip to main content, Plan with AI,
+    Rewards, Discover, Review, USD, Sign in, and a breadcrumb of category
+    links glued together with inconsistent spacing) was rendered directly
+    inside a Community card instead of being stripped."""
+    dirty = (
+        "Real, specific customer commentary about the cafe's coffee and staff.\n"
+        "Skip to main content\n\n"
+        "Plan with AI\n\n"
+        "Rewards\n\n"
+        "Discover\n\n"
+        "Review\n\n"
+        "USD\n\n"
+        "Sign in\n\n"
+        "BostonThings to DoHotelsRestaurantsCruisesForums\n\n"
+        "United States\n"
+    )
+
+    cleaned = _clean_text(dirty)
+
+    assert "Real, specific customer commentary about the cafe's coffee and staff." in cleaned
+    assert "Skip to main content" not in cleaned
+    assert "Plan with AI" not in cleaned
+    assert "Rewards" not in cleaned
+    assert "Sign in" not in cleaned
+    assert "ThingsToDo" not in cleaned.replace(" ", "")
+    assert "HotelsRestaurantsCruisesForums" not in cleaned
+
+
+def test_clean_text_drops_tourism_site_and_social_share_boilerplate():
+    """Regression test for a real bug found live: a Boston tourism site's
+    browser-compatibility notice, e-newsletter/store nag lines, and a
+    social-share widget's link labels were rendered directly inside a
+    quoted evidence excerpt instead of being stripped."""
+    dirty = (
+        "Your browser is not supported for this experience.\n"
+        "We recommend using Chrome, Firefox, Edge, or Safari.\n\n"
+        "Skip navigation\n\n"
+        "Getting Around Boston is easy with the T subway system and buses.\n\n"
+        "Share\n\n"
+        "Share on Facebook\n\n"
+        "Share on Twitter\n\n"
+        "Share on Linkedin\n"
+    )
+
+    cleaned = _clean_text(dirty)
+
+    assert "Getting Around Boston is easy with the T subway system and buses." in cleaned
+    assert "not supported for this experience" not in cleaned
+    assert "Skip navigation" not in cleaned
+    assert "Share on Facebook" not in cleaned
+
+
 def test_clean_text_deduplicates_repeated_paragraphs():
     dirty = (
         "16 friendliest neighborhood to live in Cambridge, MA\n\n"
@@ -311,8 +366,8 @@ def test_live_feed_requests_recency_and_labels_topic_live_feed(harvard_square):
         results=[
             {
                 "url": "https://example.org/recent-post",
-                "title": "Harvard Square this week",
-                "content": "A recent discussion thread about Harvard Square, Cambridge, posted this week.",
+                "title": "Cambridge community roundup",
+                "content": "A recent discussion thread about goings-on in Cambridge, posted this week.",
                 "published_date": "2026-09-15",
             }
         ]
@@ -323,7 +378,40 @@ def test_live_feed_requests_recency_and_labels_topic_live_feed(harvard_square):
 
     assert len(feed) == 1
     assert feed[0].topic == "live_feed"
-    assert "Harvard Square" in client.queries[0]
+    assert "Cambridge" in client.queries[0]
+
+
+def test_live_feed_always_queries_the_region_not_the_specific_poi(starbucks_cambridge):
+    """The feed reports on the broader region, not the exact selected place
+    -- the query itself should never key off a POI's own (often generic,
+    e.g. a chain business) name."""
+    client = FakeTavilyClient(results=[])
+
+    TavilyLiveFeedTool(client=client).fetch(starbucks_cambridge)
+
+    assert len(client.queries) == 1
+    assert "Starbucks" not in client.queries[0]
+    assert "Cambridge" in client.queries[0]
+
+
+def test_live_feed_region_is_derived_dynamically_not_hardcoded():
+    """Regional scope must come from whatever location was actually
+    selected -- not hardcoded to any one city."""
+    seattle = Location(
+        name="Pike Place Market",
+        city="Seattle",
+        region="WA",
+        country="US",
+        slug="pike-place-seattle-wa",
+        raw_query="Pike Place Market, Seattle, WA",
+    )
+    client = FakeTavilyClient(results=[])
+
+    TavilyLiveFeedTool(client=client).fetch(seattle)
+
+    assert "Seattle" in client.queries[0]
+    assert "Boston" not in client.queries[0]
+    assert "Cambridge" not in client.queries[0]
 
 
 def test_live_feed_sorts_newest_first(harvard_square):
@@ -331,14 +419,14 @@ def test_live_feed_sorts_newest_first(harvard_square):
         results=[
             {
                 "url": "https://example.org/older",
-                "title": "Older Harvard Square post",
-                "content": "An older discussion thread about Harvard Square, Cambridge, from a while back.",
+                "title": "Older Cambridge news",
+                "content": "An older discussion thread about the area from a while back.",
                 "published_date": "2025-01-01",
             },
             {
                 "url": "https://example.org/newer",
-                "title": "Newer Harvard Square post",
-                "content": "A brand new discussion thread about Harvard Square, Cambridge, posted recently.",
+                "title": "Newer Cambridge news",
+                "content": "A brand new discussion thread about the area posted recently.",
                 "published_date": "2026-09-15",
             },
         ]
@@ -350,7 +438,7 @@ def test_live_feed_sorts_newest_first(harvard_square):
     assert [e.source_url for e in feed] == ["https://example.org/newer", "https://example.org/older"]
 
 
-def test_live_feed_drops_results_that_never_mention_the_location_without_fallback(harvard_square):
+def test_live_feed_drops_results_that_never_mention_the_region():
     """Unlike per-topic research search, the live feed has no verified
     pipeline downstream to catch a bad match — the location filter here is
     not soft."""
@@ -365,70 +453,74 @@ def test_live_feed_drops_results_that_never_mention_the_location_without_fallbac
     )
     tool = TavilyLiveFeedTool(client=client)
 
-    assert tool.fetch(harvard_square) == []
+    assert tool.fetch(Location(
+        name="Harvard Square", city="Cambridge", region="MA", country="US",
+        slug="harvard-square-cambridge-ma", raw_query="Harvard Square, Cambridge, MA",
+    )) == []
 
 
-def test_live_feed_drops_results_that_mention_only_a_generic_chain_name(starbucks_cambridge):
-    """Regression test for a real bug found live: searching a chain business
-    like "Starbucks, Cambridge" returned nationwide Starbucks content (a
-    Rockville MD apartment post, a Philly hiring thread) because the old
-    filter accepted a name-only match, and "Starbucks" alone is not
-    distinctive enough to mean anything about location."""
+def test_live_feed_drops_a_result_where_the_region_is_only_a_passing_mention():
+    """Regression test for a real bug found live: a broad regional query
+    surfaced a completely unrelated hockey-forum thread and an off-topic
+    court case article, each of which happened to name-check "Boston" once
+    in passing -- neither is actually regional activity."""
+    boston = Location(
+        name="McKenna's Cafe", city="Boston", region="MA", country="US",
+        slug="mckennas-cafe-boston-ma", raw_query="McKenna's Cafe, Boston, MA",
+    )
     client = FakeTavilyClient(
         results=[
             {
-                "url": "https://example.org/unrelated-starbucks",
-                "title": "Starbucks hiring thread",
-                "content": "Just applied to a Starbucks near me, they said $19/hr to start working there.",
+                "url": "https://example.org/hockey-thread",
+                "title": "Daily Free Talk / Armchair GM Thread: r/leafs",
+                "content": "Boston has a good defense this year but our forwards need work heading into the playoffs.",
             },
             {
-                "url": "https://example.org/on-topic-starbucks",
-                "title": "Starbucks in Cambridge closing early",
-                "content": "The Starbucks on Mass Ave in Cambridge is closing early this week for renovations.",
+                "url": "https://example.org/boston-news",
+                "title": "New development planned near South Boston waterfront",
+                "content": "Boston city officials announced a new development proposal for South Boston this week.",
             },
         ]
     )
     tool = TavilyLiveFeedTool(client=client)
 
-    feed = tool.fetch(starbucks_cambridge)
+    feed = tool.fetch(boston)
 
-    assert [e.source_url for e in feed] == ["https://example.org/on-topic-starbucks"]
+    assert [e.source_url for e in feed] == ["https://example.org/boston-news"]
 
 
-def test_live_feed_falls_back_to_area_level_query_when_poi_query_finds_nothing(starbucks_cambridge):
-    """A single Starbucks branch rarely has recent web content naming it
-    specifically -- the feed should fall back to area-level activity rather
-    than showing nothing, since it promises "what's being said in this
-    region", not "about this exact business"."""
+def test_live_feed_deduplicates_repeated_urls():
+    boston = Location(
+        name="McKenna's Cafe", city="Boston", region="MA", country="US",
+        slug="mckennas-cafe-boston-ma", raw_query="McKenna's Cafe, Boston, MA",
+    )
     client = FakeTavilyClient(
-        results_sequence=[
-            [
-                {
-                    "url": "https://example.org/unrelated-starbucks",
-                    "title": "Starbucks hiring thread",
-                    "content": "Just applied to a Starbucks near me, they said $19/hr to start working there.",
-                }
-            ],
-            [
-                {
-                    "url": "https://example.org/cambridge-news",
-                    "title": "Cambridge council meeting recap",
-                    "content": "This week's Cambridge city council meeting covered zoning changes downtown.",
-                }
-            ],
+        results=[
+            {
+                "url": "https://example.org/dup",
+                "title": "Boston news roundup",
+                "content": "Boston Boston Boston recent local activity roundup for this week in Boston.",
+            },
+            {
+                "url": "https://example.org/dup",
+                "title": "Boston news roundup",
+                "content": "Boston Boston Boston recent local activity roundup for this week in Boston.",
+            },
         ]
     )
     tool = TavilyLiveFeedTool(client=client)
 
-    feed = tool.fetch(starbucks_cambridge)
+    feed = tool.fetch(boston)
 
-    assert len(client.queries) == 2
-    assert [e.source_url for e in feed] == ["https://example.org/cambridge-news"]
+    assert len(feed) == 1
 
 
-def test_is_relevant_to_live_feed_requires_city_when_known(starbucks_cambridge):
-    assert _is_relevant_to_live_feed("The Starbucks in Cambridge just reopened", starbucks_cambridge)
-    assert not _is_relevant_to_live_feed("I love my local Starbucks in Rockville", starbucks_cambridge)
+def test_is_relevant_to_live_feed_requires_region_in_title_or_repeated_in_body(starbucks_cambridge):
+    assert _is_relevant_to_live_feed("The Starbucks in Cambridge just reopened", "", starbucks_cambridge)
+    assert not _is_relevant_to_live_feed("I love my local Starbucks", "mentioned Cambridge once", starbucks_cambridge)
+    assert _is_relevant_to_live_feed(
+        "Local news roundup", "Cambridge held an event. Cambridge residents attended.", starbucks_cambridge
+    )
 
 
 def test_live_feed_wraps_client_errors(harvard_square):

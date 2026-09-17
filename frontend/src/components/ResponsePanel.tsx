@@ -94,6 +94,29 @@ export function ResponsePanel({ session }: ResponsePanelProps) {
               <p>{cleanDisplayText(response.summary)}</p>
             </section>
 
+            {response.key_findings.length > 0 && (
+              <section className="key-findings-section">
+                <h3>Key findings</h3>
+                <ul>
+                  {response.key_findings.map((finding, i) => (
+                    <li key={i}>{cleanDisplayText(finding)}</li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {response.details && (
+              <section className="details-section">
+                <h3>Details</h3>
+                {cleanDisplayText(response.details)
+                  .split("\n\n")
+                  .filter(Boolean)
+                  .map((paragraph, i) => (
+                    <p key={i}>{paragraph}</p>
+                  ))}
+              </section>
+            )}
+
             <section className="topics-section">
               <h3>Research plan</h3>
               <div className="topics-chip-row">

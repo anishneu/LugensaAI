@@ -194,20 +194,22 @@ class LocationResearchAgent:
             supported=sum(1 for c in verified_claims if c.status == ClaimStatus.SUPPORTED),
         )
 
-        summary, recommendation, synth_limitations = self.synthesizer.synthesize(
-            location, question, plan, verified_claims, evidence_topic_ids
+        synthesis = self.synthesizer.synthesize(
+            location, question, plan, verified_claims, all_evidence, evidence_topic_ids
         )
-        log(TraceStage.SYNTHESIS, "Generated summary and recommendation from verified claims")
+        log(TraceStage.SYNTHESIS, "Generated summary and recommendation from verified claims and evidence")
 
-        limitations.extend(synth_limitations)
+        limitations.extend(synthesis.limitations)
         seen: set[str] = set()
         unique_limitations = [item for item in limitations if not (item in seen or seen.add(item))]
 
         return ResearchResponse(
             location=location,
             question=question,
-            summary=summary,
-            recommendation=recommendation,
+            summary=synthesis.summary,
+            key_findings=synthesis.key_findings,
+            details=synthesis.details,
+            recommendation=synthesis.recommendation,
             topics=plan.topics,
             claims=verified_claims,
             evidence=all_evidence,

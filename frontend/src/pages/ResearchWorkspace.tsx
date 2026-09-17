@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLocation as useRouterLocation } from "react-router-dom";
 import { fetchLocationSuggestions, ResearchApiError, runResearch } from "../api";
 import { ChatSidebar } from "../components/ChatSidebar";
 import { LiveFeedSidebar } from "../components/LiveFeedSidebar";
@@ -14,8 +15,14 @@ function normalizeKey(rawQuery: string): string {
 }
 
 export function ResearchWorkspace() {
+  // The landing page's "try it on" chips navigate here with a location
+  // string pre-seeded via router state — this only pre-fills the search
+  // box, it never auto-submits, so the user always picks the real result.
+  const routerLocation = useRouterLocation();
+  const seedQuery = (routerLocation.state as { seedQuery?: string } | null)?.seedQuery ?? "";
+
   const [suggestions, setSuggestions] = useState<LocationSuggestion[]>([]);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(seedQuery);
   const [location, setLocation] = useState<ActiveLocation | null>(null);
   const [sessions, setSessions] = useState<QuerySession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);

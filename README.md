@@ -1,10 +1,13 @@
 # Lugensa AI — Agentic Location Web Intelligence System
 
+[![CI](https://github.com/anishneu/agentic-ai-location-web/actions/workflows/ci.yml/badge.svg)](https://github.com/anishneu/agentic-ai-location-web/actions/workflows/ci.yml)
+
 An agentic research system that investigates public information about a place to answer a
 natural-language question about it — e.g. *"Would Harvard Square, Cambridge, MA be a good place
-for a college student?"* — and produces a transparent, evidence-backed, cited assessment instead
-of a generic recommendation. The map and chat UI are a demonstration environment; the research
-agent itself is the project.
+for a college student?"* or *"Is there a bar near this specific Starbucks, and how safe is the
+area?"* — and produces a transparent, evidence-backed, cited assessment instead of a generic
+recommendation. The map and chat UI are a demonstration environment; the research agent itself is
+the project.
 
 ## Contents
 
@@ -14,6 +17,7 @@ agent itself is the project.
 - [Configuration](#configuration)
 - [Project structure](#project-structure)
 - [Testing](#testing)
+- [Continuous integration](#continuous-integration)
 - [Evaluation](#evaluation)
 - [Status](#status)
 - [Documentation](#documentation)
@@ -38,17 +42,35 @@ LLM-backed reasoning, via either a billed `ANTHROPIC_API_KEY` or a free local `O
 
 ## Features
 
+- **Any real place, not just two demo neighborhoods** — search resolves any point of interest
+  (a specific business, address, building) via free OpenStreetMap Nominatim, not only the two
+  curated fixture neighborhoods. Picking one exact result from live search is passed straight
+  through to research without being re-resolved as text, so a same-named place nearby can't be
+  silently substituted.
 - **Adaptive planning** — a narrow question ("what's the nightlife like?") researches one topic;
   a broad one researches several. Topic selection is keyword-based by default, LLM-based if
   `ANTHROPIC_API_KEY` or `OLLAMA_ENABLED` is set.
 - **Hybrid retrieval** — keyword scoring by default, blended with local-embedding semantic
   scoring (`sentence-transformers`, no API key) when installed.
 - **Real community voices** — a dedicated view of actual forum/review commentary (Reddit,
-  Nextdoor, Google Maps, etc.) about the location, including negative or mixed opinions and
-  recent incident reports, shown for awareness rather than filtered out.
+  Nextdoor, Google Maps, etc.) about the specific selected location, including negative or mixed
+  opinions and recent incident reports, shown for awareness rather than filtered out.
+- **An independent, regional live feed** — separate from the Q&A pipeline and from the Community
+  tab: it reports on what's recently happening in the broader area (the city/region the selected
+  place is in), not the exact selected place, since a single business rarely has anything written
+  about it by name in the last week. Paginated, deduplicated, and a real refresh — every load is
+  a real, fresh search, never reshuffled or randomly generated.
+- **Evidence-grounded answers, not reflexive "insufficient evidence"** — the Overview reasons over
+  the full retrieved evidence (not only whatever survived atomic claim extraction), producing a
+  direct answer, key findings, and question-organized details, while still never stating a fact
+  the evidence doesn't support and never asserting an absolute safety claim ("no crime has ever
+  happened here") from a mere absence of search hits.
 - **Verification, not vibes** — claim status (supported / contradicted / insufficient evidence)
   is decided by a fixed, deterministic verifier — never by whichever component proposed the
-  claim, and never by an LLM, regardless of which other components are LLM-backed.
+  claim, and never by an LLM, regardless of which other components are LLM-backed. Claim
+  grounding itself is also enforced deterministically: a claim is kept only if its cited evidence
+  id validates, or its own wording is independently matched against real evidence text — never on
+  an LLM's self-reported citation alone.
 - **Honest degradation** — every fallback (no LLM, no live search, an API failure, an
   off-topic result filtered out) is recorded in the response's `limitations`, not hidden.
 - **A real evaluation, not just a plan** — [`docs/evaluation.md`](docs/evaluation.md) has actual
@@ -115,6 +137,21 @@ pytest
 The suite is free, offline, and deterministic by construction — an autouse fixture forces real
 API keys and semantic retrieval off during tests regardless of local `.env` configuration, so
 `pytest` never makes a real network call or spends API credits.
+
+## Continuous integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and pull request to
+`main`/`develop`:
+
+- **Backend** — installs `backend/requirements.txt` and runs the full `pytest` suite. No secrets
+  are configured or needed: the same autouse fixture that keeps local `pytest` free and offline
+  keeps CI free and offline too.
+- **Frontend** — `npm ci`, `npm run lint` (oxlint), and `npm run build` (`tsc -b` type-checking +
+  a production Vite build).
+
+Both jobs run independently on `ubuntu-latest`; either failing blocks the badge at the top of this
+file from being green, but the two are otherwise unrelated (a frontend-only change doesn't need
+the backend job to mean anything, and vice versa).
 
 ## Evaluation
 

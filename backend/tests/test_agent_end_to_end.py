@@ -52,7 +52,7 @@ def test_harvard_square_college_student_full_pipeline():
 
     assert response.summary
     assert response.recommendation
-    assert "generally supportive" in response.recommendation
+    assert "generally supportive" in response.summary
 
     trace_stages = {step.stage for step in response.research_trace}
     assert TraceStage.LOCATION_RESOLUTION in trace_stages

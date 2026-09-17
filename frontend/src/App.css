@@ -481,6 +481,28 @@
   font-size: 14px;
 }
 
+/* --- Key findings / Details --- */
+
+.key-findings-section ul {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.details-section p {
+  margin: 0 0 10px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.details-section p:last-child {
+  margin-bottom: 0;
+}
+
 /* --- Limitations --- */
 
 .limitations-section {

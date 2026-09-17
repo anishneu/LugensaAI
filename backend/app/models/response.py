@@ -15,6 +15,12 @@ class ResearchResponse(BaseModel):
     location: Location
     question: str
     summary: str
+    key_findings: list[str] = Field(
+        default_factory=list, description="Short, scannable bullet points directly answering the question"
+    )
+    details: str = Field(
+        default="", description="Longer, question-organized elaboration citing sources and distinguishing fact from opinion"
+    )
     recommendation: str
     topics: list[ResearchTopic]
     claims: list[Claim]

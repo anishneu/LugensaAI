@@ -30,27 +30,26 @@ is an abstract interface with a free, deterministic default alongside it:
 
 | Interface | Free / deterministic default | Alternative implementation |
 |---|---|---|
-| `LocationResolverTool` | `FixtureLocationResolver` (alias lookup in `fixtures/locations.json`) | Geocoding API (not scheduled — low priority; alias lookup covers the demo locations) |
+| `LocationResolverTool` | `FixtureLocationResolver` (alias lookup in `fixtures/locations.json`) | `NominatimLocationResolverTool` — real geocoding for any point of interest via free OpenStreetMap Nominatim, wrapped in `FallbackLocationResolver` so the two demo neighborhoods still resolve instantly from fixtures (opt-out via `DISABLE_LIVE_GEOCODING=1`) |
 | `WebSearchTool` | `FixtureWebSearchTool` (reads `fixtures/sources/<slug>/<topic>.json`) | `TavilyWebSearchTool` — real search via the Tavily API (opt-in via `TAVILY_API_KEY`) |
 | `PageRetrievalTool` | `FixturePageRetrievalTool` (full-text lookup from the same fixtures) | `TavilyPageRetrievalTool` — reads full text Tavily already returned during search |
-| `ResearchPlanner` | `KeywordResearchPlanner` (rule-based keyword → topic mapping) | `LLMResearchPlanner` — chooses from the fixed topic taxonomy via the LLM (opt-in via `ANTHROPIC_API_KEY`) |
+| `ResearchPlanner` | `KeywordResearchPlanner` (rule-based keyword → topic mapping) | `LLMResearchPlanner` — chooses from the fixed topic taxonomy via the LLM (opt-in via `ANTHROPIC_API_KEY` or `OLLAMA_ENABLED`) |
 | `EvidenceRetriever` | `KeywordEvidenceRetriever` (lexical term-overlap scoring) | `HybridEvidenceRetriever` (keyword + `SemanticEvidenceRetriever`, local `sentence-transformers`; auto-enabled if installed, opt-out via `DISABLE_SEMANTIC_RETRIEVAL=1`) |
 | `EvidenceRepository` | `InMemoryEvidenceRepository` (per-run, not persisted) | `SQLiteEvidenceRepository` — durable, per-run-scoped local file, the actual default in `build_default_agent()` |
-| `ClaimExtractor` | `FixtureClaimExtractor` (reads a pre-annotated `claim_text` per fixture doc) | `LLMClaimExtractor` — extracts from real evidence text, grounding-checked (opt-in via `ANTHROPIC_API_KEY`) |
+| `ClaimExtractor` | `FixtureClaimExtractor` (reads a pre-annotated `claim_text` per fixture doc) | `LLMClaimExtractor` — extracts from real evidence text (opt-in via `ANTHROPIC_API_KEY` or `OLLAMA_ENABLED`). Grounding is enforced independently of the LLM's self-report: a cited evidence id/topic is checked against the real evidence given, and if that citation doesn't validate, `_best_matching_evidence()` recovers grounding by lexical overlap between the claim's own wording and the real evidence text — a claim is kept only if one of those two checks passes, never on the LLM's say-so alone |
 | `ClaimVerifier` | `EvidenceBasedClaimVerifier` — relevance/recency checks, always; a second deterministic pass flags same-topic contradictions via a coarse antonym heuristic (never LLM-backed) | — (no alternative implementation; see "Provenance and honesty" below for why) |
-| `Synthesizer` | `TemplateSynthesizer` (renders verified claims into prose via templates) | `LLMSynthesizer` — drafts prose from verified claims only, rejects absolute language (opt-in via `ANTHROPIC_API_KEY`) |
-| `LLMService` | `FakeLLMService` (deterministic; used only in tests) | `AnthropicLLMService` (opt-in via `ANTHROPIC_API_KEY`) |
+| `Synthesizer` | `TemplateSynthesizer` — renders verified claims into prose via templates; for a topic with evidence but no claim, quotes the single most relevant *and* credible excerpt (blending relevance with a source-type quality score) rather than reporting only a gap | `LLMSynthesizer` — sees both verified claims and the full raw evidence (grouped by topic, labeled by source type/publisher/date), so it can answer the actual question from real evidence even when claim extraction found little; rejects absolute language, including absolute safety claims like "no crime has ever happened here" (opt-in via `ANTHROPIC_API_KEY` or `OLLAMA_ENABLED`) |
+| `LLMService` | `FakeLLMService` (deterministic; used only in tests) | `AnthropicLLMService` (opt-in via `ANTHROPIC_API_KEY`, billed) or `OllamaLLMService` (opt-in via `OLLAMA_ENABLED`, free and local; Anthropic takes priority if both are set) |
 
 `app/agents/factory.py` is the one place that wires concrete implementations together;
 everything else — including `LocationResearchAgent` itself — depends only on the interfaces,
-via constructor injection. `build_default_agent()` auto-detects `ANTHROPIC_API_KEY`,
-`TAVILY_API_KEY`, and whether `sentence-transformers` is installed, independently of each other,
-and picks components accordingly with no other code changing either way. Every LLM-backed
-implementation also falls back to its deterministic counterpart on failure (bad JSON, API error,
-a rejected/ungrounded response) — see `docs/research-workflow.md`'s "LLM integration" section
-for exactly what is and isn't trusted to the LLM, and its "Live search" section for what changes
-once real evidence is in play (notably: real evidence needs `LLMClaimExtractor` to become
-claims — `FixtureClaimExtractor` can't read real page text).
+via constructor injection. `build_default_agent()` auto-detects `ANTHROPIC_API_KEY`/
+`OLLAMA_ENABLED`, `TAVILY_API_KEY`, live geocoding, and whether `sentence-transformers` is
+installed, independently of each other, and picks components accordingly with no other code
+changing either way. Every LLM-backed implementation also falls back to its deterministic
+counterpart on failure (bad JSON, API error, a rejected/ungrounded response) — see
+`docs/research-workflow.md`'s "LLM integration" section for exactly what is and isn't trusted to
+the LLM.
 
 ## Why hybrid retrieval, not just semantic
 
@@ -80,15 +79,15 @@ response's `limitations` field rather than hidden.
 
 ## Milestone status
 
-All eight milestones from the original project plan are implemented; what's opt-in vs. free by
-default is summarized in the interface table above.
+All eight milestones from the original project plan are implemented, plus two later additions
+(9 and 10, below); what's opt-in vs. free by default is summarized in the interface table above.
 
 - **Milestone 1:** fixture-backed, fully deterministic pipeline. No API key, no network.
 - **Milestone 2:** LLM-backed planning, claim extraction, and synthesis — opt-in via
-  `ANTHROPIC_API_KEY`, each falling back to its Milestone 1 counterpart on failure.
+  `ANTHROPIC_API_KEY` or the free local `OLLAMA_ENABLED`, each falling back to its Milestone 1
+  counterpart on failure.
 - **Milestone 3:** live web search + page retrieval via Tavily — opt-in via `TAVILY_API_KEY`,
-  independently of the LLM key. Real evidence collected this way needs `LLMClaimExtractor`
-  (i.e. both keys set) to actually become claims — see `docs/research-workflow.md`.
+  independently of the LLM key.
 - **Milestone 4:** hybrid (keyword + local-embedding semantic) retrieval — auto-enabled if
   `sentence-transformers` is installed, opt-out via `DISABLE_SEMANTIC_RETRIEVAL=1`.
 - **Milestone 5:** `SQLiteEvidenceRepository` — durable, per-run-scoped local storage, the
@@ -101,3 +100,25 @@ default is summarized in the interface table above.
   system's orchestration, live search, no LLM key available) and results — including where the
   proposed system did *not* win — are reported in `docs/evaluation.md`, not just planned.
   Baseline A and claim-level metrics remain unmeasured pending an `ANTHROPIC_API_KEY`.
+- **Milestone 9:** research isn't limited to a neighborhood — `NominatimLocationResolverTool` /
+  `NominatimPlaceSearchTool` resolve and search for any real point of interest (a specific
+  business, address, building) via free OpenStreetMap Nominatim, opt-out via
+  `DISABLE_LIVE_GEOCODING=1`. Picking one exact POI from live search passes the already-resolved
+  `Location` straight into the agent (`LocationResearchAgent.run()` accepts `str | Location`),
+  skipping re-resolution so a same-named place nearby can't be silently substituted.
+- **Milestone 10:** the independent, region-scoped live feed (`TavilyLiveFeedTool` /
+  `GET /api/live-feed`) and a rework of claim extraction and synthesis so a real, useful body of
+  evidence doesn't collapse into "insufficient evidence":
+  - The live feed reports on the broader area (city/region), not the specific selected place —
+    querying and filtering are anchored on the region, with a title-or-repeated-mention check to
+    reject a passing name-check of the region in unrelated content.
+  - `LLMClaimExtractor` recovers grounding deterministically (`_best_matching_evidence`, lexical
+    overlap against real evidence text) when a model cites a source name or an invented topic
+    label instead of the literal evidence id/topic it was given, rather than dropping every claim
+    a weaker model produces.
+  - `Synthesizer.synthesize()` now sees the full evidence set, not only already-extracted claims,
+    and returns a structured `SynthesisResult` (`summary`, `key_findings`, `details`,
+    `recommendation`) — both `TemplateSynthesizer` and `LLMSynthesizer` can produce a real,
+    question-answering Overview even when claim extraction found little or nothing, instead of
+    defaulting to "insufficient evidence" purely because one precisely-formatted extraction step
+    didn't succeed.

@@ -1,6 +1,8 @@
 import json
+from datetime import datetime, timezone
 
 from app.models.claim import Claim, ClaimStatus
+from app.models.evidence import Evidence, SourceType
 from app.models.location import Location
 from app.models.plan import Priority, ResearchPlan, ResearchTopic
 from app.synthesis.llm_synthesizer import LLMSynthesizer
@@ -39,17 +41,39 @@ def _claim(status: ClaimStatus = ClaimStatus.SUPPORTED) -> Claim:
     return Claim(claim_id="c1", text="Rent is high.", claim_type="housing", supporting_evidence_ids=["e1"], status=status)
 
 
+def _evidence() -> list[Evidence]:
+    return [
+        Evidence(
+            evidence_id="e1",
+            source_url="https://example.org/e1",
+            source_title="Housing report",
+            source_type=SourceType.NEWS,
+            retrieved_at=datetime.now(timezone.utc),
+            location_scope="Cambridge, MA",
+            text="Rent is high in this neighborhood.",
+            topic="housing",
+        )
+    ]
+
+
 def test_uses_llm_drafted_prose_plus_deterministic_limitations():
     response = json.dumps(
-        {"summary": "Housing is expensive.", "recommendation": "It could work depending on your budget."}
+        {
+            "summary": "Housing is expensive.",
+            "key_findings": ["Rent is high"],
+            "details": "Housing costs are elevated based on available evidence.",
+            "recommendation": "It could work depending on your budget.",
+        }
     )
     synthesizer = LLMSynthesizer(ScriptedLLMService([response]))
 
-    summary, recommendation, limitations = synthesizer.synthesize(_location(), "q?", _plan(), [_claim()])
+    result = synthesizer.synthesize(_location(), "q?", _plan(), [_claim()], _evidence())
 
-    assert summary == "Housing is expensive."
-    assert recommendation == "It could work depending on your budget."
-    assert any("contradiction detection" in lim.lower() for lim in limitations)
+    assert result.summary == "Housing is expensive."
+    assert result.key_findings == ["Rent is high"]
+    assert result.details == "Housing costs are elevated based on available evidence."
+    assert result.recommendation == "It could work depending on your budget."
+    assert any("contradiction detection" in lim.lower() for lim in result.limitations)
 
 
 def test_falls_back_on_absolute_language():
@@ -58,20 +82,35 @@ def test_falls_back_on_absolute_language():
     )
     synthesizer = LLMSynthesizer(ScriptedLLMService([response]))
 
-    summary, recommendation, limitations = synthesizer.synthesize(_location(), "q?", _plan(), [_claim()])
+    result = synthesizer.synthesize(_location(), "q?", _plan(), [_claim()], _evidence())
 
-    assert any("LLM-based synthesis failed" in lim for lim in limitations)
-    assert "guaranteed" not in recommendation.lower()
+    assert any("LLM-based synthesis failed" in lim for lim in result.limitations)
+    assert "guaranteed" not in result.recommendation.lower()
+
+
+def test_falls_back_on_absolute_safety_language_in_details():
+    response = json.dumps(
+        {
+            "summary": "ok",
+            "details": "This area is completely safe and no crime has ever happened here.",
+            "recommendation": "Seems fine.",
+        }
+    )
+    synthesizer = LLMSynthesizer(ScriptedLLMService([response]))
+
+    result = synthesizer.synthesize(_location(), "q?", _plan(), [_claim()], _evidence())
+
+    assert any("LLM-based synthesis failed" in lim for lim in result.limitations)
 
 
 def test_falls_back_on_llm_error():
     synthesizer = LLMSynthesizer(ScriptedLLMService(raise_error=True))
 
-    summary, recommendation, limitations = synthesizer.synthesize(_location(), "q?", _plan(), [_claim()])
+    result = synthesizer.synthesize(_location(), "q?", _plan(), [_claim()], _evidence())
 
-    assert summary
-    assert recommendation
-    assert any("LLM-based synthesis failed" in lim for lim in limitations)
+    assert result.summary
+    assert result.recommendation
+    assert any("LLM-based synthesis failed" in lim for lim in result.limitations)
 
 
 def test_missing_topic_limitation_present_even_if_llm_omits_it():
@@ -79,6 +118,6 @@ def test_missing_topic_limitation_present_even_if_llm_omits_it():
     response = json.dumps({"summary": "No housing evidence found.", "recommendation": "Not enough data to say."})
     synthesizer = LLMSynthesizer(ScriptedLLMService([response]))
 
-    summary, recommendation, limitations = synthesizer.synthesize(_location(), "q?", plan, [])
+    result = synthesizer.synthesize(_location(), "q?", plan, [], [])
 
-    assert any("No evidence was found for planned topic 'housing'" in lim for lim in limitations)
+    assert any("No evidence was found for planned topic 'housing'" in lim for lim in result.limitations)

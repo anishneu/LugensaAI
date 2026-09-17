@@ -72,6 +72,8 @@ export interface ResearchResponse {
   location: Location;
   question: string;
   summary: string;
+  key_findings: string[];
+  details: string;
   recommendation: string;
   topics: ResearchTopic[];
   claims: Claim[];
