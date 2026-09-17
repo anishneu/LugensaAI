@@ -79,7 +79,7 @@ TOPIC_DEFINITIONS: dict[str, TopicDefinition] = {
         ),
         TopicDefinition(
             topic_id="nightlife",
-            keywords=("nightlife", "bars", "clubs", "party", "going out", "night out"),
+            keywords=("nightlife", "bars", "bar", "clubs", "party", "going out", "night out"),
             reason_template="The question raises nightlife specifically, so bars/venues/late-night options in {location} are relevant.",
             query_templates=("{location} nightlife bars venues",),
             preferred_source_types=("review_aggregator", "business_directory"),
@@ -105,6 +105,28 @@ TOPIC_DEFINITIONS: dict[str, TopicDefinition] = {
             expected_evidence="Real comments/reviews from forums (Reddit, Google Maps, Nextdoor, etc.), including "
             "recent or negative ones — clearly separated from objective fact, never filtered out for being unflattering.",
             completion_criteria="At least one community-forum or review-aggregator source with a real excerpt.",
+        ),
+        TopicDefinition(
+            topic_id="nearby_amenities",
+            keywords=(
+                "restroom",
+                "bathroom",
+                "toilet",
+                "wifi",
+                "seating",
+                "parking",
+                "accessible",
+                "wheelchair",
+                "nearby",
+                "close by",
+                "walking distance",
+            ),
+            reason_template="The question asks about practical, on-the-ground amenities at or near {location} — "
+            "restrooms, seating, parking, accessibility — not a general area assessment.",
+            query_templates=("{location} restrooms parking wifi accessibility nearby",),
+            preferred_source_types=("review_aggregator", "business_directory", "blog"),
+            expected_evidence="Practical amenity details: restrooms, seating, parking, wifi, accessibility.",
+            completion_criteria="At least one source describing a practical amenity at or near this specific place.",
         ),
     ]
 }

@@ -44,9 +44,35 @@ ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 ANTHROPIC_MAX_TOKENS = int(os.environ.get("ANTHROPIC_MAX_TOKENS", "1024"))
 
 
-def llm_enabled() -> bool:
+def anthropic_enabled() -> bool:
     """Whether an Anthropic API key is configured in the environment."""
     return bool(os.environ.get(ANTHROPIC_API_KEY_ENV_VAR))
+
+
+# --- Ollama configuration (free, local alternative to Anthropic) -------
+#
+# Ollama (https://ollama.com) runs a model entirely on this machine — no API
+# key, no per-token billing — but it does need Ollama installed and a model
+# pulled locally (`ollama pull <model>`) first, and inference is only as fast
+# as this machine's CPU/GPU. Unlike ANTHROPIC_API_KEY, there's no key whose
+# presence implies intent to use it, and unlike geocoding it needs real local
+# setup the user may not have done — so this is opt-in via OLLAMA_ENABLED,
+# not auto-detected.
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.1")
+# CPU-only inference of even a small (~8B) model can take minutes per call,
+# well past what would be a reasonable timeout for a hosted API -- default
+# generously and let a real deployment with a hosted/GPU Ollama tighten it.
+OLLAMA_TIMEOUT_SECONDS = float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "600"))
+
+
+def ollama_enabled() -> bool:
+    return bool(os.environ.get("OLLAMA_ENABLED"))
+
+
+def llm_enabled() -> bool:
+    """Whether an LLM-backed path (Anthropic or Ollama) is configured."""
+    return anthropic_enabled() or ollama_enabled()
 
 
 # --- Search configuration (Milestone 3) ---------------------------------
@@ -93,3 +119,13 @@ def semantic_retrieval_enabled() -> bool:
 
 
 SEMANTIC_MODEL_NAME = os.environ.get("SEMANTIC_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2")
+
+
+# --- Geocoding / POI search (Milestone 9) -------------------------------
+#
+# Live geocoding (OpenStreetMap Nominatim) needs no API key, so — unlike
+# ANTHROPIC_API_KEY / TAVILY_API_KEY — this is opt-out, not opt-in: on by
+# default, off only if DISABLE_LIVE_GEOCODING is set (tests force this off
+# so the suite never makes a real network call — see tests/conftest.py).
+def geocoding_enabled() -> bool:
+    return not bool(os.environ.get("DISABLE_LIVE_GEOCODING"))

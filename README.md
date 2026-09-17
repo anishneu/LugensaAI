@@ -33,13 +33,14 @@ Given a location and a question, the agent:
 
 Everything above runs **free and offline by default** (fixture-backed tools, rule-based
 planning, local SQLite storage). Two things are opt-in: live web search (`TAVILY_API_KEY`) and
-LLM-backed reasoning (`ANTHROPIC_API_KEY`) — see [Configuration](#configuration).
+LLM-backed reasoning, via either a billed `ANTHROPIC_API_KEY` or a free local `OLLAMA_ENABLED`
+(needs [Ollama](https://ollama.com) installed) — see [Configuration](#configuration).
 
 ## Features
 
 - **Adaptive planning** — a narrow question ("what's the nightlife like?") researches one topic;
   a broad one researches several. Topic selection is keyword-based by default, LLM-based if
-  `ANTHROPIC_API_KEY` is set.
+  `ANTHROPIC_API_KEY` or `OLLAMA_ENABLED` is set.
 - **Hybrid retrieval** — keyword scoring by default, blended with local-embedding semantic
   scoring (`sentence-transformers`, no API key) when installed.
 - **Real community voices** — a dedicated view of actual forum/review commentary (Reddit,
@@ -87,11 +88,12 @@ Nothing below is required — the app is fully functional with none of it set. C
 |---|---|---|
 | `TAVILY_API_KEY` | Live web search + real community/forum evidence | Free tier available at [tavily.com](https://tavily.com) |
 | `ANTHROPIC_API_KEY` | LLM-backed planning, claim extraction, and synthesis | Billed per Anthropic's normal usage pricing |
+| `OLLAMA_ENABLED` | Same LLM-backed components as above, via a local model | Free, but needs [Ollama](https://ollama.com) installed and a model pulled — see `backend/README.md`. Ignored if `ANTHROPIC_API_KEY` is also set |
 | `DISABLE_SEMANTIC_RETRIEVAL` | Forces keyword-only retrieval | Set to `1` to skip loading the local embedding model |
 
 Setting `TAVILY_API_KEY` alone collects real evidence but produces no claims — the fixture-based
-claim extractor can't read real page text. Set `ANTHROPIC_API_KEY` too for live search to
-actually produce claims. See [`docs/research-workflow.md`](docs/research-workflow.md).
+claim extractor can't read real page text. Set `ANTHROPIC_API_KEY` or `OLLAMA_ENABLED` too for
+live search to actually produce claims. See [`docs/research-workflow.md`](docs/research-workflow.md).
 
 ## Project structure
 

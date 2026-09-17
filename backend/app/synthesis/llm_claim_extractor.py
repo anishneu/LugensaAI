@@ -24,11 +24,25 @@ from app.synthesis.claim_extractor import ClaimExtractor, ExtractionResult, Fixt
 
 _SYSTEM_PROMPT = (
     "You extract discrete, checkable factual or clearly-labeled-subjective claims from research "
-    "evidence passages, grouped by research topic. Every claim you propose must be directly "
-    "supported by one or more of the evidence passages given to you — cite their evidence ids. "
-    "Do not invent evidence ids that were not given to you. Do not propose a claim with no "
-    "supporting evidence id. Keep each claim to one sentence. Respond with a single strict JSON "
-    "object and nothing else: no markdown fences, no commentary."
+    "evidence passages, grouped by research topic.\n\n"
+    "Each evidence line looks like this:\n"
+    '- [tavily:safety:982ec06c37ea] (Publisher Name) "Some quoted passage text."\n\n'
+    "The evidence id is ONLY the exact string inside the square brackets (here, "
+    '"tavily:safety:982ec06c37ea") — never the publisher name in parentheses, and never a source '
+    'name mentioned inside the quoted text itself (e.g. "FBI" or "CrimeGrades" if those appear in '
+    "the passage's own wording). Every claim you propose must be directly supported by one or "
+    "more evidence passages, and supporting_evidence_ids must contain ONLY those exact bracketed "
+    "id strings, copied verbatim — never invented, never a publisher/source name. Do not propose "
+    "a claim with no valid supporting evidence id. Keep each claim to one sentence.\n\n"
+    "Example:\n"
+    "Evidence:\n"
+    "Topic: safety\n"
+    '- [tavily:safety:abc123] (CrimeGrades) "Overall crime in Elmwood is rated a C, with property '
+    'crime higher than the national average."\n\n'
+    "Correct response:\n"
+    '{"claims": [{"topic_id": "safety", "text": "Elmwood has higher-than-average property crime.", '
+    '"supporting_evidence_ids": ["tavily:safety:abc123"]}]}\n\n'
+    "Respond with a single strict JSON object and nothing else: no markdown fences, no commentary."
 )
 
 _RESPONSE_SHAPE = (

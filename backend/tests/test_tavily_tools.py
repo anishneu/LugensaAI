@@ -3,26 +3,45 @@ import pytest
 from app.models.plan import Priority, ResearchTopic
 from app.tools.base import ToolConfigurationError, ToolExecutionError
 from app.tools.tavily_tools import (
+    TavilyLiveFeedTool,
     TavilyPageRetrievalTool,
     TavilyWebSearchTool,
     _classify_source_type,
     _clean_text,
+    _is_relevant_to_live_feed,
     _is_relevant_to_location,
     _truncate_for_display,
 )
 
 
 class FakeTavilyClient:
-    def __init__(self, results: list[dict] | None = None, raise_error: bool = False, images: list | None = None) -> None:
+    def __init__(
+        self,
+        results: list[dict] | None = None,
+        raise_error: bool = False,
+        images: list | None = None,
+        results_sequence: list[list[dict]] | None = None,
+    ) -> None:
         self._results = results or []
         self._raise_error = raise_error
         self._images = images or []
+        self._results_sequence = results_sequence
         self.queries: list[str] = []
 
-    def search(self, query: str, max_results: int, include_raw_content: bool, include_images: bool) -> dict:
+    def search(
+        self,
+        query: str,
+        max_results: int,
+        include_raw_content: bool,
+        include_images: bool,
+        time_range: str | None = None,
+    ) -> dict:
         self.queries.append(query)
         if self._raise_error:
             raise RuntimeError("simulated network failure")
+        if self._results_sequence is not None:
+            call_index = min(len(self.queries) - 1, len(self._results_sequence) - 1)
+            return {"results": self._results_sequence[call_index], "images": self._images}
         return {"results": self._results, "images": self._images}
 
 
@@ -44,7 +63,7 @@ def test_search_returns_evidence_and_caches_raw_content(harvard_square):
             {
                 "url": "https://cambridgema.gov/housing-info",
                 "title": "Cambridge Housing Info",
-                "content": "Short snippet about housing.",
+                "content": "Short snippet about housing near Harvard Square today.",
                 "raw_content": "Much longer full page text about housing near Harvard Square.",
                 "published_date": "2025-06-01",
             }
@@ -57,7 +76,7 @@ def test_search_returns_evidence_and_caches_raw_content(harvard_square):
     assert len(evidence) == 1
     item = evidence[0]
     assert item.source_url == "https://cambridgema.gov/housing-info"
-    assert item.text == "Short snippet about housing."
+    assert item.text == "Short snippet about housing near Harvard Square today."
     assert item.topic == "housing"
     assert item.metadata["provider"] == "tavily"
     assert tool.raw_content_cache[item.source_url] == "Much longer full page text about housing near Harvard Square."
@@ -69,9 +88,9 @@ def test_page_retrieval_reads_from_shared_cache(harvard_square):
         results=[
             {
                 "url": "https://example.org/a",
-                "title": "A",
-                "content": "snippet",
-                "raw_content": "full text",
+                "title": "Harvard Square guide",
+                "content": "A reasonably long snippet about Harvard Square for testing the cache.",
+                "raw_content": "A reasonably long full text body about Harvard Square used to test the cache.",
             }
         ]
     )
@@ -79,7 +98,10 @@ def test_page_retrieval_reads_from_shared_cache(harvard_square):
     search_tool.search(harvard_square, _topic())
     retrieval_tool = TavilyPageRetrievalTool(search_tool.raw_content_cache)
 
-    assert retrieval_tool.retrieve_full_text("https://example.org/a") == "full text"
+    assert (
+        retrieval_tool.retrieve_full_text("https://example.org/a")
+        == "A reasonably long full text body about Harvard Square used to test the cache."
+    )
     assert retrieval_tool.retrieve_full_text("https://example.org/unknown") is None
 
 
@@ -243,7 +265,13 @@ def test_search_keeps_everything_if_nothing_mentions_the_location(harvard_square
     """A topic with zero evidence is more honest than one with silently-swapped
     off-topic evidence — but only as a last resort when literally nothing matched."""
     client = FakeTavilyClient(
-        results=[{"url": "https://example.org/unrelated", "title": "Totally unrelated", "content": "Nothing to do with it."}]
+        results=[
+            {
+                "url": "https://example.org/unrelated",
+                "title": "Totally unrelated",
+                "content": "Nothing to do with it at all, completely unrelated content here.",
+            }
+        ]
     )
     tool = TavilyWebSearchTool(client=client)
 
@@ -256,8 +284,16 @@ def test_search_keeps_everything_if_nothing_mentions_the_location(harvard_square
 def test_search_pairs_images_with_results_by_position(harvard_square):
     client = FakeTavilyClient(
         results=[
-            {"url": "https://example.org/a", "title": "Harvard Square guide", "content": "About Harvard Square."},
-            {"url": "https://example.org/b", "title": "Harvard Square news", "content": "More Harvard Square info."},
+            {
+                "url": "https://example.org/a",
+                "title": "Harvard Square guide",
+                "content": "About Harvard Square and its many local attractions.",
+            },
+            {
+                "url": "https://example.org/b",
+                "title": "Harvard Square news",
+                "content": "More Harvard Square info for visitors and residents alike.",
+            },
         ],
         images=["https://example.org/img-a.jpg", {"url": "https://example.org/img-b.jpg"}],
     )
@@ -268,3 +304,140 @@ def test_search_pairs_images_with_results_by_position(harvard_square):
     by_url = {e.source_url: e for e in evidence}
     assert by_url["https://example.org/a"].image_url == "https://example.org/img-a.jpg"
     assert by_url["https://example.org/b"].image_url == "https://example.org/img-b.jpg"
+
+
+def test_live_feed_requests_recency_and_labels_topic_live_feed(harvard_square):
+    client = FakeTavilyClient(
+        results=[
+            {
+                "url": "https://example.org/recent-post",
+                "title": "Harvard Square this week",
+                "content": "A recent discussion thread about Harvard Square, Cambridge, posted this week.",
+                "published_date": "2026-09-15",
+            }
+        ]
+    )
+    tool = TavilyLiveFeedTool(client=client)
+
+    feed = tool.fetch(harvard_square)
+
+    assert len(feed) == 1
+    assert feed[0].topic == "live_feed"
+    assert "Harvard Square" in client.queries[0]
+
+
+def test_live_feed_sorts_newest_first(harvard_square):
+    client = FakeTavilyClient(
+        results=[
+            {
+                "url": "https://example.org/older",
+                "title": "Older Harvard Square post",
+                "content": "An older discussion thread about Harvard Square, Cambridge, from a while back.",
+                "published_date": "2025-01-01",
+            },
+            {
+                "url": "https://example.org/newer",
+                "title": "Newer Harvard Square post",
+                "content": "A brand new discussion thread about Harvard Square, Cambridge, posted recently.",
+                "published_date": "2026-09-15",
+            },
+        ]
+    )
+    tool = TavilyLiveFeedTool(client=client)
+
+    feed = tool.fetch(harvard_square)
+
+    assert [e.source_url for e in feed] == ["https://example.org/newer", "https://example.org/older"]
+
+
+def test_live_feed_drops_results_that_never_mention_the_location_without_fallback(harvard_square):
+    """Unlike per-topic research search, the live feed has no verified
+    pipeline downstream to catch a bad match — the location filter here is
+    not soft."""
+    client = FakeTavilyClient(
+        results=[
+            {
+                "url": "https://example.org/unrelated",
+                "title": "Totally unrelated post",
+                "content": "This discussion thread has nothing to do with the place in question.",
+            }
+        ]
+    )
+    tool = TavilyLiveFeedTool(client=client)
+
+    assert tool.fetch(harvard_square) == []
+
+
+def test_live_feed_drops_results_that_mention_only_a_generic_chain_name(starbucks_cambridge):
+    """Regression test for a real bug found live: searching a chain business
+    like "Starbucks, Cambridge" returned nationwide Starbucks content (a
+    Rockville MD apartment post, a Philly hiring thread) because the old
+    filter accepted a name-only match, and "Starbucks" alone is not
+    distinctive enough to mean anything about location."""
+    client = FakeTavilyClient(
+        results=[
+            {
+                "url": "https://example.org/unrelated-starbucks",
+                "title": "Starbucks hiring thread",
+                "content": "Just applied to a Starbucks near me, they said $19/hr to start working there.",
+            },
+            {
+                "url": "https://example.org/on-topic-starbucks",
+                "title": "Starbucks in Cambridge closing early",
+                "content": "The Starbucks on Mass Ave in Cambridge is closing early this week for renovations.",
+            },
+        ]
+    )
+    tool = TavilyLiveFeedTool(client=client)
+
+    feed = tool.fetch(starbucks_cambridge)
+
+    assert [e.source_url for e in feed] == ["https://example.org/on-topic-starbucks"]
+
+
+def test_live_feed_falls_back_to_area_level_query_when_poi_query_finds_nothing(starbucks_cambridge):
+    """A single Starbucks branch rarely has recent web content naming it
+    specifically -- the feed should fall back to area-level activity rather
+    than showing nothing, since it promises "what's being said in this
+    region", not "about this exact business"."""
+    client = FakeTavilyClient(
+        results_sequence=[
+            [
+                {
+                    "url": "https://example.org/unrelated-starbucks",
+                    "title": "Starbucks hiring thread",
+                    "content": "Just applied to a Starbucks near me, they said $19/hr to start working there.",
+                }
+            ],
+            [
+                {
+                    "url": "https://example.org/cambridge-news",
+                    "title": "Cambridge council meeting recap",
+                    "content": "This week's Cambridge city council meeting covered zoning changes downtown.",
+                }
+            ],
+        ]
+    )
+    tool = TavilyLiveFeedTool(client=client)
+
+    feed = tool.fetch(starbucks_cambridge)
+
+    assert len(client.queries) == 2
+    assert [e.source_url for e in feed] == ["https://example.org/cambridge-news"]
+
+
+def test_is_relevant_to_live_feed_requires_city_when_known(starbucks_cambridge):
+    assert _is_relevant_to_live_feed("The Starbucks in Cambridge just reopened", starbucks_cambridge)
+    assert not _is_relevant_to_live_feed("I love my local Starbucks in Rockville", starbucks_cambridge)
+
+
+def test_live_feed_wraps_client_errors(harvard_square):
+    tool = TavilyLiveFeedTool(client=FakeTavilyClient(raise_error=True))
+
+    with pytest.raises(ToolExecutionError):
+        tool.fetch(harvard_square)
+
+
+def test_live_feed_missing_api_key_and_client_raises_configuration_error():
+    with pytest.raises(ToolConfigurationError):
+        TavilyLiveFeedTool()

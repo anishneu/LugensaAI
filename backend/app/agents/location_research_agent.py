@@ -31,6 +31,7 @@ from app.evidence.processing import enrich_evidence
 from app.evidence.repository import EvidenceRepository
 from app.models.claim import ClaimStatus
 from app.models.evidence import Evidence
+from app.models.location import Location
 from app.models.response import ResearchResponse
 from app.models.trace import ResearchTraceStep, TraceStage
 from app.planning.planner import ResearchPlanner
@@ -66,16 +67,26 @@ class LocationResearchAgent:
         self.synthesizer = synthesizer
         self.config = config or AgentConfig()
 
-    def run(self, raw_location: str, question: str) -> ResearchResponse:
+    def run(self, raw_location: str | Location, question: str) -> ResearchResponse:
         """Run the full research lifecycle and always release the evidence
         repository's resources afterward (e.g. closing a SQLite connection),
-        even if location resolution or a later stage raises."""
+        even if location resolution or a later stage raises.
+
+        `raw_location` is usually a string resolved via `location_resolver`.
+        Passing an already-resolved `Location` instead skips resolution
+        entirely — used when the caller already committed to one specific
+        place (e.g. the user picked one exact POI candidate from a live
+        search): re-resolving its name as a fresh text query could, in
+        principle, land on a *different* same-named place nearby (a
+        different branch of the same chain), which would silently research
+        the wrong location.
+        """
         try:
             return self._run(raw_location, question)
         finally:
             self.evidence_repository.close()
 
-    def _run(self, raw_location: str, question: str) -> ResearchResponse:
+    def _run(self, raw_location: str | Location, question: str) -> ResearchResponse:
         trace: list[ResearchTraceStep] = []
         tool_calls_made = 0
 
@@ -89,12 +100,20 @@ class LocationResearchAgent:
                 )
             )
 
-        location = self.location_resolver.resolve(raw_location)
-        log(
-            TraceStage.LOCATION_RESOLUTION,
-            f"Resolved '{raw_location}' to {location.name}, {location.city}, {location.region}",
-            slug=location.slug,
-        )
+        if isinstance(raw_location, Location):
+            location = raw_location
+            log(
+                TraceStage.LOCATION_RESOLUTION,
+                f"Using pre-resolved location {location.name}, {location.city}, {location.region}",
+                slug=location.slug,
+            )
+        else:
+            location = self.location_resolver.resolve(raw_location)
+            log(
+                TraceStage.LOCATION_RESOLUTION,
+                f"Resolved '{raw_location}' to {location.name}, {location.city}, {location.region}",
+                slug=location.slug,
+            )
 
         plan = self.planner.plan(location, question)
         log(

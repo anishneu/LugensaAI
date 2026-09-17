@@ -43,23 +43,13 @@ export function ResearchWorkspace() {
     setQuery("");
   }
 
-  function handleSelectSuggestion(suggestion: LocationSuggestion) {
-    selectLocation({
-      rawQuery: suggestion.raw_query,
-      displayName: `${suggestion.name}${suggestion.city ? `, ${suggestion.city}` : ""}`,
-      city: suggestion.city,
-      region: suggestion.region,
-      latitude: suggestion.latitude,
-      longitude: suggestion.longitude,
-    });
-  }
-
   function handleSubmitRawQuery(text: string) {
     selectLocation({
       rawQuery: text,
       displayName: text,
       city: null,
       region: null,
+      country: null,
       latitude: null,
       longitude: null,
     });
@@ -82,7 +72,19 @@ export function ResearchWorkspace() {
     setActiveSessionId(id);
 
     try {
-      const response = await runResearch({ location: location.rawQuery, question });
+      // A location with known coordinates (picked from live search, or
+      // already resolved by a previous question) is passed through exactly
+      // as-is — re-resolving its name as text server-side could land on a
+      // different same-named place nearby.
+      const response = await runResearch({
+        location: location.rawQuery,
+        question,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        city: location.city,
+        region: location.region,
+        country: location.country,
+      });
       setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, status: "done", response } : s)));
 
       if (location.latitude == null && response.location.latitude != null) {
@@ -93,6 +95,7 @@ export function ResearchWorkspace() {
                 displayName: `${response.location.name}${response.location.city ? `, ${response.location.city}` : ""}`,
                 city: response.location.city,
                 region: response.location.region,
+                country: response.location.country,
                 latitude: response.location.latitude,
                 longitude: response.location.longitude,
               }
@@ -112,14 +115,13 @@ export function ResearchWorkspace() {
         query={query}
         onQueryChange={setQuery}
         suggestions={suggestions}
-        onSelect={handleSelectSuggestion}
+        onSelect={selectLocation}
         onSubmit={handleSubmitRawQuery}
       />
     );
   }
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
-  const allEvidence = sessions.flatMap((s) => s.response?.evidence ?? []);
 
   return (
     <div className="workspace">
@@ -135,7 +137,7 @@ export function ResearchWorkspace() {
         <main className="workspace-center">
           <ResponsePanel session={activeSession} />
         </main>
-        <LiveFeedSidebar evidence={allEvidence} locationName={location.displayName} />
+        <LiveFeedSidebar location={location} />
       </div>
     </div>
   );

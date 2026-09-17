@@ -1,5 +1,5 @@
 import { MapContainer, TileLayer } from "react-leaflet";
-import type { LocationSuggestion } from "../types";
+import type { ActiveLocation, LocationSuggestion } from "../types";
 import { LocationSearchInput } from "./LocationSearchInput";
 
 const DEFAULT_CENTER: [number, number] = [42.38, -71.115]; // Cambridge/Somerville, MA — where the demo data lives
@@ -8,7 +8,7 @@ interface SearchHeroProps {
   query: string;
   onQueryChange: (value: string) => void;
   suggestions: LocationSuggestion[];
-  onSelect: (suggestion: LocationSuggestion) => void;
+  onSelect: (location: ActiveLocation) => void;
   onSubmit: (text: string) => void;
 }
 
@@ -30,14 +30,17 @@ export function SearchHero({ query, onQueryChange, suggestions, onSelect, onSubm
 
       <div className="search-hero-content">
         <h1>Where should the agent investigate?</h1>
-        <p>Known demo locations: Harvard Square and Davis Square, MA — start typing to see them.</p>
+        <p>
+          Any real place — a neighborhood, a specific Starbucks, an address. Harvard Square and Davis Square have
+          the richest demo data, but search finds real businesses everywhere.
+        </p>
         <LocationSearchInput
           value={query}
           onChange={onQueryChange}
           suggestions={suggestions}
           onSelect={onSelect}
           onSubmit={onSubmit}
-          placeholder="Try “Harvard Square”…"
+          placeholder="Try “Starbucks, Cambridge MA”…"
           autoFocus
         />
       </div>

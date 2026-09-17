@@ -173,6 +173,23 @@ def _is_relevant_to_location(item_text: str, location: Location) -> bool:
     return any(needle in haystack for needle in needles if needle)
 
 
+def _is_relevant_to_live_feed(item_text: str, location: Location) -> bool:
+    """The live feed surfaces general regional activity -- a Reddit post, a
+    news article, anything freshly published near this place -- rather than
+    coverage of one exact business. Matching on `location.name` alone (as
+    `_is_relevant_to_location` does) breaks for a chain business like
+    "Starbucks": the name alone matches unrelated content about that chain
+    anywhere in the country, while genuinely relevant local chatter rarely
+    names one specific branch. The anchor that actually proves an item is
+    about the right place is its city (or region, if no city is known).
+    """
+    haystack = item_text.lower()
+    anchor = location.city or location.region
+    if anchor:
+        return anchor.lower() in haystack
+    return location.name.lower() in haystack
+
+
 def _classify_source_type(url: str) -> SourceType:
     domain = urlparse(url).netloc.lower().removeprefix("www.")
     if domain.endswith(_GOV_TLDS):
@@ -217,6 +234,47 @@ def _extract_image_url(raw_image: object) -> str | None:
     return None
 
 
+def _build_candidates(
+    location: Location, topic_id: str, results: list[dict], images: list, cache: dict[str, str]
+) -> list[Evidence]:
+    """Turn raw Tavily results into Evidence — shared by the per-topic
+    research search and the topic-agnostic live feed, so cleaning/length
+    filtering/image-pairing logic exists in exactly one place."""
+    candidates: list[Evidence] = []
+    for index, item in enumerate(results):
+        url = item.get("url")
+        if not url:
+            continue
+        raw_content = _truncate_for_display(_clean_text(item.get("raw_content") or ""), _MAX_FULL_TEXT_LENGTH)
+        snippet = _truncate_for_display(_clean_text(item.get("content") or raw_content[:500]))
+        title = item.get("title") or url
+
+        if len(snippet) < _MIN_USABLE_SNIPPET_LENGTH:
+            # Cleaning (stripping nav menus, timestamps, markdown) can leave
+            # almost nothing behind for some sources (e.g. a video whose
+            # "content" was mostly chapter markers) — not worth keeping.
+            continue
+
+        cache[url] = raw_content or snippet
+        candidates.append(
+            Evidence(
+                evidence_id=_evidence_id(topic_id, url),
+                source_url=url,
+                source_title=title,
+                publisher=urlparse(url).netloc.removeprefix("www.") or None,
+                source_type=_classify_source_type(url),
+                retrieved_at=datetime.now(timezone.utc),
+                published_at=_parse_published_date(item.get("published_date")),
+                location_scope=f"{location.city}, {location.region}",
+                text=snippet,
+                topic=topic_id,
+                metadata={"provider": "tavily", "is_fixture": "false"},
+                image_url=_extract_image_url(images[index]) if index < len(images) else None,
+            )
+        )
+    return candidates
+
+
 class TavilyWebSearchTool(WebSearchTool):
     def __init__(self, api_key: str | None = None, max_results: int = 4, client: object | None = None) -> None:
         self.raw_content_cache: dict[str, str] = {}
@@ -254,80 +312,91 @@ class TavilyWebSearchTool(WebSearchTool):
         results = response.get("results", []) if isinstance(response, dict) else []
         images = response.get("images", []) if isinstance(response, dict) else []
 
-        candidates: list[Evidence] = []
-        for index, item in enumerate(results):
-            url = item.get("url")
-            if not url:
-                continue
-            raw_content = _truncate_for_display(_clean_text(item.get("raw_content") or ""), _MAX_FULL_TEXT_LENGTH)
-            snippet = _truncate_for_display(_clean_text(item.get("content") or raw_content[:500]))
-            title = item.get("title") or url
-
-            if len(snippet) < _MIN_USABLE_SNIPPET_LENGTH:
-                # Cleaning (stripping nav menus, timestamps, markdown) can leave
-                # almost nothing behind for some sources (e.g. a video whose
-                # "content" was mostly chapter markers) — not worth keeping.
-                continue
-            if not _is_relevant_to_location(f"{title} {snippet}", location):
-                continue
-
-            self.raw_content_cache[url] = raw_content or snippet
-
-            candidates.append(
-                Evidence(
-                    evidence_id=_evidence_id(topic.topic_id, url),
-                    source_url=url,
-                    source_title=title,
-                    publisher=urlparse(url).netloc.removeprefix("www.") or None,
-                    source_type=_classify_source_type(url),
-                    retrieved_at=datetime.now(timezone.utc),
-                    published_at=_parse_published_date(item.get("published_date")),
-                    location_scope=f"{location.city}, {location.region}",
-                    text=snippet,
-                    topic=topic.topic_id,
-                    metadata={"provider": "tavily", "is_fixture": "false"},
-                    image_url=_extract_image_url(images[index]) if index < len(images) else None,
-                )
-            )
+        candidates = _build_candidates(location, topic.topic_id, results, images, self.raw_content_cache)
+        relevant = [c for c in candidates if _is_relevant_to_location(f"{c.source_title} {c.text}", location)]
 
         # Soft filter: an empty topic with an honest coverage-gap limitation
-        # is better than quietly keeping off-topic results to avoid it, but
-        # dropping every single candidate (e.g. the location name appears
-        # only in the query, never in any real result) would be worse than
-        # showing the unfiltered results with a lower relevance score.
-        if candidates:
-            return candidates
+        # is more honest than quietly keeping off-topic results to avoid it,
+        # but dropping every single candidate (e.g. the location name
+        # appears only in the query, never in any real result) is worse than
+        # showing the unfiltered results, clearly flagged as such.
+        if relevant:
+            return relevant
+        for candidate in candidates:
+            candidate.metadata["location_match"] = "false"
+        return candidates
 
-        return self._build_unfiltered(location, topic, results, images)
 
-    def _build_unfiltered(
-        self, location: Location, topic: ResearchTopic, results: list[dict], images: list
-    ) -> list[Evidence]:
-        evidence: list[Evidence] = []
-        for index, item in enumerate(results):
-            url = item.get("url")
-            if not url:
-                continue
-            raw_content = _truncate_for_display(_clean_text(item.get("raw_content") or ""), _MAX_FULL_TEXT_LENGTH)
-            snippet = _truncate_for_display(_clean_text(item.get("content") or raw_content[:500]))
-            self.raw_content_cache[url] = raw_content or snippet
-            evidence.append(
-                Evidence(
-                    evidence_id=_evidence_id(topic.topic_id, url),
-                    source_url=url,
-                    source_title=item.get("title") or url,
-                    publisher=urlparse(url).netloc.removeprefix("www.") or None,
-                    source_type=_classify_source_type(url),
-                    retrieved_at=datetime.now(timezone.utc),
-                    published_at=_parse_published_date(item.get("published_date")),
-                    location_scope=f"{location.city}, {location.region}",
-                    text=snippet,
-                    topic=topic.topic_id,
-                    metadata={"provider": "tavily", "is_fixture": "false", "location_match": "false"},
-                    image_url=_extract_image_url(images[index]) if index < len(images) else None,
-                )
+class TavilyLiveFeedTool:
+    """Recency-biased, topic-agnostic search: "what's currently being said
+    about this place" — independent of any specific research question.
+
+    Not part of the verified research pipeline: no per-topic planning, no
+    claim extraction, no verification. `topic="live_feed"` on the resulting
+    Evidence is a label for consistent typing, not a real research topic.
+    Every call is a real, billed Tavily search — see `backend/README.md`
+    before wiring this up to an aggressive auto-refresh interval.
+    """
+
+    def __init__(self, api_key: str | None = None, max_results: int = 8, client: object | None = None) -> None:
+        self.raw_content_cache: dict[str, str] = {}
+        self._max_results = max_results
+
+        if client is not None:
+            self._client = client
+            return
+
+        if not api_key:
+            raise ToolConfigurationError("TavilyLiveFeedTool requires an api_key (TAVILY_API_KEY).")
+        try:
+            from tavily import TavilyClient
+        except ImportError as exc:
+            raise ToolConfigurationError(
+                "The 'tavily-python' package is required. Install it with `pip install tavily-python` "
+                "(already in requirements.txt)."
+            ) from exc
+        self._client = TavilyClient(api_key=api_key)
+
+    def fetch(self, location: Location) -> list[Evidence]:
+        location_label = f"{location.name}, {location.city}, {location.region}".strip(", ")
+        relevant = self._search_and_filter(location, f"{location_label} news reddit recent discussion")
+
+        # A specific POI (one Starbucks branch, one restaurant) rarely has
+        # anything written about it by name in the last week -- fall back to
+        # an area-level query instead of showing nothing. This still passes
+        # through the same relevance filter (city/region, not the POI name),
+        # so it only ever surfaces content actually about the right place.
+        # One extra billed call, and only when the first query came up empty.
+        if not relevant and location.city:
+            area_label = ", ".join(filter(None, [location.city, location.region]))
+            relevant = self._search_and_filter(location, f"{area_label} news reddit recent discussion")
+
+        return relevant
+
+    def _search_and_filter(self, location: Location, query: str) -> list[Evidence]:
+        try:
+            response = self._client.search(
+                query=query,
+                max_results=self._max_results,
+                include_raw_content=True,
+                include_images=True,
+                time_range="week",
             )
-        return evidence
+        except Exception as exc:  # noqa: BLE001 - the Tavily SDK's own exception types aren't guaranteed
+            raise ToolExecutionError(f"Tavily live-feed search failed for query '{query}': {exc}") from exc
+
+        results = response.get("results", []) if isinstance(response, dict) else []
+        images = response.get("images", []) if isinstance(response, dict) else []
+        candidates = _build_candidates(location, "live_feed", results, images, self.raw_content_cache)
+
+        # This *is* the "just show me what's relevant-ish nearby" surface —
+        # unlike per-topic research search, there's no verified pipeline
+        # downstream to catch an overly loose match, so the location filter
+        # here is not soft: a result that never mentions the place is
+        # dropped outright rather than shown with a caveat.
+        relevant = [c for c in candidates if _is_relevant_to_live_feed(f"{c.source_title} {c.text}", location)]
+        relevant.sort(key=lambda e: e.published_at or e.retrieved_at, reverse=True)
+        return relevant
 
 
 class TavilyPageRetrievalTool(PageRetrievalTool):

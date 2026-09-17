@@ -1,21 +1,16 @@
-import { useMemo, useState } from "react";
-import type { Evidence } from "../types";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { fetchLiveFeed, ResearchApiError } from "../api";
 import { cleanDisplayText, relativeTimeFrom } from "../textUtils";
 import { SOURCE_TYPE_ICON } from "../sourceTypeIcon";
+import type { ActiveLocation, Evidence } from "../types";
 
 interface LiveFeedSidebarProps {
-  evidence: Evidence[];
-  locationName: string;
+  location: ActiveLocation;
 }
 
-// Guards against stale localStorage history saved before the backend's
-// location-relevance filter existed — never show something this weakly
-// related to the topic it was retrieved for, regardless of when it was cached.
-const MIN_FEED_RELEVANCE = 0.3;
-
-function feedTimestamp(item: Evidence): number {
-  return new Date(item.published_at ?? item.retrieved_at).getTime();
-}
+// A real, billed Tavily search runs on every fetch — auto-refresh stays
+// infrequent by design; the manual button covers "I want it now."
+const AUTO_REFRESH_MS = 3 * 60 * 1000;
 
 function FeedMedia({ item }: { item: Evidence }) {
   const [failed, setFailed] = useState(false);
@@ -37,27 +32,80 @@ function FeedMedia({ item }: { item: Evidence }) {
   );
 }
 
-export function LiveFeedSidebar({ evidence, locationName }: LiveFeedSidebarProps) {
-  const feed = useMemo(() => {
-    const seen = new Set<string>();
-    const deduped = evidence.filter((item) => {
-      if (seen.has(item.evidence_id)) return false;
-      seen.add(item.evidence_id);
-      return item.relevance_score == null || item.relevance_score >= MIN_FEED_RELEVANCE;
-    });
-    return deduped.sort((a, b) => feedTimestamp(b) - feedTimestamp(a));
-  }, [evidence]);
+export function LiveFeedSidebar({ location }: LiveFeedSidebarProps) {
+  const [feed, setFeed] = useState<Evidence[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const load = useCallback(() => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    setLoading(true);
+    setError(null);
+    fetchLiveFeed(
+      {
+        location: location.rawQuery,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        city: location.city,
+        region: location.region,
+        country: location.country,
+      },
+      controller.signal,
+    )
+      .then((items) => {
+        setFeed(items);
+        setUnavailable(items.length === 0);
+        setLastUpdated(new Date().toISOString());
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        setError(err instanceof ResearchApiError ? err.message : "Could not load the live feed.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+  }, [location.rawQuery, location.latitude, location.longitude, location.city, location.region, location.country]);
+
+  useEffect(() => {
+    load();
+    const interval = window.setInterval(load, AUTO_REFRESH_MS);
+    return () => {
+      window.clearInterval(interval);
+      abortRef.current?.abort();
+    };
+  }, [load]);
 
   return (
     <aside className="live-feed-sidebar">
       <div className="sidebar-heading">
-        <h2>Live feed</h2>
-        <p>Real sources the agent has surfaced for {locationName} so far, newest first.</p>
+        <div className="feed-heading-row">
+          <h2>Live feed</h2>
+          <button type="button" className="feed-refresh-button" onClick={load} disabled={loading} title="Refresh now">
+            {loading ? "⏳" : "↻"}
+          </button>
+        </div>
+        <p>
+          What's currently being said about {location.displayName} — real Reddit, news, and review activity from
+          the last week, independent of the questions on the left.
+        </p>
+        {lastUpdated && <p className="feed-updated-at">Updated {relativeTimeFrom(lastUpdated)}</p>}
       </div>
 
-      {feed.length === 0 ? (
-        <p className="empty-note">Nothing yet — ask a question to start collecting evidence.</p>
-      ) : (
+      {error && <p className="empty-note">{error}</p>}
+
+      {!error && unavailable && !loading && (
+        <p className="empty-note">
+          No live feed available — this needs a Tavily API key configured on the backend (`TAVILY_API_KEY`).
+        </p>
+      )}
+
+      {!error && feed.length > 0 && (
         <div className="feed-items">
           {feed.map((item) => (
             <a key={item.evidence_id} href={item.source_url} target="_blank" rel="noreferrer" className="feed-item">
@@ -72,7 +120,6 @@ export function LiveFeedSidebar({ evidence, locationName }: LiveFeedSidebarProps
                 <div className="feed-item-title">{item.source_title}</div>
                 {item.publisher && <div className="feed-item-publisher">{item.publisher}</div>}
                 <p className="feed-item-snippet">{cleanDisplayText(item.text)}</p>
-                <span className="feed-item-topic">#{item.topic}</span>
               </div>
             </a>
           ))}

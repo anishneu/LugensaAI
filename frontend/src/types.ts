@@ -83,6 +83,14 @@ export interface ResearchResponse {
 export interface ResearchRequest {
   location: string;
   question: string;
+  // Set together when the caller already committed to one exact place (a
+  // specific POI picked from live search) — skips server-side text
+  // resolution, which could otherwise land on a different same-named place.
+  latitude?: number | null;
+  longitude?: number | null;
+  city?: string | null;
+  region?: string | null;
+  country?: string | null;
 }
 
 export interface LocationSuggestion {
@@ -96,6 +104,19 @@ export interface LocationSuggestion {
   longitude: number | null;
 }
 
+/** A real point-of-interest candidate from a live search (e.g. one specific
+ * Starbucks among several) — see GET /api/places/search. */
+export interface PlaceCandidate {
+  name: string;
+  display_name: string;
+  category: string;
+  city: string | null;
+  region: string | null;
+  country: string | null;
+  latitude: number;
+  longitude: number;
+}
+
 /** The location currently being researched in the workspace. May start out
  * unresolved (free-text search, no coordinates yet) and get refined once a
  * real ResearchResponse comes back with a fully resolved Location. */
@@ -104,6 +125,7 @@ export interface ActiveLocation {
   displayName: string;
   city: string | null;
   region: string | null;
+  country: string | null;
   latitude: number | null;
   longitude: number | null;
 }

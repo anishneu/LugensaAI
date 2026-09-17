@@ -274,6 +274,47 @@
   margin: 0;
 }
 
+.feed-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.feed-heading-row h2 {
+  margin: 0;
+}
+
+.feed-refresh-button {
+  font-size: 14px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.feed-refresh-button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.feed-refresh-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.feed-updated-at {
+  font-size: 10.5px !important;
+  color: var(--text-muted);
+  margin-top: 4px !important;
+}
+
 /* --- Chat sidebar --- */
 
 .chat-input-form {
