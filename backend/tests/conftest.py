@@ -3,6 +3,27 @@ import pytest
 from app.models.location import Location
 
 
+@pytest.fixture(autouse=True)
+def _isolated_test_environment(monkeypatch, tmp_path):
+    """Keep the whole test suite free, offline, fast, and side-effect-free.
+
+    A developer's local `.env` may set real keys for manual/live testing
+    (see backend/README.md), and semantic retrieval auto-enables itself if
+    `sentence-transformers` happens to be installed — without this fixture,
+    running `pytest` on such a machine would silently make real, billed API
+    calls, load a real embedding model, and write into the real project
+    `data/` directory. This fixture forces every test back to the free,
+    deterministic, temp-storage default regardless of local machine state.
+    Tests that specifically want the LLM-backed, live-search, or semantic
+    path inject a fake/scripted implementation directly instead of relying
+    on env vars or real external resources.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.setenv("DISABLE_SEMANTIC_RETRIEVAL", "1")
+    monkeypatch.setenv("EVIDENCE_DB_PATH", str(tmp_path / "evidence.db"))
+
+
 @pytest.fixture
 def harvard_square() -> Location:
     return Location(

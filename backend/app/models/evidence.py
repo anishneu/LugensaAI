@@ -44,3 +44,9 @@ class Evidence(BaseModel):
     recency_days: int | None = Field(
         default=None, description="Days between publication and retrieval, if publication date is known"
     )
+    image_url: str | None = Field(
+        default=None,
+        description="A real image surfaced by the search alongside this result, if any. Best-effort pairing "
+        "with the specific source when the search API doesn't guarantee per-result image attribution — "
+        "never a fabricated or stock image.",
+    )

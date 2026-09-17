@@ -61,3 +61,62 @@ def test_stale_evidence_still_supports_but_adds_limitation():
 
     assert verified.status == ClaimStatus.SUPPORTED
     assert any("older than" in limitation for limitation in verified.limitations)
+
+
+def test_two_supported_claims_that_contradict_are_both_marked_contradicted():
+    evidence_a = _evidence("e1", relevance_score=0.5)
+    evidence_b = _evidence("e2", relevance_score=0.5)
+    claim_a = Claim(
+        claim_id="c1", text="The area is very safe at night.", claim_type="safety", supporting_evidence_ids=["e1"]
+    )
+    claim_b = Claim(
+        claim_id="c2", text="Residents describe it as a dangerous area.", claim_type="safety",
+        supporting_evidence_ids=["e2"],
+    )
+    config = AgentConfig()
+
+    verified = EvidenceBasedClaimVerifier().verify(
+        [claim_a, claim_b], {"e1": evidence_a, "e2": evidence_b}, config
+    )
+
+    assert {c.status for c in verified} == {ClaimStatus.CONTRADICTED}
+    by_id = {c.claim_id: c for c in verified}
+    assert by_id["c1"].contradicting_evidence_ids == ["e2"]
+    assert by_id["c2"].contradicting_evidence_ids == ["e1"]
+    assert any("contradict" in lim for lim in by_id["c1"].limitations)
+
+
+def test_contradiction_check_ignores_different_topics():
+    evidence_a = _evidence("e1", relevance_score=0.5)
+    evidence_b = _evidence("e2", relevance_score=0.5)
+    claim_a = Claim(
+        claim_id="c1", text="The area is very safe at night.", claim_type="safety", supporting_evidence_ids=["e1"]
+    )
+    claim_b = Claim(
+        claim_id="c2", text="It is a dangerous place to invest money.", claim_type="cost_of_living",
+        supporting_evidence_ids=["e2"],
+    )
+    config = AgentConfig()
+
+    verified = EvidenceBasedClaimVerifier().verify(
+        [claim_a, claim_b], {"e1": evidence_a, "e2": evidence_b}, config
+    )
+
+    assert all(c.status == ClaimStatus.SUPPORTED for c in verified)
+
+
+def test_contradiction_check_ignores_claims_without_sufficient_evidence():
+    evidence_a = _evidence("e1", relevance_score=0.5)
+    claim_a = Claim(
+        claim_id="c1", text="The area is very safe at night.", claim_type="safety", supporting_evidence_ids=["e1"]
+    )
+    claim_b = Claim(
+        claim_id="c2", text="It is a dangerous area.", claim_type="safety", supporting_evidence_ids=[]
+    )
+    config = AgentConfig()
+
+    verified = EvidenceBasedClaimVerifier().verify([claim_a, claim_b], {"e1": evidence_a}, config)
+
+    by_id = {c.claim_id: c for c in verified}
+    assert by_id["c1"].status == ClaimStatus.SUPPORTED  # unsupported claim can't drag a supported one down
+    assert by_id["c2"].status == ClaimStatus.INSUFFICIENT_EVIDENCE

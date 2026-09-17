@@ -29,3 +29,9 @@ class ResearchPlan(BaseModel):
     question: str
     detected_intents: list[str] = Field(default_factory=list)
     topics: list[ResearchTopic] = Field(default_factory=list)
+    notes: list[str] = Field(
+        default_factory=list,
+        description="Transparency notes about how the plan was produced, e.g. an LLM planning "
+        "failure that caused a fallback to the rule-based planner. Surfaced in the final "
+        "response's limitations.",
+    )

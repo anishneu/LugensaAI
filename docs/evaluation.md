@@ -1,9 +1,4 @@
-# Evaluation Plan
-
-No evaluation has been run yet. Milestone 1 has no LLM in its pipeline (see
-`docs/architecture.md`), so Baseline A below doesn't yet have a meaningful counterpart to
-compare against within this repo — this document is the plan for Milestone 2+, once an
-LLM-backed planner/synthesizer exists, recorded now so evaluation isn't an afterthought.
+# Evaluation Plan and Results
 
 ## Comparisons
 
@@ -39,9 +34,71 @@ A small, fixed set of location + question pairs, covering:
 | Latency and token usage | Wall-clock time per run; token usage once an LLM is in the loop |
 | Research completeness | Were all planned topics attempted before the budget ran out? |
 
-## What would make Milestone 2 worth shipping
+## Results (Milestone 8, run 2026-09-16)
 
-The proposed system should not be declared "better" until it is actually run against Baseline
-A and B on the benchmark above and the metrics are reported — including cases where it loses
-(e.g. higher latency, more tool calls, no clear groundedness improvement over Baseline B for a
-trivial question). This document records the plan; it does not claim a result.
+Run via `python -m evaluation.run_benchmark` from `backend/` (code in `backend/evaluation/`).
+Raw output: `backend/evaluation/last_run_results.json`. Reproducible with `TAVILY_API_KEY` set;
+no `ANTHROPIC_API_KEY` was set for this run.
+
+**Scope, stated plainly:**
+- **Baseline A was not run.** It requires a real LLM call and this environment has no
+  `ANTHROPIC_API_KEY`. Nothing below compares against it — the table only measures Baseline B vs.
+  the proposed system's *orchestration* (planning, retrieval scoring, verification), not
+  generation quality.
+- **Citation correctness / groundedness / claim-level comparison could not be measured this
+  run.** Both systems produced zero claims (`FixtureClaimExtractor` cannot extract from real
+  page text — see `docs/research-workflow.md`). This is not evidence the systems are equal on
+  those metrics; it's evidence they're both untestable on those metrics without an LLM key.
+- **The `partial_coverage` case (Davis Square) did not exercise its intended fixture-gap
+  behavior.** Both systems used live search here, and Tavily has no trouble finding real Davis
+  Square results regardless of what's in `fixtures/`. The actual fixture-coverage-gap behavior
+  (evidence found for only 2 of 5 planned topics, reported honestly) is verified separately and
+  deterministically in `tests/test_agent_end_to_end.py::test_davis_square_reports_coverage_gaps_honestly`.
+  This is a real gap in this benchmark's design, noted rather than glossed over.
+- Both systems used the same live `TavilyWebSearchTool`, so the comparison isolates the
+  orchestration layer (adaptive multi-topic planning + retrieval scoring + verification) from
+  search-quality differences.
+
+| case | system | ok | latency (s) | tool calls | evidence | avg relevance | source types | topics planned | topics covered |
+|---|---|---|---|---|---|---|---|---|---|
+| broad_suitability | baseline_b | yes | 2.07 | 1 | 5 | n/a | 4 | n/a | n/a |
+| broad_suitability | proposed | yes | 9.48 | 25 | 20 | 0.55 | 4 | 5 | 5 |
+| narrow_topic | baseline_b | yes | 1.79 | 1 | 5 | n/a | 3 | n/a | n/a |
+| narrow_topic | proposed | yes | 3.33 | 5 | 4 | 0.64 | 1 | 1 | 1 |
+| partial_coverage | baseline_b | yes | 3.43 | 1 | 5 | n/a | 3 | n/a | n/a |
+| partial_coverage | proposed | yes | 8.15 | 25 | 20 | 0.54 | 2 | 5 | 5 |
+| unresolvable_location | baseline_b | **NO** | 0.00 | 0 | 0 | n/a | 0 | n/a | n/a |
+| unresolvable_location | proposed | **NO** | 0.01 | 0 | 0 | n/a | 0 | n/a | n/a |
+
+**What this actually shows:**
+
+- **Both systems correctly refuse to answer for an unresolvable location** rather than
+  hallucinating a place — the one metric where "failure" in the `ok` column is the correct,
+  desired outcome for both.
+- **The proposed system reaches full topic coverage every time** (`topics_covered` ==
+  `topics_planned` in both resolvable-and-relevant cases); Baseline B has no topic concept at
+  all, so "coverage" isn't meaningful for it — it either finds something relevant to the whole
+  question in one shot or it doesn't.
+- **The proposed system is the only one that scores relevance at all** (`avg_relevance`
+  0.54–0.64 vs. Baseline B's `n/a`). Baseline B just takes the search API's raw ranking
+  on faith. This is the concrete, measured version of the "adaptive retrieval" claim in
+  `docs/architecture.md` — not assumed, shown.
+- **This costs real latency and tool calls.** The proposed system used 5–25x more tool calls
+  and took roughly 2–4.5x longer than Baseline B in every resolvable case. Thoroughness is not
+  free, and a system that needs one topic (`narrow_topic`) correctly does far less work (5 tool
+  calls) than one needing five (`broad_suitability`/`partial_coverage`, 25 tool calls each,
+  capped by `AgentConfig.max_evidence_per_topic`).
+- **Not a clean win on every axis:** in `narrow_topic`, the proposed system's single
+  hyper-specific query returned evidence from only 1 source type, while Baseline B's single
+  broader query happened to pull from 3. A narrowly-targeted query can trade source diversity
+  for precision — a real, unflattering data point, not hidden here.
+
+## What's still needed before claiming more
+
+Baseline A, and any claim-level metric (citation correctness, groundedness, coverage of
+*supported* topics rather than just topics-with-evidence), need `ANTHROPIC_API_KEY` set and the
+benchmark re-run with `use_llm=True`. Until then, the honest claim is narrower than "the agent
+is better": *the orchestration layer measurably improves topic coverage and adds relevance
+scoring Baseline B entirely lacks, at a real and measured latency/tool-call cost* — nothing has
+been shown yet about whether its eventual LLM-generated answers are more grounded or accurate
+than Baseline A's or B's.

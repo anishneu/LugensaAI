@@ -33,3 +33,15 @@ def test_research_endpoint_404s_on_unknown_location():
     )
 
     assert response.status_code == 404
+
+
+def test_locations_endpoint_returns_known_locations():
+    response = client.get("/api/locations")
+
+    assert response.status_code == 200
+    names = {entry["name"] for entry in response.json()}
+    assert "Harvard Square" in names
+    assert "Davis Square" in names
+    for entry in response.json():
+        assert entry["aliases"]
+        assert entry["raw_query"]
