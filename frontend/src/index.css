@@ -1,0 +1,68 @@
+:root {
+  --text: #3a3540;
+  --text-muted: #6b6375;
+  --text-h: #08060d;
+  --bg: #fdfcfb;
+  --bg-alt: #f4f3ec;
+  --border: #e5e4e7;
+  --accent: #6d28d9;
+  --accent-bg: rgba(109, 40, 217, 0.08);
+  --supported: #1a7f37;
+  --contradicted: #b91c1c;
+  --insufficient: #92400e;
+
+  font: 16px/1.5 system-ui, "Segoe UI", Roboto, sans-serif;
+  color-scheme: light dark;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #d1d0d6;
+    --text-muted: #9ca3af;
+    --text-h: #f3f4f6;
+    --bg: #16171d;
+    --bg-alt: #1f2028;
+    --border: #2e303a;
+    --accent: #c084fc;
+    --accent-bg: rgba(192, 132, 252, 0.12);
+    --supported: #4ade80;
+    --contradicted: #f87171;
+    --insufficient: #fbbf24;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Scroll still works everywhere — the bar itself is just hidden, for a
+   cleaner look across the app (form field overflow, sidebars, panels). */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+*::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+body {
+  margin: 0;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+a {
+  color: var(--accent);
+}

@@ -3,3 +3,23 @@ uvicorn[standard]>=0.30,<1.0
 pydantic>=2.8,<3.0
 pytest>=8.0,<9.0
 httpx>=0.27,<1.0
+
+# Milestone 2 (LLM-backed planning/extraction/synthesis). Installing this
+# costs nothing; only calling the Anthropic API with a real key does — see
+# app/core/config.py and backend/README.md.
+anthropic>=0.40,<1.0
+
+# Milestone 3 (live web search). Installing this costs nothing; only calling
+# the Tavily API with a real key does.
+tavily-python>=0.5,<1.0
+
+# Loads backend/.env for local development so API keys don't need to be
+# exported by hand every session. .env itself is gitignored.
+python-dotenv>=1.0,<2.0
+
+# Milestone 4 (semantic retrieval). Local model, no API key — but a real,
+# if one-time and cached, model download (~90MB) plus the torch dependency.
+# Optional: the app runs fine without it (keyword-only retrieval); omit this
+# line from your install if you want to skip the download entirely and set
+# DISABLE_SEMANTIC_RETRIEVAL=1.
+sentence-transformers>=3.0,<4.0

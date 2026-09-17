@@ -10,12 +10,13 @@
       -> SYNTHESIS
       -> FINAL RESPONSE
 
-Milestone 1 runs claim verification *before* synthesis, not after, unlike
-the draft-then-check order a generative (LLM-based) synthesizer would use.
-`TemplateSynthesizer` is extractive, not generative — it renders already-
-verified claims into prose, so there is nothing to check afterwards. See
-docs/research-workflow.md for the reasoning; a Milestone 2 LLM-backed
-synthesizer would restore the draft-then-verify order.
+Claim verification always runs *before* synthesis, never after — this is
+deliberate and unchanged by Milestone 2's LLM-backed components. An LLM may
+now draft the extraction (`LLMClaimExtractor`) or the final prose
+(`LLMSynthesizer`), but it never gets to draft a full answer that is then
+checked after the fact: `ClaimVerifier` is a fixed, non-LLM gate that every
+claim must pass before `Synthesizer` (LLM-backed or not) ever sees it. See
+docs/research-workflow.md for the full reasoning.
 
 Every external tool call is counted against `AgentConfig.max_tool_calls` so
 the loop is guaranteed to terminate.
@@ -66,6 +67,15 @@ class LocationResearchAgent:
         self.config = config or AgentConfig()
 
     def run(self, raw_location: str, question: str) -> ResearchResponse:
+        """Run the full research lifecycle and always release the evidence
+        repository's resources afterward (e.g. closing a SQLite connection),
+        even if location resolution or a later stage raises."""
+        try:
+            return self._run(raw_location, question)
+        finally:
+            self.evidence_repository.close()
+
+    def _run(self, raw_location: str, question: str) -> ResearchResponse:
         trace: list[ResearchTraceStep] = []
         tool_calls_made = 0
 
@@ -96,7 +106,7 @@ class LocationResearchAgent:
             f"Planned {len(plan.topics)} topic(s): {', '.join(t.topic_id for t in plan.topics)}",
         )
 
-        limitations: list[str] = []
+        limitations: list[str] = list(plan.notes)
 
         for topic in plan.topics:
             if tool_calls_made >= self.config.max_tool_calls:
@@ -145,14 +155,16 @@ class LocationResearchAgent:
             )
 
         all_evidence = self.evidence_repository.list_all()
-        covered_topic_ids = {e.topic for e in all_evidence}
-        missing_topics = [t.topic_id for t in plan.topics if t.topic_id not in covered_topic_ids]
+        evidence_topic_ids = {e.topic for e in all_evidence}
+        missing_topics = [t.topic_id for t in plan.topics if t.topic_id not in evidence_topic_ids]
         if missing_topics:
             log(TraceStage.COVERAGE_CHECK, f"No evidence found for: {', '.join(missing_topics)}")
         else:
             log(TraceStage.COVERAGE_CHECK, "Evidence was found for every planned topic.")
 
-        claims = self.claim_extractor.extract(all_evidence, plan)
+        extraction = self.claim_extractor.extract(all_evidence, plan)
+        claims = extraction.claims
+        limitations.extend(extraction.notes)
         log(TraceStage.CLAIM_EXTRACTION, f"Extracted {len(claims)} claim(s) from {len(all_evidence)} evidence item(s)")
 
         evidence_by_id = {e.evidence_id: e for e in all_evidence}
@@ -164,7 +176,7 @@ class LocationResearchAgent:
         )
 
         summary, recommendation, synth_limitations = self.synthesizer.synthesize(
-            location, question, plan, verified_claims
+            location, question, plan, verified_claims, evidence_topic_ids
         )
         log(TraceStage.SYNTHESIS, "Generated summary and recommendation from verified claims")
 

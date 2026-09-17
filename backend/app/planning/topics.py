@@ -97,12 +97,14 @@ TOPIC_DEFINITIONS: dict[str, TopicDefinition] = {
         ),
         TopicDefinition(
             topic_id="community_sentiment",
-            keywords=("community", "locals", "reddit", "residents think", "opinion of"),
-            reason_template="The question asks about community perception of {location}, which is subjective and best sourced from resident discussion.",
-            query_templates=("{location} resident community discussion opinions",),
-            preferred_source_types=("community_forum", "blog"),
-            expected_evidence="Resident or community sentiment, clearly separated from objective fact.",
-            completion_criteria="At least one community-forum or blog source.",
+            keywords=("community", "locals", "reddit", "residents think", "opinion of", "comments", "reviews"),
+            reason_template="Real resident and visitor opinions about {location} — including recent complaints "
+            "or safety concerns — matter for awareness, not just official statistics.",
+            query_templates=("{location} community reddit reviews recent safety complaints opinions",),
+            preferred_source_types=("community_forum", "review_aggregator", "blog"),
+            expected_evidence="Real comments/reviews from forums (Reddit, Google Maps, Nextdoor, etc.), including "
+            "recent or negative ones — clearly separated from objective fact, never filtered out for being unflattering.",
+            completion_criteria="At least one community-forum or review-aggregator source with a real excerpt.",
         ),
     ]
 }
@@ -113,9 +115,20 @@ PERSONA_DEFINITIONS: dict[str, PersonaDefinition] = {
         PersonaDefinition(
             persona_id="college_student",
             trigger_keywords=("college student", "university student", "undergrad", "grad student", "student"),
-            topic_bundle=("housing", "transportation", "safety", "student_amenities", "cost_of_living"),
+            topic_bundle=(
+                "housing",
+                "transportation",
+                "safety",
+                "student_amenities",
+                "cost_of_living",
+                "community_sentiment",
+            ),
         ),
     ]
 }
 
-FALLBACK_TOPIC_BUNDLE: tuple[str, ...] = ("housing", "transportation", "safety")
+# `community_sentiment` is included even in the generic fallback: real
+# resident/visitor commentary (including recent safety complaints) is
+# treated as baseline-relevant to any location question, not an optional
+# extra — see TopicDefinition("community_sentiment") above.
+FALLBACK_TOPIC_BUNDLE: tuple[str, ...] = ("housing", "transportation", "safety", "community_sentiment")

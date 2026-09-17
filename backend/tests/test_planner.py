@@ -7,7 +7,14 @@ def test_college_student_question_selects_persona_bundle(harvard_square):
     plan = KeywordResearchPlanner().plan(harvard_square, "Would this be a good place for a college student?")
 
     topic_ids = {t.topic_id for t in plan.topics}
-    assert topic_ids == {"housing", "transportation", "safety", "student_amenities", "cost_of_living"}
+    assert topic_ids == {
+        "housing",
+        "transportation",
+        "safety",
+        "student_amenities",
+        "cost_of_living",
+        "community_sentiment",
+    }
     assert "college_student" in plan.detected_intents
 
     student_amenities = next(t for t in plan.topics if t.topic_id == "student_amenities")

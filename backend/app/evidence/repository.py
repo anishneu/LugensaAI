@@ -26,6 +26,10 @@ class EvidenceRepository(ABC):
         for item in evidence_items:
             self.add(item)
 
+    def close(self) -> None:
+        """Release any underlying resources (e.g. a database connection). No-op by default."""
+        return None
+
 
 class InMemoryEvidenceRepository(EvidenceRepository):
     """A per-run evidence store. Not persisted across process restarts.

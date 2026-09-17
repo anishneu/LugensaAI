@@ -1,0 +1,151 @@
+[
+  {
+    "case_id": "broad_suitability",
+    "system": "baseline_b",
+    "succeeded": true,
+    "latency_seconds": 2.0743521000003966,
+    "tool_calls": 1,
+    "evidence_count": 5,
+    "avg_relevance_score": null,
+    "source_type_diversity": 4,
+    "topics_planned": null,
+    "topics_covered": null,
+    "claims_count": 0,
+    "contradictions_detected": 0,
+    "error": null,
+    "notes": [
+      "Naive concatenated summary (no LLM): This family-friendly, multilevel bar-restaurant and self-proclaimed \u201cdouble cheeseburger king\u201d has been a mainstay of Harvard Square for more than 65 years, and is a popular spot f"
+    ]
+  },
+  {
+    "case_id": "broad_suitability",
+    "system": "proposed",
+    "succeeded": true,
+    "latency_seconds": 9.480103800000506,
+    "tool_calls": 25,
+    "evidence_count": 20,
+    "avg_relevance_score": 0.5547,
+    "source_type_diversity": 4,
+    "topics_planned": 5,
+    "topics_covered": 5,
+    "claims_count": 0,
+    "contradictions_detected": 0,
+    "error": null,
+    "notes": [
+      "Evidence was found for planned topic 'student_amenities' but no claims could be extracted from it.",
+      "Evidence was found for planned topic 'housing' but no claims could be extracted from it.",
+      "Evidence was found for planned topic 'transportation' but no claims could be extracted from it."
+    ]
+  },
+  {
+    "case_id": "narrow_topic",
+    "system": "baseline_b",
+    "succeeded": true,
+    "latency_seconds": 1.7868577000008372,
+    "tool_calls": 1,
+    "evidence_count": 5,
+    "avg_relevance_score": null,
+    "source_type_diversity": 3,
+    "topics_planned": null,
+    "topics_covered": null,
+    "claims_count": 0,
+    "contradictions_detected": 0,
+    "error": null,
+    "notes": [
+      "Naive concatenated summary (no LLM): Harvard Square is the most prominent area for tourists, and locals will bemoan to no end how it's lost much of its unique character over the years, trending toward a more chain-fri"
+    ]
+  },
+  {
+    "case_id": "narrow_topic",
+    "system": "proposed",
+    "succeeded": true,
+    "latency_seconds": 3.3304537999974855,
+    "tool_calls": 5,
+    "evidence_count": 4,
+    "avg_relevance_score": 0.6425,
+    "source_type_diversity": 1,
+    "topics_planned": 1,
+    "topics_covered": 1,
+    "claims_count": 0,
+    "contradictions_detected": 0,
+    "error": null,
+    "notes": [
+      "Evidence was found for planned topic 'nightlife' but no claims could be extracted from it.",
+      "Cross-source contradiction detection uses a coarse keyword-based heuristic (see app/verification/contradiction.py), not full natural-language understanding \u2014 it catches clear opposite-sentiment phrasing but will miss subtler disagreements, so a 'supported' status is not a guarantee that no source disagrees."
+    ]
+  },
+  {
+    "case_id": "partial_coverage",
+    "system": "baseline_b",
+    "succeeded": true,
+    "latency_seconds": 3.430573800000275,
+    "tool_calls": 1,
+    "evidence_count": 5,
+    "avg_relevance_score": null,
+    "source_type_diversity": 3,
+    "topics_planned": null,
+    "topics_covered": null,
+    "claims_count": 0,
+    "contradictions_detected": 0,
+    "error": null,
+    "notes": [
+      "Naive concatenated summary (no LLM): One of the things I love most about being a Tufts student is having a lively and vibrant community space like Davis Square just a five-minute shuttle ride away. Beyond being a grea"
+    ]
+  },
+  {
+    "case_id": "partial_coverage",
+    "system": "proposed",
+    "succeeded": true,
+    "latency_seconds": 8.147764500001358,
+    "tool_calls": 25,
+    "evidence_count": 20,
+    "avg_relevance_score": 0.53765,
+    "source_type_diversity": 2,
+    "topics_planned": 5,
+    "topics_covered": 5,
+    "claims_count": 0,
+    "contradictions_detected": 0,
+    "error": null,
+    "notes": [
+      "Evidence was found for planned topic 'student_amenities' but no claims could be extracted from it.",
+      "Evidence was found for planned topic 'housing' but no claims could be extracted from it.",
+      "Evidence was found for planned topic 'transportation' but no claims could be extracted from it."
+    ]
+  },
+  {
+    "case_id": "unresolvable_location",
+    "system": "baseline_b",
+    "succeeded": false,
+    "latency_seconds": 0.0007787000031385105,
+    "tool_calls": 0,
+    "evidence_count": 0,
+    "avg_relevance_score": null,
+    "source_type_diversity": 0,
+    "topics_planned": null,
+    "topics_covered": null,
+    "claims_count": 0,
+    "contradictions_detected": 0,
+    "error": "Could not resolve location: 'Nowhereville, XX'",
+    "notes": [
+      "Location could not be resolved; correctly failed rather than guessing."
+    ]
+  },
+  {
+    "case_id": "unresolvable_location",
+    "system": "proposed",
+    "succeeded": false,
+    "latency_seconds": 0.010384199998952681,
+    "tool_calls": 0,
+    "evidence_count": 0,
+    "avg_relevance_score": null,
+    "source_type_diversity": 0,
+    "topics_planned": null,
+    "topics_covered": null,
+    "claims_count": 0,
+    "contradictions_detected": 0,
+    "error": "Could not resolve location: 'Nowhereville, XX'",
+    "notes": [
+      "Location could not be resolved; correctly failed rather than guessing."
+    ]
+  }
+]

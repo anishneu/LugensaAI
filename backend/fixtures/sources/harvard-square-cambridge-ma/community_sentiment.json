@@ -9,5 +9,16 @@
     "snippet": "Long-running resident discussion thread with mixed opinions: some love the walkability and energy, others cite noise and tourist crowds.",
     "full_text": "A long-running community forum thread on living near Harvard Square shows mixed resident sentiment: many praise the walkability, transit access, and constant activity, while others cite tourist crowds, weekend noise, and rising rents as recurring frustrations.",
     "claim_text": "Community sentiment about living near Harvard Square is mixed: residents frequently cite walkability and energy as positives, and tourist crowds, noise, and rising rents as recurring complaints."
+  },
+  {
+    "url": "https://neighborhoodforums.example.net/cambridge/harvard-square-safety-update",
+    "title": "Recent reports thread: safety incidents near the T station",
+    "publisher": "Neighborhood Forums (fixture)",
+    "source_type": "community_forum",
+    "published_at": "2026-08-20T00:00:00Z",
+    "location_scope": "Cambridge, MA",
+    "snippet": "Several posters in the last month describe a phone-snatching incident and a late-night altercation near the Harvard Square T entrance; others say it's still no worse than any busy transit hub.",
+    "full_text": "A recent thread collects several posts from the past month: a few residents describe a phone-snatching incident and a late-night altercation near the Harvard Square T entrance, while other commenters push back, saying the incidents are isolated and the area is no worse than any busy transit hub. Posters generally agree it is worth being alert late at night regardless.",
+    "claim_text": "Some residents have recently reported isolated safety incidents (a phone-snatching, a late-night altercation) near the Harvard Square T entrance, though others describe the area as no worse than a typical busy transit hub."
   }
 ]

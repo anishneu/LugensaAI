@@ -20,6 +20,14 @@ class LocationNotFoundError(Exception):
     """Raised when a LocationResolverTool cannot resolve a raw query."""
 
 
+class ToolConfigurationError(Exception):
+    """Raised at construction time when a real tool is missing required config (e.g. an API key)."""
+
+
+class ToolExecutionError(Exception):
+    """Raised when a real tool's external call fails (network error, API error, timeout)."""
+
+
 class LocationResolverTool(ABC):
     @abstractmethod
     def resolve(self, raw_query: str) -> Location:
