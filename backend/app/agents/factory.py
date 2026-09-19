@@ -7,13 +7,12 @@ annotated claim extraction, template-based synthesis, keyword-only
 retrieval, in-process evidence storage backed by a local SQLite file. Zero
 network calls, zero API cost.
 
-Setting `ANTHROPIC_API_KEY` (billed) or `OLLAMA_ENABLED` (free, local, needs
-Ollama installed — see backend/README.md) swaps the planner, claim
-extractor, and synthesizer for their LLM-backed Milestone 2 counterparts;
-Anthropic takes priority if both are set. Setting `TAVILY_API_KEY` swaps the
+Setting `OLLAMA_ENABLED` (free, local, needs Ollama installed — see
+backend/README.md) swaps the planner, claim extractor, and synthesizer for
+their LLM-backed Milestone 2 counterparts. Setting `TAVILY_API_KEY` swaps the
 web search and page retrieval tools for their live Milestone 3 counterparts.
-Any of these can be set independently, but real search without either LLM
-option means evidence is collected without being turned into claims —
+Either can be set independently, but real search without the LLM option means
+evidence is collected without being turned into claims —
 `FixtureClaimExtractor` can't extract from real page text (see
 backend/README.md) — so `build_default_agent()` logs nothing special for
 that combination, it's just an honest, documented limitation rather than
@@ -48,14 +47,16 @@ from app.core.config import (
     TAVILY_API_KEY_ENV_VAR,
     TAVILY_MAX_RESULTS,
     AgentConfig,
-    anthropic_enabled,
     evidence_db_path,
+    GOOGLE_PLACES_API_KEY_ENV_VAR,
     geocoding_enabled,
     llm_enabled,
+    place_profile_enabled,
     search_enabled,
     semantic_retrieval_enabled,
+    translation_enabled,
 )
-from app.core.llm_service import AnthropicLLMService, LLMService, OllamaLLMService
+from app.core.llm_service import LLMService, OllamaLLMService
 from app.evidence.repository import EvidenceRepository
 from app.evidence.sqlite_repository import SQLiteEvidenceRepository
 from app.planning.llm_planner import LLMResearchPlanner
@@ -70,9 +71,11 @@ from app.synthesis.llm_synthesizer import LLMSynthesizer
 from app.synthesis.synthesizer import Synthesizer, TemplateSynthesizer
 from app.tools.base import LocationResolverTool, PageRetrievalTool, WebSearchTool
 from app.tools.composite import FallbackLocationResolver
+from app.tools.google_places_tool import GooglePlacesTool
 from app.tools.fixture_tools import FixtureLocationResolver, FixturePageRetrievalTool, FixtureWebSearchTool
 from app.tools.nominatim_tool import NominatimLocationResolverTool
 from app.tools.tavily_tools import TavilyPageRetrievalTool, TavilyWebSearchTool
+from app.tools.translation import default_translator
 from app.verification.verifier import EvidenceBasedClaimVerifier
 
 
@@ -106,7 +109,7 @@ def build_default_agent(
     synthesizer: Synthesizer
 
     if use_llm:
-        llm: LLMService = AnthropicLLMService() if anthropic_enabled() else OllamaLLMService()
+        llm: LLMService = OllamaLLMService()
         planner = LLMResearchPlanner(llm, fallback=KeywordResearchPlanner())
         claim_extractor = LLMClaimExtractor(llm, fallback=FixtureClaimExtractor())
         synthesizer = LLMSynthesizer(llm, fallback=TemplateSynthesizer())
@@ -120,7 +123,9 @@ def build_default_agent(
 
     if use_live_search:
         tavily_search = TavilyWebSearchTool(
-            api_key=os.environ.get(TAVILY_API_KEY_ENV_VAR), max_results=TAVILY_MAX_RESULTS
+            api_key=os.environ.get(TAVILY_API_KEY_ENV_VAR),
+            max_results=TAVILY_MAX_RESULTS,
+            translator=default_translator() if translation_enabled() else None,
         )
         web_search_tool = tavily_search
         page_retrieval_tool = TavilyPageRetrievalTool(tavily_search.raw_content_cache)
@@ -155,4 +160,7 @@ def build_default_agent(
         verifier=EvidenceBasedClaimVerifier(),
         synthesizer=synthesizer,
         config=config,
+        place_profile_tool=(
+            GooglePlacesTool(api_key=os.environ.get(GOOGLE_PLACES_API_KEY_ENV_VAR)) if place_profile_enabled() else None
+        ),
     )

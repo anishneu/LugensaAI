@@ -96,3 +96,37 @@ def test_live_feed_returns_empty_when_search_disabled():
 
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_capabilities_reports_the_free_default_configuration():
+    response = client.get("/api/capabilities")
+
+    assert response.status_code == 200
+    body = response.json()
+    # conftest forces every key and optional feature off for the test suite.
+    assert body["llm_provider"] == "none"
+    assert body["live_search"] is False
+    assert body["estimated_seconds_min"] < body["estimated_seconds_max"]
+
+
+def test_capabilities_reports_ollama_with_a_slower_estimate(monkeypatch):
+    monkeypatch.setenv("OLLAMA_ENABLED", "1")
+
+    body = client.get("/api/capabilities").json()
+
+    assert body["llm_provider"] == "ollama"
+    assert body["llm_model"]
+    # Local CPU inference is minutes, not seconds — the estimate must say so.
+    assert body["estimated_seconds_min"] >= 60
+
+
+def test_nearby_places_is_unavailable_when_live_lookups_are_disabled():
+    response = client.get("/api/places/nearby", params={"latitude": 42.37, "longitude": -71.11})
+
+    assert response.status_code == 503
+
+
+def test_place_profile_is_unavailable_without_a_google_key():
+    response = client.get("/api/places/profile", params={"name": "Cafe", "latitude": 1.0, "longitude": 2.0})
+
+    assert response.status_code == 503

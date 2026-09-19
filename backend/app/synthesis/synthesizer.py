@@ -127,8 +127,6 @@ class TemplateSynthesizer(Synthesizer):
         evidence: list[Evidence],
         topics_with_evidence: set[str] | None = None,
     ) -> SynthesisResult:
-        covered_topic_ids = {c.claim_type for c in claims}
-        evidence_topic_ids = topics_with_evidence if topics_with_evidence is not None else covered_topic_ids
         evidence_by_topic: dict[str, list[Evidence]] = {}
         for item in evidence:
             evidence_by_topic.setdefault(item.topic, []).append(item)

@@ -18,11 +18,12 @@ def _isolated_test_environment(monkeypatch, tmp_path):
     path inject a fake/scripted implementation directly instead of relying
     on env vars or real external resources.
     """
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("TAVILY_API_KEY", raising=False)
     monkeypatch.delenv("OLLAMA_ENABLED", raising=False)
+    monkeypatch.delenv("GOOGLE_PLACES_API_KEY", raising=False)
     monkeypatch.setenv("DISABLE_SEMANTIC_RETRIEVAL", "1")
     monkeypatch.setenv("DISABLE_LIVE_GEOCODING", "1")
+    monkeypatch.setenv("DISABLE_TRANSLATION", "1")
     monkeypatch.setenv("EVIDENCE_DB_PATH", str(tmp_path / "evidence.db"))
 
 

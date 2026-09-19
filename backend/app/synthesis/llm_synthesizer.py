@@ -34,12 +34,16 @@ Three things are deliberately kept out of the LLM's hands:
 
 from __future__ import annotations
 
+import html
+import re
+
 from app.core.llm_json import parse_json_object
 from app.core.llm_service import LLMService, LLMServiceError
 from app.models.claim import Claim
 from app.models.evidence import Evidence
 from app.models.location import Location
 from app.models.plan import ResearchPlan
+from app.synthesis.excerpt import best_excerpt, query_terms
 from app.synthesis.synthesizer import (
     Synthesizer,
     SynthesisResult,
@@ -80,6 +84,8 @@ _SYSTEM_PROMPT = (
     "- Never state the recommendation as universally or definitely correct — acknowledge it depends "
     "on personal circumstances.\n"
     "- Keep prose concise: summarize, don't copy long passages verbatim.\n\n"
+    "Write every field in English, as plain text — no HTML tags, no markdown. If an excerpt was "
+    "machine-translated from another language, say so where it matters.\n"
     "Respond with a single strict JSON object and nothing else: no markdown fences, no commentary."
 )
 
@@ -120,7 +126,8 @@ def _format_claims(claims: list[Claim]) -> str:
     return "\n".join(lines) if lines else "(no claims were verified)"
 
 
-def _format_evidence(evidence: list[Evidence]) -> str:
+def _format_evidence(evidence: list[Evidence], question: str = "", place_name: str = "") -> str:
+    terms = query_terms(question, place_name)
     by_topic: dict[str, list[Evidence]] = {}
     for item in evidence:
         by_topic.setdefault(item.topic, []).append(item)
@@ -129,13 +136,24 @@ def _format_evidence(evidence: list[Evidence]) -> str:
     for topic_id, items in by_topic.items():
         lines.append(f"Topic: {topic_id}")
         for item in items:
-            snippet = item.text
-            if len(snippet) > _MAX_EVIDENCE_SNIPPET_FOR_SYNTHESIS:
-                snippet = snippet[:_MAX_EVIDENCE_SNIPPET_FOR_SYNTHESIS].rsplit(" ", 1)[0] + "…"
+            snippet = best_excerpt(item.text, terms, _MAX_EVIDENCE_SNIPPET_FOR_SYNTHESIS)
             date = item.published_at.date().isoformat() if item.published_at else "date unknown"
             lines.append(f'- [{item.source_type.value}] ({item.publisher or "unknown source"}, {date}): "{snippet}"')
         lines.append("")
     return "\n".join(lines) if lines else "(no evidence was collected)"
+
+
+_PARAGRAPH_BREAK_RE = re.compile(r"</p>\s*<p[^>]*>|<br\s*/?>", re.IGNORECASE)
+_HTML_TAG_RE = re.compile(r"</?[a-zA-Z][^>]*>")
+
+
+def _plain_text(text: str) -> str:
+    """Small local models sometimes wrap prose in HTML (`<p>...</p>`) despite
+    being told not to. Paragraph tags become blank lines, every other tag is
+    dropped, and entities are decoded — the words themselves are untouched."""
+    text = _PARAGRAPH_BREAK_RE.sub("\n\n", text)
+    text = _HTML_TAG_RE.sub("", text)
+    return html.unescape(text).strip()
 
 
 def _contains_absolute_phrase(*texts: str) -> bool:
@@ -186,7 +204,7 @@ class LLMSynthesizer(Synthesizer):
             f"Location: {location_label}\n"
             f'Question: "{question}"\n\n'
             f"Verified claims:\n{_format_claims(claims)}\n\n"
-            f"Raw evidence excerpts:\n{_format_evidence(evidence)}\n\n"
+            f"Raw evidence excerpts:\n{_format_evidence(evidence, question, location.name)}\n\n"
             f"Respond with JSON matching exactly this shape:\n{_RESPONSE_SHAPE}"
         )
 
@@ -209,4 +227,9 @@ class LLMSynthesizer(Synthesizer):
         if _contains_absolute_phrase(summary, recommendation, details):
             raise ValueError("LLM synthesis used disallowed absolute language")
 
-        return summary, key_findings, details, recommendation
+        return (
+            _plain_text(summary),
+            [_plain_text(finding) for finding in key_findings],
+            _plain_text(details),
+            _plain_text(recommendation),
+        )

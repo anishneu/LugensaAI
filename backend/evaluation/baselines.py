@@ -6,8 +6,7 @@ linking, no verification: one search call per question, and a "summary"
 that is just the first few snippets concatenated — deliberately not using an
 LLM, so this baseline is honest about being naive rather than a strawman
 dressed up to look worse than it is. Baseline A (a plain LLM call with no
-tools) is not implemented here because this environment has no
-`ANTHROPIC_API_KEY` configured — see the evaluation report in
+tools) is not implemented here — see the evaluation report in
 docs/evaluation.md for what that means for these results' scope.
 """
 

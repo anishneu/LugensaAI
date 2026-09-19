@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import type { QuerySession } from "../types";
+import { fetchCapabilities } from "../api";
+import type { Capabilities, QuerySession } from "../types";
 import { cleanDisplayText } from "../textUtils";
 import { ClaimsList } from "./ClaimsList";
 import { CommunityVoices } from "./CommunityVoices";
@@ -16,9 +17,69 @@ const VOICE_SOURCE_TYPES = new Set(["community_forum", "review_aggregator"]);
 
 type TabId = "overview" | "community" | "claims" | "evidence" | "details";
 
+function formatDuration(totalSeconds: number): string {
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+/** Elapsed time is the real measurement; the estimate beside it only sets
+ * expectations, because run time swings from seconds to minutes depending on
+ * whether a local model is doing the reasoning. Once elapsed passes the
+ * estimate, the estimate is dropped rather than left contradicting the clock. */
+function ResearchProgress({
+  startedAt,
+  capabilities,
+}: {
+  startedAt: string;
+  capabilities: Capabilities | null;
+}) {
+  const [elapsed, setElapsed] = useState(() => Math.max(0, Math.round((Date.now() - new Date(startedAt).getTime()) / 1000)));
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setElapsed(Math.max(0, Math.round((Date.now() - new Date(startedAt).getTime()) / 1000)));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [startedAt]);
+
+  const overEstimate = capabilities != null && elapsed > capabilities.estimated_seconds_max;
+
+  return (
+    <div className="research-progress">
+      <span className="research-elapsed">{formatDuration(elapsed)} elapsed</span>
+      {capabilities && !overEstimate && (
+        <span className="research-estimate">
+          {" · "}usually {formatDuration(capabilities.estimated_seconds_min)}–
+          {formatDuration(capabilities.estimated_seconds_max)}
+        </span>
+      )}
+      {overEstimate && <span className="research-estimate">{" · "}taking longer than usual, still working</span>}
+      {capabilities?.first_run_warmup && (
+        <p className="research-progress-note">
+          First question since the server started — it also loads the local search model, a one-time cost the
+          next questions won't pay.
+        </p>
+      )}
+      {capabilities?.llm_provider === "ollama" && (
+        <p className="research-progress-note">
+          Reasoning locally via Ollama ({capabilities.llm_model}) — speed depends on whether Ollama is using a GPU (a few minutes) or only the CPU (much longer).
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function ResponsePanel({ session }: ResponsePanelProps) {
   const [sortMode, setSortMode] = useState<EvidenceSortMode>("relevance");
   const [activeTab, setActiveTab] = useState<TabId>("overview");
+  const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
+
+  // Config-derived, so it's fetched once rather than per question.
+  useEffect(() => {
+    fetchCapabilities().then(setCapabilities);
+  }, []);
 
   // Each question is its own little "document" — start back on Overview
   // rather than leaving the reader stranded on whatever tab the last
@@ -41,6 +102,7 @@ export function ResponsePanel({ session }: ResponsePanelProps) {
         <div className="loading-spinner" />
         <p>Researching “{session.question}”…</p>
         <p className="loading-subtext">Planning topics, retrieving evidence, verifying claims.</p>
+        <ResearchProgress startedAt={session.askedAt} capabilities={capabilities} />
       </div>
     );
   }

@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { useLocation as useRouterLocation } from "react-router-dom";
-import { fetchLocationSuggestions, ResearchApiError, runResearch } from "../api";
+import { fetchLocationSuggestions, ResearchApiError, runResearch, searchPlaces } from "../api";
 import { ChatSidebar } from "../components/ChatSidebar";
+import { NearbyCard } from "../components/NearbyCard";
+import { PlaceProfileCard } from "../components/PlaceProfileCard";
 import { LiveFeedSidebar } from "../components/LiveFeedSidebar";
 import { ResponsePanel } from "../components/ResponsePanel";
 import { SearchHero } from "../components/SearchHero";
@@ -59,6 +61,28 @@ export function ResearchWorkspace() {
       country: null,
       latitude: null,
       longitude: null,
+      isBusiness: false,
+    });
+
+    // Geocode right away so the map shows the right place immediately, rather
+    // than sitting empty until the first (slow) research answer comes back.
+    searchPlaces(text).then((places) => {
+      const top = places[0];
+      if (!top) return;
+      setLocation((prev) =>
+        prev && prev.rawQuery === text && prev.latitude == null
+          ? {
+              ...prev,
+              displayName: `${top.name}${top.city ? `, ${top.city}` : ""}`,
+              city: top.city,
+              region: top.region,
+              country: top.country,
+              latitude: top.latitude,
+              longitude: top.longitude,
+              isBusiness: top.is_business,
+            }
+          : prev,
+      );
     });
   }
 
@@ -86,6 +110,7 @@ export function ResearchWorkspace() {
       const response = await runResearch({
         location: location.rawQuery,
         question,
+        is_business: location.isBusiness,
         latitude: location.latitude,
         longitude: location.longitude,
         city: location.city,
@@ -103,6 +128,7 @@ export function ResearchWorkspace() {
                 city: response.location.city,
                 region: response.location.region,
                 country: response.location.country,
+                isBusiness: response.location.is_business,
                 latitude: response.location.latitude,
                 longitude: response.location.longitude,
               }
@@ -142,6 +168,8 @@ export function ResearchWorkspace() {
           busy={busy}
         />
         <main className="workspace-center">
+          <PlaceProfileCard location={location} />
+          <NearbyCard location={location} />
           <ResponsePanel session={activeSession} />
         </main>
         <LiveFeedSidebar location={location} />

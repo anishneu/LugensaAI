@@ -1,279 +1,226 @@
-import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { motion, useReducedMotion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
-import "./LandingPage.css";
 
-interface DemoExample {
-  location: string;
-  question: string;
-  stages: string[];
-  answer: string;
-  sources: string[];
-}
+const EXAMPLE_PLACES = ["Starbucks, Cambridge, MA", "Harvard Square, Cambridge, MA", "Henn na Hotel, Tokyo"];
 
-// Illustrative only — a scripted walkthrough of the real pipeline stages, not
-// a live query. Every question/location here is also usable as a real
-// example chip below, so nothing shown here is a claim this app can't back.
-const DEMO_EXAMPLES: DemoExample[] = [
+const STEPS = [
   {
-    location: "Starbucks, Cambridge, MA",
-    question: "Is it safe nearby, and is there a bar close by?",
-    stages: ["Resolving location", "Planning: safety, nightlife", "Retrieving evidence", "Verifying claims", "Synthesizing answer"],
-    answer:
-      "Recent sources checked show Cambridge's overall crime rate near the state average, with no reported incidents near this address in the past week. Several bars are within a short walk.",
-    sources: ["cambridgepolice.gov", "yelp.com", "tripadvisor.com"],
+    title: "Resolve the place",
+    body: "A neighborhood, a specific business, or a street address, anywhere in the world. Names come back in English.",
   },
   {
-    location: "Harvard Square, Cambridge, MA",
-    question: "Would this be a good place for a college student?",
-    stages: ["Resolving location", "Planning: housing, nightlife, transit", "Retrieving evidence", "Verifying claims", "Synthesizing answer"],
-    answer:
-      "Reviewers consistently highlight walkability and a dense nightlife scene. Rent nearby runs above the city median, per two independent listings sites.",
-    sources: ["apartments.com", "reddit.com/r/cambridgema", "mbta.com"],
+    title: "Plan the research",
+    body: "Your question decides which topics matter. A narrow question skips research it doesn't need.",
   },
   {
-    location: "A cafe near Savin Hill, Boston, MA",
-    question: "How is the cafe, and how close is it to the subway?",
-    stages: ["Resolving location", "Planning: reviews, transit", "Retrieving evidence", "Verifying claims", "Synthesizing answer"],
-    answer:
-      "Customer reviews describe the coffee and service positively; the nearest Red Line station is roughly a 3-minute walk, per transit mapping data.",
-    sources: ["tripadvisor.com", "mbta.com"],
+    title: "Gather evidence",
+    body: "Real web search plus forum and review commentary, filtered for relevance to the exact place. Foreign-language pages are translated, and labeled as translated.",
+  },
+  {
+    title: "Verify the claims",
+    body: "A fixed, non-AI checker decides what the evidence actually supports. The part that proposes a claim never gets to approve it.",
+  },
+  {
+    title: "Answer with sources",
+    body: "A hedged, cited answer. What couldn't be confirmed is stated plainly, not smoothed over.",
   },
 ];
 
-const TYPE_SPEED_MS = 28;
-const STAGE_STEP_MS = 550;
-const ANSWER_HOLD_MS = 4200;
+const PRINCIPLES = [
+  { title: "Every fact has a source", body: "A statement either traces to a passage you can open, or it isn't stated." },
+  { title: "Dates are the source's own", body: "A post shows when it was actually published. If the date is unknown, it says so instead of saying “just now.”" },
+  { title: "Translation is labeled", body: "Machine-translated text is marked as such, and the original is one click away." },
+  { title: "Gaps are reported", body: "Missing coverage, weak sources and disagreements between sources are shown, not hidden." },
+];
 
-function usePipelineDemo() {
-  const [exampleIndex, setExampleIndex] = useState(0);
-  const [typedQuestion, setTypedQuestion] = useState("");
-  const [activeStage, setActiveStage] = useState(-1);
-  const [showAnswer, setShowAnswer] = useState(false);
-  const timers = useRef<number[]>([]);
-
-  useEffect(() => {
-    const example = DEMO_EXAMPLES[exampleIndex];
-    timers.current.forEach(window.clearTimeout);
-    timers.current = [];
-    setTypedQuestion("");
-    setActiveStage(-1);
-    setShowAnswer(false);
-
-    let charIndex = 0;
-    const typeNext = () => {
-      charIndex += 1;
-      setTypedQuestion(example.question.slice(0, charIndex));
-      if (charIndex < example.question.length) {
-        timers.current.push(window.setTimeout(typeNext, TYPE_SPEED_MS));
-      } else {
-        example.stages.forEach((_, i) => {
-          timers.current.push(
-            window.setTimeout(() => setActiveStage(i), 400 + i * STAGE_STEP_MS),
-          );
-        });
-        const afterStages = 400 + example.stages.length * STAGE_STEP_MS + 400;
-        timers.current.push(window.setTimeout(() => setShowAnswer(true), afterStages));
-        timers.current.push(
-          window.setTimeout(
-            () => setExampleIndex((i) => (i + 1) % DEMO_EXAMPLES.length),
-            afterStages + ANSWER_HOLD_MS,
-          ),
-        );
-      }
-    };
-    timers.current.push(window.setTimeout(typeNext, 300));
-
-    return () => timers.current.forEach(window.clearTimeout);
-  }, [exampleIndex]);
-
-  return { example: DEMO_EXAMPLES[exampleIndex], typedQuestion, activeStage, showAnswer };
+function Reveal({ children, className }: { children: ReactNode; className?: string }) {
+  const reduce = useReducedMotion();
+  return (
+    <motion.div
+      className={className}
+      initial={reduce ? false : { opacity: 0, y: 14 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, amount: 0.25 }}
+      transition={{ duration: 0.4, ease: "easeOut" }}
+    >
+      {children}
+    </motion.div>
+  );
 }
 
-function useRevealOnScroll() {
-  useEffect(() => {
-    const targets = document.querySelectorAll(".reveal");
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            entry.target.classList.add("revealed");
-            observer.unobserve(entry.target);
-          }
-        }
-      },
-      { threshold: 0.15 },
-    );
-    targets.forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
-  }, []);
+const BUTTON =
+  "inline-flex items-center gap-2 rounded-md bg-[var(--l-ink)] px-5 py-3 text-[15px] font-semibold text-[var(--l-bg)] transition-opacity hover:opacity-85";
+
+/** A static, clearly labeled sample of what an answer looks like. Not a live
+ * query — no numbers or claims here are presented as real measurements. */
+function SampleAnswer() {
+  return (
+    <figure className="m-0 rounded-lg border border-[var(--l-rule)] bg-[var(--l-card)] p-6 shadow-[0_1px_0_var(--l-rule)]">
+      <div className="mb-4 flex items-center justify-between text-[11px] uppercase tracking-[0.12em] text-[var(--l-muted)]">
+        <span>Sample answer</span>
+        <span>Illustrative, not a live query</span>
+      </div>
+
+      <p className="m-0 text-[13px] text-[var(--l-muted)]">📍 Harvard Square, Cambridge, MA</p>
+      <p className="mt-1 mb-4 font-serif text-xl leading-snug text-[var(--l-ink)]">
+        Would this be a good place for a college student?
+      </p>
+
+      <p className="m-0 text-[15px] leading-relaxed text-[var(--l-ink)]">
+        Reviewers describe the area as walkable, with a dense mix of cafes and bars<sup className="text-[var(--l-accent)]">1</sup>.
+        Rent nearby runs above the city median on both listing sites checked<sup className="text-[var(--l-accent)]">2</sup>,
+        and the Red Line stop is at the square<sup className="text-[var(--l-accent)]">3</sup>.
+      </p>
+
+      <ol className="mt-5 mb-0 flex list-none flex-col gap-2 border-t border-[var(--l-rule)] p-0 pt-4 text-[13px]">
+        {[
+          ["1", "reddit.com/r/cambridgema", "community forum"],
+          ["2", "apartments.com", "listing site"],
+          ["3", "mbta.com", "transit authority"],
+        ].map(([n, domain, kind]) => (
+          <li key={n} className="flex items-baseline gap-2.5">
+            <span className="w-3 text-[var(--l-accent)]">{n}</span>
+            <span className="text-[var(--l-ink)]">{domain}</span>
+            <span className="text-[var(--l-muted)]">· {kind}</span>
+          </li>
+        ))}
+      </ol>
+
+      <p className="mt-4 mb-0 rounded-md bg-[var(--l-bg)] px-3 py-2 text-[12.5px] leading-relaxed text-[var(--l-muted)]">
+        <strong className="font-semibold text-[var(--l-ink)]">Not confirmed:</strong> noise levels late at night. No
+        source checked covered it.
+      </p>
+    </figure>
+  );
 }
 
 export function LandingPage() {
   const navigate = useNavigate();
-  const { example, typedQuestion, activeStage, showAnswer } = usePipelineDemo();
-  useRevealOnScroll();
 
-  function tryExample(loc: string) {
-    navigate("/app", { state: { seedQuery: loc } });
+  function tryExample(place: string) {
+    navigate("/app", { state: { seedQuery: place } });
   }
 
   return (
-    <div className="landing">
-      <div className="landing-glow" aria-hidden="true" />
-      <div className="landing-hero">
-      <div className="landing-content">
-        <span className="landing-eyebrow">Agentic AI · Retrieval-Augmented Reasoning</span>
-        <h1>
-          Lugensa<span className="landing-accent">AI</span>
-        </h1>
-        <p className="landing-subtitle">An Agentic Location Web Intelligence System</p>
-        <p className="landing-description">
-          Ask a real question about a real place — <em>"Would this be a good place for a college
-          student?"</em> — and watch an autonomous research agent decide what to investigate,
-          gather evidence from multiple sources, verify its own claims, and answer with citations
-          instead of a guess.
-        </p>
-
-        <button type="button" className="get-started-button" onClick={() => navigate("/app")}>
-          Get Started
-          <span aria-hidden="true">→</span>
+    <div className="landing min-h-screen bg-[var(--l-bg)] text-[var(--l-ink)]">
+      <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
+        <span className="font-serif text-xl font-semibold tracking-tight text-[var(--l-ink)]">Lugensa</span>
+        <button
+          type="button"
+          onClick={() => navigate("/app")}
+          className="text-sm font-medium text-[var(--l-ink)] underline decoration-[var(--l-rule)] underline-offset-4 hover:decoration-[var(--l-ink)]"
+        >
+          Open the app
         </button>
+      </header>
 
-        <div className="landing-example-chips">
-          <span className="example-chips-label">Try it on:</span>
-          {DEMO_EXAMPLES.map((ex) => (
-            <button key={ex.location} type="button" className="example-chip" onClick={() => tryExample(ex.location)}>
-              {ex.location}
-            </button>
-          ))}
-        </div>
-
-        <div className="landing-features">
-          <div className="feature-card">
-            <span className="feature-icon">🧭</span>
-            <h3>Adaptive planning</h3>
-            <p>Decomposes your question into the research topics that actually matter for it.</p>
-          </div>
-          <div className="feature-card">
-            <span className="feature-icon">📎</span>
-            <h3>Cited evidence</h3>
-            <p>Every claim links back to a real source — nothing asserted without a passage behind it.</p>
-          </div>
-          <div className="feature-card">
-            <span className="feature-icon">⚖️</span>
-            <h3>Honest verification</h3>
-            <p>Flags contradictions, stale sources, and gaps instead of hiding them.</p>
-          </div>
-        </div>
-
-        <div className="scroll-cue" aria-hidden="true">
-          <span>See it in action</span>
-          <span className="scroll-cue-arrow">↓</span>
-        </div>
-      </div>
-      </div>
-
-      <section className="landing-section reveal">
-        <div className="section-inner">
-          <span className="section-eyebrow">See it in action</span>
-          <h2>Watch the agent think</h2>
-          <p className="section-lede">
-            An illustrative walkthrough of the real pipeline stages — not a live query, but the
-            same sequence and honesty standard every real question goes through.
-          </p>
-
-          <div className="demo-panel">
-            <div className="demo-panel-top">
-              <span className="demo-location-pin">📍 {example.location}</span>
-            </div>
-            <p className="demo-question">
-              “{typedQuestion}
-              <span className="demo-cursor" aria-hidden="true">▍</span>
-              ”
+      <main>
+        <section className="mx-auto grid max-w-6xl items-center gap-12 px-6 pt-10 pb-24 md:grid-cols-[1.1fr_0.9fr] md:pt-20">
+          <div>
+            <p className="m-0 mb-5 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--l-accent)]">
+              Location research with receipts
+            </p>
+            <h1 className="m-0 font-serif text-[clamp(38px,6vw,64px)] font-medium leading-[1.05] tracking-tight text-[var(--l-ink)]">
+              Ask about any place. Get an answer you can check.
+            </h1>
+            <p className="mt-6 mb-0 max-w-[34rem] text-[17px] leading-relaxed text-[var(--l-muted)]">
+              Lugensa researches a neighborhood, a business, or an address across the open web, in any language,
+              then answers your question with a source next to every claim, and tells you what it couldn't confirm.
             </p>
 
-            <div className="demo-stages">
-              {example.stages.map((stage, i) => (
-                <div
-                  key={stage}
-                  className={`demo-stage ${i <= activeStage ? "active" : ""} ${i === activeStage ? "current" : ""}`}
-                >
-                  <span className="demo-stage-dot" />
-                  {stage}
-                </div>
+            <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3">
+              <button type="button" className={BUTTON} onClick={() => navigate("/app")}>
+                Research a place <span aria-hidden="true">→</span>
+              </button>
+              <a
+                href="#how-it-works"
+                className="text-[15px] font-medium text-[var(--l-ink)] underline decoration-[var(--l-rule)] underline-offset-4 hover:decoration-[var(--l-ink)]"
+              >
+                How it works
+              </a>
+            </div>
+
+            <p className="mt-8 mb-0 text-[13px] text-[var(--l-muted)]">
+              Try:{" "}
+              {EXAMPLE_PLACES.map((place, i) => (
+                <span key={place}>
+                  {i > 0 && " · "}
+                  <button
+                    type="button"
+                    onClick={() => tryExample(place)}
+                    className="cursor-pointer border-none bg-transparent p-0 text-[13px] text-[var(--l-ink)] underline decoration-[var(--l-rule)] underline-offset-4 hover:decoration-[var(--l-ink)]"
+                  >
+                    {place}
+                  </button>
+                </span>
+              ))}
+            </p>
+          </div>
+
+          <SampleAnswer />
+        </section>
+
+        <section id="how-it-works" className="border-t border-[var(--l-rule)]">
+          <div className="mx-auto grid max-w-6xl gap-10 px-6 py-24 md:grid-cols-[0.8fr_1.2fr]">
+            <Reveal>
+              <h2 className="m-0 font-serif text-[clamp(28px,4vw,40px)] font-medium leading-tight tracking-tight text-[var(--l-ink)]">
+                Five steps, every question
+              </h2>
+              <p className="mt-4 mb-0 max-w-sm text-[15px] leading-relaxed text-[var(--l-muted)]">
+                The same sequence runs every time, so an answer is never just a model's best guess.
+              </p>
+            </Reveal>
+
+            <ol className="m-0 flex list-none flex-col p-0">
+              {STEPS.map((step, i) => (
+                <li key={step.title}>
+                  <Reveal className="grid grid-cols-[2.25rem_1fr] gap-4 border-t border-[var(--l-rule)] py-6 first:border-t-0 first:pt-0">
+                    <span className="font-serif text-lg text-[var(--l-accent)]">{i + 1}</span>
+                    <div>
+                      <h3 className="m-0 mb-1 text-base font-semibold text-[var(--l-ink)]">{step.title}</h3>
+                      <p className="m-0 text-[15px] leading-relaxed text-[var(--l-muted)]">{step.body}</p>
+                    </div>
+                  </Reveal>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </section>
+
+        <section className="border-t border-[var(--l-rule)]">
+          <div className="mx-auto max-w-6xl px-6 py-24">
+            <Reveal>
+              <h2 className="m-0 mb-12 max-w-xl font-serif text-[clamp(28px,4vw,40px)] font-medium leading-tight tracking-tight text-[var(--l-ink)]">
+                What it will and won't do
+              </h2>
+            </Reveal>
+            <div className="grid gap-x-10 gap-y-10 sm:grid-cols-2">
+              {PRINCIPLES.map((p) => (
+                <Reveal key={p.title} className="border-t border-[var(--l-ink)] pt-4">
+                  <h3 className="m-0 mb-2 text-base font-semibold text-[var(--l-ink)]">{p.title}</h3>
+                  <p className="m-0 text-[15px] leading-relaxed text-[var(--l-muted)]">{p.body}</p>
+                </Reveal>
               ))}
             </div>
-
-            <div className={`demo-answer ${showAnswer ? "visible" : ""}`}>
-              <p>{example.answer}</p>
-              <div className="demo-sources">
-                {example.sources.map((s) => (
-                  <span key={s} className="demo-source-chip">
-                    {s}
-                  </span>
-                ))}
-              </div>
-            </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section className="landing-section reveal">
-        <div className="section-inner">
-          <span className="section-eyebrow">How it works</span>
-          <h2>Five stages, every time</h2>
-          <div className="how-it-works-grid">
-            <div className="how-step">
-              <span className="how-step-number">1</span>
-              <h3>Resolve</h3>
-              <p>Any real place — a neighborhood, a specific business, an address — not just a fixed list.</p>
-            </div>
-            <div className="how-step">
-              <span className="how-step-number">2</span>
-              <h3>Plan</h3>
-              <p>Your question decides which topics matter — a narrow question skips irrelevant research.</p>
-            </div>
-            <div className="how-step">
-              <span className="how-step-number">3</span>
-              <h3>Retrieve</h3>
-              <p>Real web search and community sources, scored and filtered for relevance.</p>
-            </div>
-            <div className="how-step">
-              <span className="how-step-number">4</span>
-              <h3>Verify</h3>
-              <p>A fixed, non-LLM checker decides what's actually supported — never the component that proposed it.</p>
-            </div>
-            <div className="how-step">
-              <span className="how-step-number">5</span>
-              <h3>Answer</h3>
-              <p>A cited, hedged answer — with what couldn't be confirmed stated plainly, not hidden.</p>
-            </div>
+        <section className="border-t border-[var(--l-rule)]">
+          <div className="mx-auto flex max-w-6xl flex-col items-start gap-6 px-6 py-24 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="m-0 max-w-md font-serif text-[clamp(26px,3.6vw,36px)] font-medium leading-tight tracking-tight text-[var(--l-ink)]">
+              Pick a place and ask what you'd actually want to know.
+            </h2>
+            <button type="button" className={BUTTON} onClick={() => navigate("/app")}>
+              Research a place <span aria-hidden="true">→</span>
+            </button>
           </div>
-        </div>
-      </section>
+        </section>
+      </main>
 
-      <section className="landing-section reveal">
-        <div className="section-inner">
-          <div className="principles-row">
-            <div className="principle-badge">
-              <strong>No fabricated facts</strong>
-              <span>Every stated fact traces to a real, cited passage.</span>
-            </div>
-            <div className="principle-badge">
-              <strong>Verification isn't optional</strong>
-              <span>Claim status is decided deterministically — never assumed.</span>
-            </div>
-            <div className="principle-badge">
-              <strong>Limitations, always shown</strong>
-              <span>Gaps and fallbacks are reported, not smoothed over.</span>
-            </div>
-          </div>
-          <button type="button" className="get-started-button secondary" onClick={() => navigate("/app")}>
-            Start researching a place
-            <span aria-hidden="true">→</span>
-          </button>
-        </div>
-      </section>
+      <footer className="border-t border-[var(--l-rule)] px-6 py-6 text-center text-xs text-[var(--l-muted)]">
+        Map data © OpenStreetMap contributors
+      </footer>
     </div>
   );
 }

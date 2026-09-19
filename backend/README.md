@@ -2,8 +2,8 @@
 
 The research pipeline described in [`docs/architecture.md`](../docs/architecture.md). By
 default it runs fully free and mostly offline: fixture-backed tools, rule-based planning,
-keyword retrieval, local SQLite storage. Setting `ANTHROPIC_API_KEY`/`OLLAMA_ENABLED` and/or
-`TAVILY_API_KEY` opts into LLM-backed reasoning and live web search respectively (independent of
+keyword retrieval, local SQLite storage. Setting `OLLAMA_ENABLED` and/or `TAVILY_API_KEY` opts
+into LLM-backed reasoning (a free local model) and live web search respectively (independent of
 each other); having `sentence-transformers` installed opts into hybrid semantic retrieval
 automatically. See below for all of these.
 
@@ -58,6 +58,35 @@ had been collected. Two changes fixed this:
 Both synthesizers still never get to invent a limitation — coverage gaps, per-claim caveats, and
 the contradiction-detection caveat are computed in code (`deterministic_limitations()`) and
 appended regardless of what either synthesizer wrote.
+
+## What makes a run slow
+
+Run time is dominated by two things, in this order:
+
+1. **Loading the semantic-retrieval model.** `sentence-transformers` reads a
+   real model off disk, which takes about a minute. A fresh retriever is built
+   per research run, so this used to be paid on *every* request; it's now
+   cached per process (`_MODEL_CACHE` in
+   `app/retrieval/semantic_retriever.py`), making it a one-time cost on the
+   first request after a restart. Measured with the LLM off, the same run took
+   **67.4s cold and 6.3s warm** — so this caching is worth roughly 10x on
+   every request after the first. `DISABLE_SEMANTIC_RETRIEVAL=1` removes the
+   cost entirely, at the price of keyword-only retrieval.
+2. **LLM inference, if an LLM is enabled.** Minutes on a CPU, seconds to a minute or two
+   on a GPU (see "Choosing the local model" below). Reading the prompt dominates, which is why
+   the claim-extraction prompt caps each evidence passage
+   (`_MAX_EVIDENCE_CHARS_FOR_EXTRACTION`) and `best_excerpt` picks the relevant passage of a
+   page rather than shipping full page extracts.
+
+Per-topic web searches run concurrently (`_MAX_SEARCH_WORKERS` in
+`app/agents/location_research_agent.py`), so N topics cost roughly one search
+round trip rather than N. Only the searches are parallel — scoring, evidence
+enrichment, and the SQLite writes stay on one thread and in topic order, so
+results remain deterministic.
+
+`GET /api/capabilities` reports which of these are active along with a rough
+expected duration range, which the UI shows beside a live elapsed timer while
+a question runs.
 
 ## Live feed: regional, not location-specific
 
@@ -115,60 +144,82 @@ Copy `.env.example` to `.env` (gitignored, never committed) and fill in whicheve
 cp .env.example .env
 ```
 
-**`ANTHROPIC_API_KEY`** — opts into `LLMResearchPlanner`, `LLMClaimExtractor`, and
-`LLMSynthesizer` in place of the rule-based/fixture-based defaults. Billed per Anthropic's normal
-usage pricing once set (the default model, `claude-haiku-4-5`, is inexpensive; override with
-`ANTHROPIC_MODEL`).
-
-**`OLLAMA_ENABLED`** — a free, local alternative to `ANTHROPIC_API_KEY` for the same three
-components, via [Ollama](https://ollama.com) running on this machine. No API key, no per-token
-billing, but it needs Ollama installed and a model pulled first:
+**`OLLAMA_ENABLED`** — opts into `LLMResearchPlanner`, `LLMClaimExtractor` and `LLMSynthesizer` in
+place of the rule-based/fixture-based defaults, using a model running on this machine through
+[Ollama](https://ollama.com). No API key, no per-token billing, and nothing leaves the machine. The
+project has no billed model API by design.
 
 ```bash
-# 1. install Ollama (see ollama.com/download for macOS/Linux/Windows installers)
-# 2. pull a model once (a few GB download; llama3.1 is the default)
-ollama pull llama3.1
-# 3. make sure the server is running (the installer usually starts this automatically)
-ollama serve
-# 4. in backend/.env:
+# 1. install Ollama (ollama.com/download)
+# 2. pull the model once (~19GB)
+ollama pull qwen3:30b
+# 3. in backend/.env:
 OLLAMA_ENABLED=1
 ```
 
-Override the model with `OLLAMA_MODEL` (must match a model you've pulled) and the server address
-with `OLLAMA_BASE_URL` (default `http://localhost:11434`). If `ANTHROPIC_API_KEY` is also set,
-Anthropic takes priority — see `app/agents/factory.py`. Inference speed and quality depend entirely
-on this machine's hardware and the model chosen; a smaller model (e.g. `llama3.2` or a `:3b`-class
-model) trades quality for speed if the default is too slow.
+Override the model with `OLLAMA_MODEL` (it must be pulled) and the server with `OLLAMA_BASE_URL`
+(default `http://localhost:11434`). If a call fails or times out (`OLLAMA_TIMEOUT_SECONDS`, default
+600), that component falls back to its deterministic counterpart and says so in `limitations`.
 
-**CPU-only inference is genuinely slow, not a bug** — measured on one CPU-only machine (no GPU
-offload), claim extraction over ~12 evidence passages (the largest of the three LLM-backed calls,
-since it includes every retrieved passage's full text) took 3.5–6 minutes; the planner and
-synthesizer calls are smaller and noticeably faster. `OLLAMA_TIMEOUT_SECONDS` (default `600`)
-gives each call generous headroom before falling back to the deterministic path — raise it further
-if a call is timing out on slower hardware, or lower it if you'd rather fail fast to the free
-rule-based fallback than wait minutes per question. A GPU-backed Ollama install is dramatically
-faster if available.
+### Choosing the local model
 
-**Model size is a real tradeoff for claim extraction specifically**, measured on the same machine
-with real live-search evidence: `llama3.1` (8B) sometimes cites evidence ids correctly and produces
-real grounded claims, but not reliably — the same evidence sometimes yields grounded claims and
-sometimes doesn't, and each attempt costs several slow CPU-bound minutes. `llama3.2:3b` is roughly
-3x faster but consistently failed to copy the literal `[evidence_id]` token verbatim — it
-substitutes a source name it noticed inside the passage text instead (e.g. writing `"FBI Uniform
-Crime Reporting (UCR) data"` instead of `"tavily:safety:982ec06c37ea"`), even with an explicit
-worked example added to the system prompt (`_SYSTEM_PROMPT` in `app/synthesis/llm_claim_extractor.py`).
-`LLMClaimExtractor`'s grounding safeguard correctly drops every one of those miscited claims and
-falls back rather than showing a fabricated citation, so this never produces a wrong answer — it
-just means claim extraction with a 3B-class model will consistently report "insufficient evidence"
-even when the planner/synthesizer's own LLM-generated topic reasoning and prose are working fine.
-There isn't a known prompt fix for this within the 3B class; a larger model is the lever that
-actually helps, at the cost of speed.
+Measured on one laptop (Intel i7-1255U, 64GB RAM, integrated Iris Xe graphics, no dedicated GPU),
+not assumed. The "one call" rows use a realistic ~2,800-token prompt, cold (model load included):
+
+| Model | One call, CPU only | One call, integrated GPU |
+|---|---|---|
+| `llama3.2:3b` | 227 s | **42 s** |
+| `llama3.1` (8B) | 450 s | 100 s |
+| `gpt-oss:20b` | 329 s | 92 s |
+| `qwen3:30b` (thinking off) | 470 s | **127 s** |
+
+Three findings drove the choice:
+
+1. **Reading the prompt is the cost, not writing.** On this CPU a model reads 8–15 tokens/s whatever
+   its size, so time scales with prompt length (a business question sends ~2.8k tokens across the
+   three calls, a neighbourhood question ~6k). The integrated GPU reads at 40–120 tokens/s. A quick
+   test on a 48-token prompt showed 226 tokens/s and was badly misleading; always time a real prompt.
+2. **"Thinking" mode must be off.** `qwen3:30b` took 233 s for a trivial request with it on and 6.7 s
+   with it off, for an extract-and-summarize task that gains nothing from reasoning. `OLLAMA_THINK`
+   defaults to `false`; models with no thinking mode accept and ignore it.
+3. **A mixture-of-experts model is bigger for free.** `qwen3:30b` holds 30B parameters of knowledge
+   but activates ~3B per token, so it writes about as fast as a small model. End to end through the
+   real pipeline on the same question and hardware:
+
+   | | `qwen3:30b` | `llama3.2:3b` |
+   |---|---|---|
+   | Time, business question | 192 s | 182 s |
+   | Claims produced | 3, each traceable to a source | 13, several padding ("has a pleasant atmosphere") |
+   | Time, neighbourhood question | 259 s | not run |
+
+   So the bigger model cost no extra time and gave a more precise answer. One caveat: claim grounding
+   is a lexical check against real evidence text, so a weaker model's plausible-but-unsourced claims
+   can still pass it; a stronger model mostly avoids producing them in the first place.
+
+**Make Ollama use the integrated GPU (Windows).** This is what turns 15+ minutes into ~3–4. Ollama
+skips integrated GPUs unless told otherwise. Set these user environment variables, then restart
+Ollama:
+
+```powershell
+[Environment]::SetEnvironmentVariable("OLLAMA_VULKAN", "1", "User")
+[Environment]::SetEnvironmentVariable("OLLAMA_IGPU_ENABLE", "1", "User")
+[Environment]::SetEnvironmentVariable("OLLAMA_FLASH_ATTENTION", "1", "User")
+```
+
+Check with `ollama ps`: the `PROCESSOR` column should read `100% GPU`. With no GPU at all, expect
+`qwen3:30b` to take roughly 15–25 minutes per question; set `OLLAMA_MODEL=llama3.2:3b` (about 8
+minutes on CPU) if that's too slow. Other settings: `OLLAMA_NUM_CTX` (default 8192; Ollama
+truncates silently past the window), `OLLAMA_KEEP_ALIVE` (default `30m`, so the 25–40 s model load
+isn't repeated after a short break).
+
+Hosted free tiers were considered and not adopted: Groq's free tier, for example, allows roughly
+100K tokens/day on its 70B model (about ten questions), and sends the research to a third party.
 
 **`TAVILY_API_KEY`** — opts into real web search + page retrieval
 (`TavilyWebSearchTool`/`TavilyPageRetrievalTool`) in place of the fixture tools. Tavily has a free
 tier; heavier usage is billed by Tavily. **Setting this alone collects real evidence but produces
-no claims** — `FixtureClaimExtractor` can't read real page text, so set `ANTHROPIC_API_KEY` or
-`OLLAMA_ENABLED` too if you want live search to actually produce claims. See
+no claims** — `FixtureClaimExtractor` can't read real page text, so set `OLLAMA_ENABLED` too if
+you want live search to actually produce claims. See
 `docs/research-workflow.md`'s "Live search" section for what this looks like in practice (verified
 against the real API).
 
@@ -185,7 +236,7 @@ pytest
 
 The test suite never calls a real external API or loads a real embedding model, **even if `.env`
 has real keys and `sentence-transformers` is installed** — an autouse fixture in
-`tests/conftest.py` forces both API keys off, semantic retrieval off, and evidence storage into a
+`tests/conftest.py` forces every API key and optional feature off, semantic retrieval off, and evidence storage into a
 per-test temp file. LLM-backed components are tested against a scripted fake `LLMService`
 (`tests/llm_doubles.py`); Tavily against a fake client (`tests/test_tavily_tools.py`); semantic
 retrieval against a fake embedding function (`tests/test_semantic_retriever.py`). The suite is
@@ -200,14 +251,14 @@ python -m evaluation.run_benchmark
 Runs the benchmark from [`../docs/evaluation.md`](../docs/evaluation.md) for real (Baseline B vs.
 the proposed system, both against live Tavily search) and prints/saves actual metrics — not just
 the plan. Requires `TAVILY_API_KEY`; results and their scope (what could and couldn't be measured
-without an `ANTHROPIC_API_KEY`) are written up in that doc.
+without the LLM-backed components) are written up in that doc.
 
 ## Layout
 
 ```
 app/
   models/       Pydantic schemas shared by every layer (incl. PlaceCandidate for live POI search)
-  core/         config (incl. .env loading), LLMService + AnthropicLLMService + OllamaLLMService,
+  core/         config (incl. .env loading), LLMService + OllamaLLMService,
                 shared LLM JSON parsing
   tools/        LocationResolver / WebSearch / PageRetrieval interfaces + fixture, Tavily, and
                 Nominatim (POI geocoding/search, TavilyLiveFeedTool) implementations, plus
@@ -230,3 +281,80 @@ tests/          pytest suite: planner, retrieval (keyword/semantic/hybrid), evid
                 (in-memory/SQLite), verification (incl. contradiction), agent end-to-end, API,
                 and the LLM-backed and Tavily components (against fakes, never live)
 ```
+
+## Nearby places (OpenStreetMap, not AI)
+
+`GET /api/places/nearby?latitude=&longitude=&radius_m=` lists food, transit, groceries, health,
+police, and banking places around a pin, each with a computed distance, via the free Overpass API
+(`app/tools/overpass_tool.py`). It exists because "is there a bar / station / pharmacy nearby" is
+a factual question the LLM should not be the source of: every item is a real map feature, so it
+can't be hallucinated. Two honest limits, both shown in the UI: it is only as complete as
+OpenStreetMap's volunteer mapping, and OSM has no ratings, reviews, or live opening hours — those
+still come from web sources and are only as reliable as they are. Google's Places API would
+supply them but needs a billing account, and scraping Google Maps breaks its terms, so it isn't
+used. Returns 503 when `DISABLE_LIVE_GEOCODING=1`, 502 if Overpass is down.
+
+Location search only treats a *trailing* US state ("Boston, MA 02122", "Cambridge MA") as a
+signal to restrict results to the US. Scanning every word was a bug: "hotel in Tokyo" read "in" as
+Indiana and returned New York hotels.
+
+## Translation (any language to English)
+
+A place in Japan, Germany or Russia is mostly written about in that language, so evidence and live
+feed items in other languages are machine-translated to English before the rest of the pipeline
+sees them (`app/tools/translation.py`). It runs locally with Argos Translate: free, no API key,
+and nothing about the research leaves the machine. Language is detected with `langdetect`
+(ignored below 90% confidence), and each language's pack (~100MB) downloads the first time it is
+needed, so the first Japanese page in a fresh install is slow and later ones are not.
+
+Translating happens *before* the relevance filters, because a Japanese page doesn't spell the
+place the way an English query does. It also means retrieval, claim extraction and synthesis all
+work on English. The original title and text are kept in `Evidence.metadata`
+(`original_title`, `original_text`, `language`) and the UI labels every translated item as
+machine-translated with the original one click away. If a pack can't be downloaded, the original
+text is kept and flagged "not translated"; it is never dropped or faked. Nominatim is asked for
+English place names (`accept-language=en`), and a missing prefecture/state is recovered from the
+address text (a Tokyo address has none in the structured fields).
+
+Limits: machine translation is imperfect (it can flatten tone and mistranslate idiom), quality
+varies by language, and at most 20 items per search are translated. Optional like semantic
+retrieval: skip the two packages in `requirements.txt` or set `DISABLE_TRANSLATION=1` to turn it off.
+
+## Researching one specific business (a cafe, a hotel)
+
+A business is not a neighborhood, and treating it like one produced wrong answers: area-style
+queries ("... restaurants cafes food scene") returned roundups of *other* cafes in the same city,
+and one of them was cited as evidence about the cafe actually asked about. So a location now
+carries `is_business` (from OpenStreetMap's category: amenity, shop, tourism, craft, ...), and for
+a business:
+
+- The plan searches for that business by name (`"<name>" <city> customer reviews ...`) instead
+  of the area templates (`business_query_templates` in `app/planning/topics.py`).
+- A page counts as evidence only if it names the business's *distinguishing* words (not "coffee" or
+  "bar", which every cafe shares) **and** the right city or region (`_mentions_business`,
+  `_mentions_place_context` in `tavily_tools.py`). There is no soft fallback: another business's
+  reviews are worse than none, so the honest result is "nothing found".
+- If fewer than three web pages mention it, a limitation says coverage is thin.
+
+The model also no longer reads only the first few hundred characters of each page (usually site
+navigation). `app/synthesis/excerpt.py` picks the passage that matches the question instead; it
+only selects text, never rewrites it.
+
+### Google Maps ratings and reviews (optional)
+
+For one specific business, open-web search finds a couple of pages while Google Maps has hundreds
+of dated reviews, and no amount of prompting closes that gap. Setting `GOOGLE_PLACES_API_KEY`
+adds Google's rating, review count, price level, hours and up to five recent reviews (each with its
+real post date, translated to English by Google with the original kept) as ordinary cited
+evidence, and shows them in a card (`GET /api/places/profile`).
+
+It is off by default because it needs a Google Cloud project **with billing enabled** (a card on
+file); the reviews fields are in a paid tier with a monthly free allowance, so check current
+pricing. One lookup per place is cached for 30 minutes. A result is used only if it is within
+400 m of the pin and carries the business's name words. Google's API returns at most five reviews
+per place, so the rating reflects all of them and the quotes only some; the UI says so.
+`app/tools/google_places_tool.py` is written against Google's documented response shape and is
+covered by mocked tests, but has not been run against the live API from this repo. Google's terms
+restrict storing its content, and reviews are written to the local per-run evidence database, so
+clear `backend/data/evidence.db` if that matters for your use.
+

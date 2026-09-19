@@ -54,6 +54,7 @@ from app.models.evidence import Evidence, SourceType
 from app.models.location import Location
 from app.models.plan import ResearchTopic
 from app.tools.base import PageRetrievalTool, ToolConfigurationError, ToolExecutionError, WebSearchTool
+from app.tools.translation import Translator, translate_evidence
 
 _GOV_TLDS = (".gov",)
 _EDU_TLDS = (".edu",)
@@ -76,6 +77,16 @@ _TRAVEL_NAV_KEYWORD = r"(?:Things to Do|Hotels?|Restaurants?|Cruises?|Forums?|Va
 _TRAVEL_NAV_LINE_RE = re.compile(rf"^.*(?:{_TRAVEL_NAV_KEYWORD}.*){{3,}}$", re.MULTILINE)
 _MULTI_BLANK_RE = re.compile(r"\n{3,}")
 _MULTI_SPACE_RE = re.compile(r"[ \t]{2,}")
+# Markdown-converting extractors emit backslash escapes that
+# survive as stray "\ \" once the markup around them is stripped. Only runs
+# of backslashes standing alone between whitespace are removed, so an escape
+# inside a word is left intact.
+_STRAY_ESCAPE_RE = re.compile(r"(?<!\S)\\+(?!\S)")
+# Accessibility skip-links. These are whole lines in some extracts and run
+# together inline in others ("Skip navigation Skip to main content"), so the
+# exact-line denylist below can't catch them on its own. Safe to strip
+# anywhere: no real prose contains them.
+_SKIP_LINK_RE = re.compile(r"\bskip (?:to (?:main )?content|navigation)\b", re.IGNORECASE)
 
 # Exact-match, case-insensitive: known UI chrome from specific platforms
 # (Facebook, Nextdoor, Zillow, TripAdvisor, ...) observed in real scraped
@@ -116,9 +127,47 @@ _KNOWN_UI_JUNK_LINES = {
     "share on linkedin",
 }
 
+# How far back the live feed looks. Also the window named in the UI, so the
+# feed never implies more coverage than it actually searched.
+LIVE_FEED_WINDOW_DAYS = 7
+
+# Tavily's news topic returns roughly 8-9 results for a single regional query
+# in a 7-day window regardless of `max_results`, which isn't enough to fill
+# the feed. These complementary facets are issued as separate searches and
+# merged: measured against the live API they yielded 25 unique dated items
+# for one city where the first alone yielded 8. They also give the feed
+# actual topical spread (reporting, incidents, civic/community activity)
+# instead of three pages of the same beat.
+#
+# Each facet is one real, billed Tavily search per feed load — this constant
+# is the main cost knob for this surface. See `backend/README.md`.
+_LIVE_FEED_FACETS = (
+    "local news",
+    "police incident report",
+    "community events development",
+)
+
+# Job listings match a regional news query (a company's careers page names
+# the city its office is in) and carry a real posted date, so neither the
+# date requirement nor the locality check rejects them — but a role opening
+# at a company that happens to sit in this city is not "what's happening
+# around here". Matched against the URL's host/path, not page text, so a
+# news story *about* local hiring still gets through.
+_NON_ACTIVITY_URL_PATTERNS = ("jobs.", "careers.", "/jobs/", "/job/", "/careers/")
+
 _MIN_USABLE_SNIPPET_LENGTH = 40
 _MAX_DISPLAY_LENGTH = 1200
 _MAX_FULL_TEXT_LENGTH = 3000
+
+
+_CJK_RE = re.compile(r"[぀-ヿ㐀-䶿一-鿿가-힯]")
+
+
+def _effective_length(text: str) -> int:
+    """Length as English-equivalent characters. One Japanese/Chinese/Korean
+    character carries roughly what three Latin ones do, so a plain `len()` would
+    throw away short-but-complete CJK passages as "too short to be useful"."""
+    return len(text) + 2 * len(_CJK_RE.findall(text))
 
 
 def _drop_known_junk_lines(text: str) -> str:
@@ -167,6 +216,8 @@ def _clean_text(text: str) -> str:
     cleaned = _HEADING_RE.sub("", cleaned)
     cleaned = _TIMESTAMP_LINE_RE.sub("", cleaned)
     cleaned = _APP_STORE_LINE_RE.sub("", cleaned)
+    cleaned = _SKIP_LINK_RE.sub("", cleaned)
+    cleaned = _STRAY_ESCAPE_RE.sub("", cleaned)
     cleaned = _drop_known_junk_lines(cleaned)
     cleaned = _MULTI_SPACE_RE.sub(" ", cleaned)
     cleaned = _MULTI_BLANK_RE.sub("\n\n", cleaned)
@@ -196,6 +247,59 @@ def _is_relevant_to_location(item_text: str, location: Location) -> bool:
     return any(needle in haystack for needle in needles if needle)
 
 
+# Words that describe *what kind of place* something is, not *which* place.
+# "LEAVES Coffee Roasters" shares "coffee" and "roasters" with "SR Coffee
+# Roaster & Bar", so matching on them is how one cafe's reviews end up cited
+# for another. Only what's left (here: "sr") identifies the business.
+_GENERIC_NAME_WORDS = frozenset(
+    """the and of a an at in on by for cafe cafes coffee coffees roaster roasters roastery bar bars pub
+    restaurant restaurants hotel hotels inn hostel shop shops store stores house kitchen grill bistro
+    bakery market club lounge tavern diner eatery gallery studio salon spa gym""".split()
+)
+_WORD_RE = re.compile(r"[^\W_]+", re.UNICODE)
+
+
+def _name_words(text: str) -> list[str]:
+    return [w.lower() for w in _WORD_RE.findall(text.replace("'", "").replace("’", ""))]
+
+
+def _mentions_business(text: str, business_name: str) -> bool:
+    """Whether `text` is actually about this one business.
+
+    A business needs a much stricter test than an area: its city appearing on
+    the page proves nothing (every cafe in Tokyo is "in Tokyo"). Every
+    *distinguishing* word of its name must appear; if the name has none
+    (just "Coffee Shop"), the whole name must appear as a phrase.
+    """
+    name_words = _name_words(business_name)
+    if not name_words:
+        return False
+    text_words = _name_words(text)
+    text_set = set(text_words)
+
+    distinctive = [w for w in name_words if w not in _GENERIC_NAME_WORDS]
+    if distinctive:
+        return all(w in text_set for w in distinctive)
+
+    phrase = " ".join(name_words)
+    return phrase in " ".join(text_words)
+
+
+def _mentions_place_context(text: str, location: Location) -> bool:
+    """Whether `text` places the business in the right part of the world.
+
+    The business name alone isn't enough: "SR Coffee" is also a cafe in
+    Leesburg, Virginia, and its Yelp page matched on the name. The page must
+    also name the city or region (or, failing both, the country). If the
+    location carries none of those, there is nothing to check against.
+    """
+    anchors = [a for a in (location.city, location.region) if a] or [a for a in (location.country,) if a]
+    if not anchors:
+        return True
+    words = set(_name_words(text))
+    return any(all(w in words for w in _name_words(anchor)) for anchor in anchors)
+
+
 def _region_label(location: Location) -> str:
     """The broader area the live feed reports on -- dynamically derived
     from whatever location was selected, never hardcoded to one city. A
@@ -209,25 +313,132 @@ def _region_anchor(location: Location) -> str:
     return (location.city or location.region or location.name).lower()
 
 
-def _is_relevant_to_live_feed(title: str, body: str, location: Location) -> bool:
-    """The live feed surfaces general regional activity -- a Reddit post, a
-    news article, anything freshly published in the broader area -- rather
-    than coverage of one exact business, so the anchor is always the area
-    (city, or region if no city is known), never a specific POI's name.
+def _is_non_activity_url(url: str) -> bool:
+    parsed = urlparse(url.lower())
+    target = f"{parsed.netloc}{parsed.path}"
+    return any(pattern in target for pattern in _NON_ACTIVITY_URL_PATTERNS)
 
-    A single passing mention anywhere in a long body of text is too weak a
-    signal on its own -- real content, unrelated to the area, sometimes
-    name-checks a well-known city once in an aside (e.g. a national sports
-    thread mentioning a rival team's city). Requiring the anchor in the
-    title, or repeated in the body, distinguishes "this is actually about
-    the area" from "the area was mentioned in passing".
+
+def _mentions_whole_word(text: str, word: str) -> bool:
+    return re.search(rf"\b{re.escape(word.lower())}\b", text.lower()) is not None
+
+
+def _is_relevant_to_live_feed(title: str, body: str, location: Location, source: str = "") -> bool:
+    """The live feed surfaces recent regional activity -- a news article, a
+    local announcement, an incident report -- rather than coverage of one
+    exact business, so the anchor is always the area (city, or region if no
+    city is known), never a specific POI's name.
+
+    `source` (the result's URL + publisher) carries signal the title doesn't,
+    and the two are weighted differently because city names are not unique:
+
+    - A *hyper-local outlet* -- one whose own domain carries the city name,
+      like `cambridgema.gov` or `cambridgeday.com` -- is accepted outright.
+      These are the most local sources there are, and they rarely bother
+      naming their own state, so any rule that demands one drops exactly the
+      coverage most worth showing.
+    - Anything else must name the city *and* the surrounding region/state
+      somewhere. Measured against the live API, a query for Cambridge, MA
+      surfaced a New York State Police report -- there is also a Cambridge,
+      New York -- and this is what rejects it.
+
+    The tradeoff is real and chosen deliberately: a regional outlet that
+    names the city but never its state (a university paper covering the city
+    it sits in, say) is dropped too. For a feed with no downstream
+    verification, a wrong-state item is worse than a missing one.
     """
-    anchor = _region_anchor(location)
-    if not anchor:
+    city = _region_anchor(location)
+    if not city:
         return True
-    if anchor in title.lower():
+
+    haystack = f"{title} {body}".lower()
+    source_text = source.lower()
+
+    if city in source_text:
         return True
-    return f"{title} {body}".lower().count(anchor) >= 2
+
+    names_city = _mentions_whole_word(haystack, city) or haystack.count(city) >= 2
+    if not names_city:
+        return False
+
+    region = (location.region or "").strip()
+    if not region:
+        # Nothing broader to disambiguate against; fall back to requiring the
+        # city in the headline or repeated in the body.
+        return city in title.lower() or haystack.count(city) >= 2
+
+    return _mentions_whole_word(f"{haystack} {source_text}", region)
+
+
+
+# Recovers a real date from page text for sources whose search API result
+# never carries a structured `published_date` but whose scraped text does --
+# measured against the live API, TripAdvisor's own raw_content includes a
+# plain "Reviewed <Month> <Day>, <Year>" line per review even though its API
+# field is always null. Deliberately narrow (an explicit "Reviewed"/"Posted"
+# phrase, not any bare date-shaped number on the page): a wrong date is worse
+# than an honestly-missing one for a feature whose whole point is "when this
+# was actually posted".
+_TEXT_DATE_RE = re.compile(
+    r"\b(?:reviewed|posted)\s+(?:on\s+)?"
+    r"(?P<month>January|February|March|April|May|June|July|August|September|October|November|December)"
+    r"\s+(?P<day>\d{1,2}),?\s+(?P<year>\d{4})",
+    re.IGNORECASE,
+)
+
+
+def _extract_published_date_from_text(text: str) -> datetime | None:
+    if not text:
+        return None
+    match = _TEXT_DATE_RE.search(text)
+    if not match:
+        return None
+    try:
+        parsed = datetime.strptime(f"{match['month']} {match['day']} {match['year']}", "%B %d %Y")
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=timezone.utc)
+
+
+def _is_relevant_to_community_voice(title: str, body: str, location: Location, source: str = "") -> bool:
+    """Community Voices shows real forum/review commentary about the exact
+    selected place, so it needs a tighter check than the soft per-topic
+    relevance filter every other topic uses: a bare city name isn't proof of
+    the right place -- city names collide across states (the live feed hit
+    this with a Cambridge, NY report surfacing for a Cambridge, MA query; see
+    `_is_relevant_to_live_feed`), and a chain POI's own name doesn't
+    disambiguate branches (see `starbucks_cambridge` in tests) -- a review
+    site's "nearby places" carousel can surface an unrelated same-named
+    place, or the same chain in a different city, just as easily.
+
+    A *distinctive* (multi-word) place name mentioned by name is trusted on
+    its own, the same way a hyper-local domain is trusted for the live feed
+    -- it doesn't need a city restated alongside it. Short of that, city (or
+    a hyper-local domain) is required, and region strengthens it further; a
+    single generic word like "Starbucks" mentioned near a bare city name
+    isn't enough on its own, since that doesn't meaningfully narrow which
+    branch a comment is actually about.
+    """
+    haystack = f"{title} {body}".lower()
+    source_text = source.lower()
+    name = (location.name or "").strip().lower()
+
+    if len(name.split()) > 1 and _mentions_whole_word(haystack, name):
+        return True
+
+    city = _region_anchor(location)
+    if not city:
+        return bool(name) and _mentions_whole_word(haystack, name)
+
+    if city in source_text:
+        return True
+    if not _mentions_whole_word(haystack, city):
+        return False
+
+    region = (location.region or "").strip()
+    if not region:
+        return True
+    return _mentions_whole_word(f"{haystack} {source_text}", region)
 
 
 def _classify_source_type(url: str) -> SourceType:
@@ -246,19 +457,29 @@ def _classify_source_type(url: str) -> SourceType:
 
 
 def _parse_published_date(value: object) -> datetime | None:
+    """Parse a publication date into a timezone-aware UTC datetime.
+
+    Tavily returns dates in more than one shape — bare ISO dates from the
+    general topic, RFC-2822 from the news topic — and a naive datetime mixed
+    in with aware ones is not merely untidy: comparing the two raises
+    TypeError, which would take down any sort over a feed containing both.
+    A date with no zone is read as UTC rather than dropped.
+    """
     if not value or not isinstance(value, str):
         return None
+
+    parsed: datetime | None = None
     try:
-        return datetime.fromisoformat(value)
+        parsed = datetime.fromisoformat(value)
     except ValueError:
-        pass
-    try:
-        parsed = parsedate_to_datetime(value)
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed
-    except (TypeError, ValueError):
+        try:
+            parsed = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            return None
+
+    if parsed is None:
         return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
 
 def _evidence_id(topic_id: str, url: str) -> str:
@@ -289,11 +510,22 @@ def _build_candidates(
         snippet = _truncate_for_display(_clean_text(item.get("content") or raw_content[:500]))
         title = item.get("title") or url
 
-        if len(snippet) < _MIN_USABLE_SNIPPET_LENGTH:
+        if _effective_length(snippet) < _MIN_USABLE_SNIPPET_LENGTH:
             # Cleaning (stripping nav menus, timestamps, markdown) can leave
             # almost nothing behind for some sources (e.g. a video whose
             # "content" was mostly chapter markers) — not worth keeping.
             continue
+
+        # Tavily's own `published_date` field is null for entire classes of
+        # source (measured live: every Reddit, Yelp, and TripAdvisor result)
+        # even when the scraped page text names a real date in plain English
+        # ("Reviewed July 30, 2016" on TripAdvisor) — recover that before
+        # giving up on a real timestamp for this item.
+        published_at = _parse_published_date(item.get("published_date"))
+        if published_at is None:
+            published_at = _extract_published_date_from_text(raw_content) or _extract_published_date_from_text(
+                snippet
+            )
 
         cache[url] = raw_content or snippet
         candidates.append(
@@ -304,7 +536,7 @@ def _build_candidates(
                 publisher=urlparse(url).netloc.removeprefix("www.") or None,
                 source_type=_classify_source_type(url),
                 retrieved_at=datetime.now(timezone.utc),
-                published_at=_parse_published_date(item.get("published_date")),
+                published_at=published_at,
                 location_scope=f"{location.city}, {location.region}",
                 text=snippet,
                 topic=topic_id,
@@ -316,9 +548,16 @@ def _build_candidates(
 
 
 class TavilyWebSearchTool(WebSearchTool):
-    def __init__(self, api_key: str | None = None, max_results: int = 4, client: object | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        max_results: int = 4,
+        client: object | None = None,
+        translator: Translator | None = None,
+    ) -> None:
         self.raw_content_cache: dict[str, str] = {}
         self._max_results = max_results
+        self._translator = translator
 
         if client is not None:
             self._client = client
@@ -353,6 +592,24 @@ class TavilyWebSearchTool(WebSearchTool):
         images = response.get("images", []) if isinstance(response, dict) else []
 
         candidates = _build_candidates(location, topic.topic_id, results, images, self.raw_content_cache)
+        if self._translator is not None:
+            # Before the relevance filters below: a Japanese page about the
+            # place doesn't spell its name the way the English query does,
+            # and would otherwise be judged off-topic on words it never used.
+            translate_evidence(candidates, self._translator)
+        if location.is_business:
+            # One specific business: a page either mentions it or it isn't
+            # evidence about it. No soft fallback here — unlike an area, where
+            # a nearby-but-imperfect page is still informative, another
+            # business's reviews are actively misleading, so an honest
+            # "nothing found" beats them.
+            about_this_business = []
+            for c in candidates:
+                haystack = f"{c.source_title} {c.text} {c.source_url} {self.raw_content_cache.get(c.source_url, '')}"
+                if _mentions_business(haystack, location.name) and _mentions_place_context(haystack, location):
+                    about_this_business.append(c)
+            return about_this_business
+
         relevant = [c for c in candidates if _is_relevant_to_location(f"{c.source_title} {c.text}", location)]
 
         # Soft filter: an empty topic with an honest coverage-gap limitation
@@ -361,10 +618,24 @@ class TavilyWebSearchTool(WebSearchTool):
         # appears only in the query, never in any real result) is worse than
         # showing the unfiltered results, clearly flagged as such.
         if relevant:
-            return relevant
-        for candidate in candidates:
-            candidate.metadata["location_match"] = "false"
-        return candidates
+            result = relevant
+        else:
+            for candidate in candidates:
+                candidate.metadata["location_match"] = "false"
+            result = candidates
+
+        # Community Voices (frontend) reads forum/review evidence straight
+        # out of the research response, with no verification step downstream
+        # to catch a wrong-place match the way claim extraction does for
+        # everything else — so unlike the soft filter above, a forum/review
+        # result that fails the stricter place check is dropped outright
+        # rather than shown flagged. See `_is_relevant_to_community_voice`.
+        return [
+            c
+            for c in result
+            if c.source_type not in (SourceType.COMMUNITY_FORUM, SourceType.REVIEW_AGGREGATOR)
+            or _is_relevant_to_community_voice(c.source_title, c.text, location, f"{c.source_url} {c.publisher or ''}")
+        ]
 
 
 class TavilyLiveFeedTool:
@@ -378,6 +649,14 @@ class TavilyLiveFeedTool:
     on the area (city, or region if no city is known), never the place's own
     name.
 
+    Searches Tavily's *news* topic, not its general topic. Measured against
+    the live API, the general topic returned `published_date: None` for
+    every result and surfaced mostly evergreen landing pages (a paper's
+    `/tag/local-news` index, a chamber-of-commerce homepage); the news topic
+    returns real RFC-2822 timestamps on real articles. Since this feed's
+    entire claim is recency, that difference decides both what it can honestly
+    display and what's worth displaying at all.
+
     Not part of the verified research pipeline: no per-topic planning, no
     claim extraction, no verification. `topic="live_feed"` on the resulting
     Evidence is a label for consistent typing, not a real research topic.
@@ -385,9 +664,16 @@ class TavilyLiveFeedTool:
     before wiring this up to an aggressive auto-refresh interval.
     """
 
-    def __init__(self, api_key: str | None = None, max_results: int = 20, client: object | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        max_results: int = 20,
+        client: object | None = None,
+        translator: Translator | None = None,
+    ) -> None:
         self.raw_content_cache: dict[str, str] = {}
         self._max_results = max_results
+        self._translator = translator
 
         if client is not None:
             self._client = client
@@ -406,29 +692,67 @@ class TavilyLiveFeedTool:
 
     def fetch(self, location: Location) -> list[Evidence]:
         region_label = _region_label(location)
-        query = f"{region_label} local news community reddit recent activity"
 
-        try:
-            response = self._client.search(
-                query=query,
-                max_results=self._max_results,
-                include_raw_content=True,
-                include_images=True,
-                time_range="week",
-            )
-        except Exception as exc:  # noqa: BLE001 - the Tavily SDK's own exception types aren't guaranteed
-            raise ToolExecutionError(f"Tavily live-feed search failed for query '{query}': {exc}") from exc
+        candidates: list[Evidence] = []
+        failures: list[str] = []
+        for facet in _LIVE_FEED_FACETS:
+            query = f"{region_label} {facet}"
+            try:
+                response = self._client.search(
+                    query=query,
+                    max_results=self._max_results,
+                    topic="news",
+                    days=LIVE_FEED_WINDOW_DAYS,
+                    include_raw_content=True,
+                    include_images=True,
+                )
+            except Exception as exc:  # noqa: BLE001 - the Tavily SDK's own exception types aren't guaranteed
+                # One facet failing shouldn't blank the whole feed — collect
+                # it and only surface an error if every facet failed.
+                failures.append(f"'{query}': {exc}")
+                continue
 
-        results = response.get("results", []) if isinstance(response, dict) else []
-        images = response.get("images", []) if isinstance(response, dict) else []
-        candidates = _build_candidates(location, "live_feed", results, images, self.raw_content_cache)
+            results = response.get("results", []) if isinstance(response, dict) else []
+            images = response.get("images", []) if isinstance(response, dict) else []
+            candidates.extend(_build_candidates(location, "live_feed", results, images, self.raw_content_cache))
 
-        # This *is* the "just show me what's relevant-ish nearby" surface —
-        # unlike per-topic research search, there's no verified pipeline
+        if failures and len(failures) == len(_LIVE_FEED_FACETS):
+            raise ToolExecutionError("Tavily live-feed search failed for every query — " + "; ".join(failures))
+
+        # A feed item without a real publication timestamp is dropped, not
+        # backfilled with the time we happened to fetch it. Two reasons, and
+        # the second is why this filter does double duty:
+        #   1. The feed's whole claim is recency. Showing "just now" for
+        #      something whose actual post time is unknown is a fabricated
+        #      timestamp, which this project doesn't do.
+        #   2. Undated results are overwhelmingly evergreen directory and
+        #      landing pages ("Community Events in <city>", a paper's
+        #      /tag/local-news index) rather than actual posts — measured
+        #      against the live API, Tavily's general topic returned a null
+        #      published_date for *every* result, while its news topic
+        #      returns real RFC-2822 timestamps on real articles. Requiring
+        #      a date is therefore also the quality filter.
+        dated = [
+            c
+            for c in candidates
+            if c.published_at is not None and not _is_non_activity_url(c.source_url)
+        ]
+
+        dated.sort(key=lambda e: e.published_at, reverse=True)
+        if self._translator is not None:
+            # Newest first, so if there are more foreign items than the
+            # translation cap, it's the oldest that stay untranslated.
+            translate_evidence(dated, self._translator)
+
+        # Unlike per-topic research search, there's no verified pipeline
         # downstream to catch an overly loose match, so the location filter
-        # here is not soft: a result that never mentions the area is dropped
+        # here is not soft: a result with no regional signal is dropped
         # outright rather than shown with a caveat.
-        relevant = [c for c in candidates if _is_relevant_to_live_feed(c.source_title, c.text, location)]
+        relevant = [
+            c
+            for c in dated
+            if _is_relevant_to_live_feed(c.source_title, c.text, location, f"{c.source_url} {c.publisher or ''}")
+        ]
 
         seen_urls: set[str] = set()
         deduplicated: list[Evidence] = []
@@ -438,7 +762,7 @@ class TavilyLiveFeedTool:
             seen_urls.add(item.source_url)
             deduplicated.append(item)
 
-        deduplicated.sort(key=lambda e: e.published_at or e.retrieved_at, reverse=True)
+        deduplicated.sort(key=lambda e: e.published_at, reverse=True)
         return deduplicated
 
 

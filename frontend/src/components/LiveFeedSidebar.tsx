@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchLiveFeed, ResearchApiError } from "../api";
-import { cleanDisplayText, formatFeedTimestamp, relativeTimeFrom } from "../textUtils";
+import { absoluteTimeFrom, cleanDisplayText, formatFeedTimestamp, relativeTimeFrom } from "../textUtils";
+import { TranslationNote } from "./TranslationNote";
 import { SOURCE_TYPE_ICON } from "../sourceTypeIcon";
 import type { ActiveLocation, Evidence } from "../types";
 
@@ -8,9 +9,10 @@ interface LiveFeedSidebarProps {
   location: ActiveLocation;
 }
 
-// A real, billed Tavily search runs on every fetch — auto-refresh stays
-// infrequent by design; the manual button covers "I want it now."
-const AUTO_REFRESH_MS = 3 * 60 * 1000;
+// Every fetch is several real, billed Tavily searches (the backend queries
+// a few complementary regional facets and merges them), so auto-refresh is
+// deliberately infrequent; the manual button covers "I want it now."
+const AUTO_REFRESH_MS = 10 * 60 * 1000;
 const PAGE_SIZE = 5;
 const MAX_PAGES = 3;
 
@@ -102,8 +104,9 @@ export function LiveFeedSidebar({ location }: LiveFeedSidebarProps) {
           </button>
         </div>
         <p>
-          What's happening recently around {regionLabel(location)} — real Reddit, news, and review activity from
-          the last week, independent of the questions on the left and not limited to {location.displayName} itself.
+          Recent local reporting from around {regionLabel(location)} — published in the last 7 days, each item
+          showing its own publication time. Independent of the questions on the left, and not limited to{" "}
+          {location.displayName} itself.
         </p>
         {lastUpdated && (
           <p className="feed-updated-at">{loading ? "Refreshing…" : `Updated ${relativeTimeFrom(lastUpdated)}`}</p>
@@ -129,14 +132,20 @@ export function LiveFeedSidebar({ location }: LiveFeedSidebarProps) {
                     <span className={`feed-source-type type-${item.source_type}`}>
                       {item.source_type.replace(/_/g, " ")}
                     </span>
-                    <span className="feed-time">{formatFeedTimestamp(item.published_at, item.retrieved_at)}</span>
+                    <span className="feed-time" title={item.published_at ?? undefined}>
+                      {formatFeedTimestamp(item.published_at, item.retrieved_at)}
+                    </span>
                   </div>
+                  <TranslationNote item={item} inline />
                   <div className="feed-item-title">{item.source_title}</div>
                   <p className="feed-item-snippet">{cleanDisplayText(item.text)}</p>
                   <div className="feed-item-footer">
                     <span className="feed-item-location">📍 {item.location_scope}</span>
                     {item.publisher && <span className="feed-item-publisher">{item.publisher}</span>}
                   </div>
+                  {item.published_at && (
+                    <div className="feed-item-posted">🕒 Posted {absoluteTimeFrom(item.published_at)}</div>
+                  )}
                 </div>
               </a>
             ))}

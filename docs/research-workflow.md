@@ -6,7 +6,7 @@ INPUT (raw location string, question)
   -> QUESTION UNDERSTANDING     folded into planning: intent detection
   -> RESEARCH PLANNING          ResearchPlanner.plan() -> ResearchPlan
                                  (KeywordResearchPlanner, or LLMResearchPlanner if
-                                  ANTHROPIC_API_KEY is set — see "LLM integration" below)
+                                  OLLAMA_ENABLED is set — see "LLM integration" below)
   -> per topic, bounded by AgentConfig.max_tool_calls:
        TOOL SELECTION           log which tool + queries are used
        RETRIEVAL                WebSearchTool.search() -> KeywordEvidenceRetriever.score()
@@ -44,7 +44,7 @@ concretely true: pass 1 selects only `nightlife`; passes 2 and 3 never run becau
 
 ## LLM integration (Milestone 2) — where the LLM is trusted, and where it isn't
 
-Setting `ANTHROPIC_API_KEY` swaps three components for LLM-backed versions
+Setting `OLLAMA_ENABLED` swaps three components for LLM-backed versions
 (`app/agents/factory.py` auto-detects this):
 
 - `LLMResearchPlanner` — chooses which topics are relevant using real language understanding
@@ -80,7 +80,7 @@ this against a scripted fake `LLMService` rather than the real API.
 ## Live search (Milestone 3) — and why it needs the LLM key to be useful
 
 Setting `TAVILY_API_KEY` swaps `WebSearchTool`/`PageRetrievalTool` for `TavilyWebSearchTool`/
-`TavilyPageRetrievalTool` (`app/tools/tavily_tools.py`), independently of `ANTHROPIC_API_KEY`.
+`TavilyPageRetrievalTool` (`app/tools/tavily_tools.py`), independently of `OLLAMA_ENABLED`.
 Tavily returns full page text (`include_raw_content=True`) in the same call as the search
 results, so the page-retrieval tool just reads from a cache the search tool already populated
 rather than making a second real HTTP request per source.
@@ -92,7 +92,7 @@ coarse, honest heuristic keyed on domain (`.gov` → `local_government`, `reddit
 **The important interaction: live search alone produces evidence without claims.**
 `FixtureClaimExtractor` only knows how to read the `claim_text` metadata curated fixture
 documents carry — real Tavily results don't have that field, so with `TAVILY_API_KEY` set but
-not `ANTHROPIC_API_KEY`, a run collects real evidence that never becomes a claim. This is not a
+not `OLLAMA_ENABLED`, a run collects real evidence that never becomes a claim. This is not a
 bug being papered over: `deterministic_limitations()` reports it explicitly as *"Evidence was
 found for planned topic 'x' but no claims could be extracted from it"* — distinct from *"No
 evidence was found"* — so real, gathered evidence with no claim is never confused with a

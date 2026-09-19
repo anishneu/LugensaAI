@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Evidence } from "../types";
-import { cleanDisplayText, relativeTimeFrom } from "../textUtils";
+import { absoluteTimeFrom, cleanDisplayText, formatFeedTimestamp } from "../textUtils";
+import { TranslationNote } from "./TranslationNote";
 import { SOURCE_TYPE_ICON } from "../sourceTypeIcon";
 
 interface CommunityVoicesProps {
@@ -62,9 +63,15 @@ export function CommunityVoices({ evidence }: CommunityVoicesProps) {
                     <span className={`source-type type-${item.source_type}`}>
                       {item.source_type.replace(/_/g, " ")}
                     </span>
-                    <span className="voice-time">{relativeTimeFrom(item.published_at ?? item.retrieved_at)}</span>
+                    <span className="voice-time" title={item.published_at ?? undefined}>
+                      {formatFeedTimestamp(item.published_at, item.retrieved_at)}
+                    </span>
                   </div>
+                  <TranslationNote item={item} />
                   <p className="voice-text">“{cleanDisplayText(item.text)}”</p>
+                  {item.published_at && (
+                    <div className="voice-posted">🕒 Posted {absoluteTimeFrom(item.published_at)}</div>
+                  )}
                   <div className="voice-footer">
                     {item.publisher && <span className="voice-publisher">{item.publisher}</span>}
                     <a href={item.source_url} target="_blank" rel="noreferrer">

@@ -67,3 +67,18 @@ def test_complete_raises_when_response_has_no_content():
 
     with pytest.raises(LLMServiceError):
         service.complete("system", "user")
+
+
+def test_request_asks_for_an_explicit_context_window():
+    """Ollama truncates an over-long prompt silently, so the window is requested."""
+    body = OllamaLLMService(model="m", num_ctx=12000, think="").request_body("s", "u")
+
+    assert body["options"] == {"num_ctx": 12000}
+    assert body["keep_alive"]  # keep the model loaded between questions
+    assert "think" not in body  # explicit empty setting sends nothing
+
+
+def test_thinking_can_be_turned_off_for_reasoning_models():
+    body = OllamaLLMService(model="qwen3:30b", think="false").request_body("s", "u")
+
+    assert body["think"] is False

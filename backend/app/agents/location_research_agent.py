@@ -24,6 +24,7 @@ the loop is guaranteed to terminate.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from app.core.config import AgentConfig
@@ -38,8 +39,15 @@ from app.planning.planner import ResearchPlanner
 from app.retrieval.base import EvidenceRetriever
 from app.synthesis.claim_extractor import ClaimExtractor
 from app.synthesis.synthesizer import Synthesizer
-from app.tools.base import LocationResolverTool, PageRetrievalTool, WebSearchTool
+from app.evidence.place_profile_evidence import pick_topic, profile_to_evidence
+from app.tools.base import LocationResolverTool, PageRetrievalTool, ToolExecutionError, WebSearchTool
+from app.tools.google_places_tool import GooglePlacesTool
+from app.tools.translation import META_ORIGINAL_TEXT
 from app.verification.verifier import ClaimVerifier
+
+# Caps concurrent outbound searches. Bounded because the far end is a rate-
+# limited third-party API, not because of local CPU.
+_MAX_SEARCH_WORKERS = 4
 
 
 class LocationResearchAgent:
@@ -55,6 +63,7 @@ class LocationResearchAgent:
         verifier: ClaimVerifier,
         synthesizer: Synthesizer,
         config: AgentConfig | None = None,
+        place_profile_tool: GooglePlacesTool | None = None,
     ) -> None:
         self.location_resolver = location_resolver
         self.web_search_tool = web_search_tool
@@ -66,6 +75,7 @@ class LocationResearchAgent:
         self.verifier = verifier
         self.synthesizer = synthesizer
         self.config = config or AgentConfig()
+        self.place_profile_tool = place_profile_tool
 
     def run(self, raw_location: str | Location, question: str) -> ResearchResponse:
         """Run the full research lifecycle and always release the evidence
@@ -85,6 +95,44 @@ class LocationResearchAgent:
             return self._run(raw_location, question)
         finally:
             self.evidence_repository.close()
+
+    def _lookup_place_profile(
+        self, location: Location, plan, limitations: list[str], log
+    ) -> list[Evidence]:
+        """Google Maps rating, hours and reviews for a specific business, as
+        evidence. Every failure mode is recorded as a limitation, never hidden."""
+        if not location.is_business or location.latitude is None or location.longitude is None:
+            return []
+        if self.place_profile_tool is None:
+            limitations.append(
+                "Google Maps ratings and reviews are not connected (set GOOGLE_PLACES_API_KEY), so review "
+                "coverage for this business comes only from what the open web surfaced."
+            )
+            return []
+
+        topic_id = pick_topic([t.topic_id for t in plan.topics])
+        if topic_id is None:
+            return []
+        try:
+            profile = self.place_profile_tool.lookup(
+                location.name, location.latitude, location.longitude, location.city or ""
+            )
+        except ToolExecutionError as exc:
+            limitations.append(f"The Google Maps lookup failed ({exc}); its reviews are not included.")
+            return []
+        if profile is None:
+            limitations.append("No matching Google Maps listing was found within a few hundred meters of this pin.")
+            return []
+
+        evidence = profile_to_evidence(
+            profile, topic_id, f"{location.city}, {location.region}", datetime.now(timezone.utc)
+        )
+        log(
+            TraceStage.TOOL_SELECTION,
+            f"Added Google Maps listing for '{profile.name}' ({len(profile.reviews)} review(s) of "
+            f"{profile.review_count or 'unknown'} total) as evidence for '{topic_id}'",
+        )
+        return evidence
 
     def _run(self, raw_location: str | Location, question: str) -> ResearchResponse:
         trace: list[ResearchTraceStep] = []
@@ -126,21 +174,37 @@ class LocationResearchAgent:
         )
 
         limitations: list[str] = list(plan.notes)
+        profile_evidence = self._lookup_place_profile(location, plan, limitations, log)
 
+        searchable_topics = []
         for topic in plan.topics:
-            if tool_calls_made >= self.config.max_tool_calls:
+            if tool_calls_made + len(searchable_topics) >= self.config.max_tool_calls:
                 limitations.append(f"Research budget exhausted before investigating topic '{topic.topic_id}'.")
                 log(TraceStage.COVERAGE_CHECK, f"Skipped topic '{topic.topic_id}': tool call budget exhausted.")
                 continue
+            searchable_topics.append(topic)
 
+        for topic in searchable_topics:
             log(
                 TraceStage.TOOL_SELECTION,
                 f"Selected WebSearchTool for topic '{topic.topic_id}'",
                 queries="; ".join(topic.search_queries),
             )
-            candidates = self.web_search_tool.search(location, topic)
-            tool_calls_made += 1
 
+        # Each topic's search is an independent network round trip, so running
+        # them concurrently collapses N sequential API waits into roughly one.
+        # Only the searches are parallel: everything downstream (scoring,
+        # enrichment, and especially the evidence repository, whose SQLite
+        # connection is not thread-safe) stays on this thread, in topic order,
+        # so results remain deterministic.
+        if searchable_topics:
+            with ThreadPoolExecutor(max_workers=min(len(searchable_topics), _MAX_SEARCH_WORKERS)) as pool:
+                candidates_per_topic = list(pool.map(lambda t: self.web_search_tool.search(location, t), searchable_topics))
+            tool_calls_made += len(searchable_topics)
+        else:
+            candidates_per_topic = []
+
+        for topic, candidates in zip(searchable_topics, candidates_per_topic):
             if not candidates:
                 log(
                     TraceStage.ADDITIONAL_RESEARCH,
@@ -162,7 +226,9 @@ class LocationResearchAgent:
                     break
                 full_text = self.page_retrieval_tool.retrieve_full_text(candidate.source_url)
                 tool_calls_made += 1
-                if full_text:
+                # A translated snippet must not be overwritten by the page's
+                # full text, which is still in the original language.
+                if full_text and META_ORIGINAL_TEXT not in candidate.metadata:
                     candidate = candidate.model_copy(update={"text": full_text})
                 enriched.append(enrich_evidence(candidate))
 
@@ -172,6 +238,17 @@ class LocationResearchAgent:
                 f"Accepted {len(enriched)} evidence item(s) for '{topic.topic_id}'",
                 rejected=len(scored) - len(enriched),
             )
+
+        if profile_evidence:
+            self.evidence_repository.add_all([enrich_evidence(item) for item in profile_evidence])
+
+        if location.is_business:
+            web_sources = sum(1 for e in self.evidence_repository.list_all() if e.metadata.get("provider") != "google_places")
+            if web_sources < 3:
+                limitations.append(
+                    f"Only {web_sources} web page(s) mention this specific business, so coverage of it is thin — "
+                    "far less than a place's own Google Maps listing typically has."
+                )
 
         all_evidence = self.evidence_repository.list_all()
         evidence_topic_ids = {e.topic for e in all_evidence}

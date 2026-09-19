@@ -54,7 +54,9 @@ class KeywordResearchPlanner(ResearchPlanner):
         return ResearchTopic(
             topic_id=definition.topic_id,
             reason=definition.reason_template.format(location=location.name),
-            search_queries=[q.format(location=location_label) for q in definition.query_templates],
+            search_queries=definition.queries_for(
+                location_label, location.is_business, location.name, location.city or location.region or ""
+            ),
             preferred_source_types=list(definition.preferred_source_types),
             expected_evidence=definition.expected_evidence,
             priority=priority,

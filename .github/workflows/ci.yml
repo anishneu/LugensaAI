@@ -6,7 +6,35 @@ on:
   pull_request:
     branches: [main, develop]
 
+# A newer push to the same branch/PR makes the older run pointless.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
+  backend-lint:
+    name: Backend lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      # Deliberately the "this is actually broken" rules only: syntax errors,
+      # undefined names, unused imports and variables. Style opinions would
+      # fail the build over taste, which is what makes people stop reading CI.
+      - name: Ruff
+        run: ruff check backend --select E9,F63,F7,F82,F401,F841 --exclude backend/.venv
+
   backend:
     name: Backend tests
     runs-on: ubuntu-latest
@@ -22,6 +50,12 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/requirements.txt
+
+      # sentence-transformers depends on torch, and the default PyPI wheel
+      # drags in gigabytes of CUDA libraries a CI runner never uses. Installing
+      # the CPU build first lets the requirements install reuse it.
+      - name: Install CPU-only PyTorch
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Install dependencies
         run: pip install -r requirements.txt
@@ -56,3 +90,10 @@ jobs:
 
       - name: Type-check and build
         run: npm run build
+
+      - name: Upload production build
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 7

@@ -19,3 +19,4 @@ class PlaceCandidate(BaseModel):
     country: str | None = None
     latitude: float
     longitude: float
+    is_business: bool = Field(default=False, description="A specific business/venue rather than an area")

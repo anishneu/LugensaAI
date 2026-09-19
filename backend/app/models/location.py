@@ -17,3 +17,8 @@ class Location(BaseModel):
     latitude: float | None = Field(default=None)
     longitude: float | None = Field(default=None)
     raw_query: str = Field(..., description="The original, unnormalized location string supplied by the user")
+    is_business: bool = Field(
+        default=False,
+        description="True for one specific business/venue (a cafe, a hotel), False for an area or landmark. "
+        "Research about a business must be about that business, not just its city.",
+    )

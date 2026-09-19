@@ -45,6 +45,7 @@ function fixtureToOption(suggestion: LocationSuggestion): SearchOption {
       country: suggestion.country,
       latitude: suggestion.latitude,
       longitude: suggestion.longitude,
+      isBusiness: false,
     }),
   };
 }
@@ -63,6 +64,7 @@ function placeToOption(place: PlaceCandidate): SearchOption {
       country: place.country,
       latitude: place.latitude,
       longitude: place.longitude,
+      isBusiness: place.is_business,
     }),
   };
 }

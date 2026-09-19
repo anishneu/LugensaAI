@@ -38,11 +38,10 @@ A small, fixed set of location + question pairs, covering:
 
 Run via `python -m evaluation.run_benchmark` from `backend/` (code in `backend/evaluation/`).
 Raw output: `backend/evaluation/last_run_results.json`. Reproducible with `TAVILY_API_KEY` set;
-no `ANTHROPIC_API_KEY` was set for this run.
+the LLM-backed components were not used for this run.
 
 **Scope, stated plainly:**
-- **Baseline A was not run.** It requires a real LLM call and this environment has no
-  `ANTHROPIC_API_KEY`. Nothing below compares against it — the table only measures Baseline B vs.
+- **Baseline A was not run.** It needs a real LLM call and was not implemented for this benchmark. Nothing below compares against it — the table only measures Baseline B vs.
   the proposed system's *orchestration* (planning, retrieval scoring, verification), not
   generation quality.
 - **Citation correctness / groundedness / claim-level comparison could not be measured this
@@ -96,7 +95,7 @@ no `ANTHROPIC_API_KEY` was set for this run.
 ## What's still needed before claiming more
 
 Baseline A, and any claim-level metric (citation correctness, groundedness, coverage of
-*supported* topics rather than just topics-with-evidence), need `ANTHROPIC_API_KEY` set and the
+*supported* topics rather than just topics-with-evidence), need the LLM-backed components on (`OLLAMA_ENABLED`) and the
 benchmark re-run with `use_llm=True`. Until then, the honest claim is narrower than "the agent
 is better": *the orchestration layer measurably improves topic coverage and adds relevance
 scoring Baseline B entirely lacks, at a real and measured latency/tool-call cost* — nothing has

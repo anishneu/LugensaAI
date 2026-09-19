@@ -34,36 +34,39 @@ class AgentConfig(BaseModel):
 
 # --- LLM configuration (Milestone 2) -----------------------------------
 #
-# Nothing in this project calls the Anthropic API unless ANTHROPIC_API_KEY is
-# set. Without it, `build_default_agent()` uses the free, rule-based
-# Milestone 1 components exclusively (see app/agents/factory.py). Anthropic
-# API usage is billed per Anthropic's normal pricing once a key is set — it
-# is not free, just optional and inexpensive with the default model.
-ANTHROPIC_API_KEY_ENV_VAR = "ANTHROPIC_API_KEY"
-ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
-ANTHROPIC_MAX_TOKENS = int(os.environ.get("ANTHROPIC_MAX_TOKENS", "1024"))
-
-
-def anthropic_enabled() -> bool:
-    """Whether an Anthropic API key is configured in the environment."""
-    return bool(os.environ.get(ANTHROPIC_API_KEY_ENV_VAR))
-
-
-# --- Ollama configuration (free, local alternative to Anthropic) -------
-#
-# Ollama (https://ollama.com) runs a model entirely on this machine — no API
-# key, no per-token billing — but it does need Ollama installed and a model
-# pulled locally (`ollama pull <model>`) first, and inference is only as fast
-# as this machine's CPU/GPU. Unlike ANTHROPIC_API_KEY, there's no key whose
-# presence implies intent to use it, and unlike geocoding it needs real local
-# setup the user may not have done — so this is opt-in via OLLAMA_ENABLED,
-# not auto-detected.
+# The LLM-backed planner, claim extractor and synthesizer run on a local
+# Ollama model (https://ollama.com): no API key, no per-token billing, nothing
+# leaves this machine. Ollama needs to be installed with a model pulled
+# (`ollama pull <model>`), and inference is only as fast as this machine's
+# CPU/GPU. Since it needs real local setup the user may not have done, it is
+# opt-in via OLLAMA_ENABLED, not auto-detected. Without it,
+# `build_default_agent()` uses the free, rule-based Milestone 1 components
+# exclusively (see app/agents/factory.py).
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.1")
-# CPU-only inference of even a small (~8B) model can take minutes per call,
-# well past what would be a reasonable timeout for a hosted API -- default
-# generously and let a real deployment with a hosted/GPU Ollama tighten it.
+# qwen3:30b is a mixture-of-experts model: 30B parameters of knowledge but only
+# ~3B active per token, so it writes about as fast as a small model while
+# reading and reasoning far better. Measured against the previous default
+# (llama3.2:3b) on the same question and hardware it took the same ~3 minutes
+# and produced 3 precise, source-grounded claims where the 3B produced 13
+# padded ones. It needs ~19GB of RAM and `ollama pull qwen3:30b`.
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:30b")
+# A slow first call (loading the model into memory) is normal; default the
+# timeout generously rather than fall back to rules mid-question.
 OLLAMA_TIMEOUT_SECONDS = float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "600"))
+# Ollama silently truncates any prompt longer than the context window, and its
+# default window is small. The synthesis prompt carries a system prompt, the
+# claims and several evidence excerpts, so ask for room explicitly rather than
+# have the model quietly answer from the first half of its evidence.
+OLLAMA_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "8192"))
+# Reasoning models (Qwen3, DeepSeek-R1, gpt-oss) spend most of a request
+# "thinking" before they answer. Measured on qwen3:30b: 233 seconds with
+# thinking on versus 6.7 seconds off, for an extract-and-summarize task that
+# gains nothing from it. Default "false" (models with no thinking mode accept
+# and ignore it); set to "" to send nothing.
+OLLAMA_THINK = os.environ.get("OLLAMA_THINK", "false").strip().lower()
+# Loading a 19GB model takes 25-40 seconds. Ollama unloads after 5 idle minutes
+# by default, so a question asked after a coffee break would pay that again.
+OLLAMA_KEEP_ALIVE = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
 
 
 def ollama_enabled() -> bool:
@@ -71,8 +74,8 @@ def ollama_enabled() -> bool:
 
 
 def llm_enabled() -> bool:
-    """Whether an LLM-backed path (Anthropic or Ollama) is configured."""
-    return anthropic_enabled() or ollama_enabled()
+    """Whether the LLM-backed path is configured."""
+    return ollama_enabled()
 
 
 # --- Search configuration (Milestone 3) ---------------------------------
@@ -118,13 +121,37 @@ def semantic_retrieval_enabled() -> bool:
     return True
 
 
+# Translation of foreign-language evidence into English (Argos Translate,
+# local and free). On when both packages are installed, off if either is
+# missing or DISABLE_TRANSLATION is set (tests force this off).
+def translation_enabled() -> bool:
+    if os.environ.get("DISABLE_TRANSLATION"):
+        return False
+    try:
+        import argostranslate  # noqa: F401
+        import langdetect  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+GOOGLE_PLACES_API_KEY_ENV_VAR = "GOOGLE_PLACES_API_KEY"
+
+
+def place_profile_enabled() -> bool:
+    """Google Maps ratings/reviews for one specific business. Opt-in: needs a
+    key from a Google Cloud project with billing enabled (see
+    app/tools/google_places_tool.py). Also off under DISABLE_PLACE_PROFILE."""
+    return bool(os.environ.get(GOOGLE_PLACES_API_KEY_ENV_VAR)) and not os.environ.get("DISABLE_PLACE_PROFILE")
+
+
 SEMANTIC_MODEL_NAME = os.environ.get("SEMANTIC_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2")
 
 
 # --- Geocoding / POI search (Milestone 9) -------------------------------
 #
 # Live geocoding (OpenStreetMap Nominatim) needs no API key, so — unlike
-# ANTHROPIC_API_KEY / TAVILY_API_KEY — this is opt-out, not opt-in: on by
+# TAVILY_API_KEY / OLLAMA_ENABLED — this is opt-out, not opt-in: on by
 # default, off only if DISABLE_LIVE_GEOCODING is set (tests force this off
 # so the suite never makes a real network call — see tests/conftest.py).
 def geocoding_enabled() -> bool:

@@ -3,10 +3,9 @@
     python -m evaluation.run_benchmark
 
 Requires TAVILY_API_KEY (both systems use live search — see baselines.py and
-proposed_system.py for why). Does NOT require ANTHROPIC_API_KEY; if it's
-absent (the common case), Baseline A is skipped entirely and the proposed
-system runs without claim extraction, both noted plainly in the output
-rather than faked. See docs/evaluation.md for the full write-up of what
+proposed_system.py for why). Does not use an LLM: Baseline A is not
+implemented and the proposed system runs without claim extraction, both noted
+plainly in the output rather than faked. See docs/evaluation.md for the full write-up of what
 these numbers do and don't show.
 """
 
@@ -40,8 +39,8 @@ def main() -> None:
         print("TAVILY_API_KEY is not set — both systems need live search for this benchmark. Aborting.")
         sys.exit(1)
 
-    print(f"Baseline A (plain LLM call, no tools): SKIPPED — requires ANTHROPIC_API_KEY.")
-    print(f"ANTHROPIC_API_KEY set: {llm_enabled()} (claim extraction/synthesis will be a no-op if False)")
+    print("Baseline A (plain LLM call, no tools): not implemented.")
+    print(f"LLM-backed components enabled: {llm_enabled()} (this benchmark runs without them either way)")
     print()
 
     results: list[RunMetrics] = []

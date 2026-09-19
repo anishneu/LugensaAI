@@ -33,6 +33,7 @@ from app.core.llm_service import LLMService, LLMServiceError
 from app.models.claim import Claim
 from app.models.evidence import Evidence
 from app.models.plan import ResearchPlan
+from app.synthesis.excerpt import best_excerpt, query_terms
 from app.synthesis.claim_extractor import ClaimExtractor, ExtractionResult, FixtureClaimExtractor
 
 _SYSTEM_PROMPT = (
@@ -111,18 +112,32 @@ def _best_matching_evidence(claim_text: str, evidence: list[Evidence]) -> Eviden
     return best_evidence
 
 
-def _format_evidence_by_topic(evidence: list[Evidence]) -> tuple[str, dict[str, set[str]]]:
+# Evidence text reaching this point can be a full page extract (up to
+# _MAX_FULL_TEXT_LENGTH in app/tools/tavily_tools.py), and every character is
+# paid for twice: once in prompt-evaluation latency, once in the model's
+# ability to stay on task. Prompt evaluation measurably dominates runtime on
+# CPU-only local inference, and claims worth extracting sit near the top of a
+# passage rather than buried thousands of characters in, so each item is
+# capped here. The full text remains intact on the Evidence itself for the
+# UI, the synthesizer, and grounding checks — this cap applies only to what
+# the extraction prompt carries.
+_MAX_EVIDENCE_CHARS_FOR_EXTRACTION = 600
+
+
+def _format_evidence_by_topic(evidence: list[Evidence], question: str = "") -> tuple[str, dict[str, set[str]]]:
     by_topic: dict[str, list[Evidence]] = {}
     for item in evidence:
         by_topic.setdefault(item.topic, []).append(item)
 
+    terms = query_terms(question)
     lines: list[str] = []
     valid_ids_by_topic: dict[str, set[str]] = {}
     for topic_id, items in by_topic.items():
         lines.append(f"Topic: {topic_id}")
         valid_ids_by_topic[topic_id] = {item.evidence_id for item in items}
         for item in items:
-            lines.append(f'- [{item.evidence_id}] ({item.publisher or item.source_type}) "{item.text}"')
+            snippet = best_excerpt(item.text, terms, _MAX_EVIDENCE_CHARS_FOR_EXTRACTION)
+            lines.append(f'- [{item.evidence_id}] ({item.publisher or item.source_type}) "{snippet}"')
         lines.append("")
     return "\n".join(lines), valid_ids_by_topic
 
@@ -137,7 +152,7 @@ class LLMClaimExtractor(ClaimExtractor):
             return ExtractionResult(claims=[])
 
         try:
-            return self._extract_with_llm(evidence)
+            return self._extract_with_llm(evidence, plan.question)
         except (LLMServiceError, ValueError) as exc:
             fallback_result = self._fallback.extract(evidence, plan)
             fallback_result.notes.append(
@@ -145,8 +160,8 @@ class LLMClaimExtractor(ClaimExtractor):
             )
             return fallback_result
 
-    def _extract_with_llm(self, evidence: list[Evidence]) -> ExtractionResult:
-        evidence_text, valid_ids_by_topic = _format_evidence_by_topic(evidence)
+    def _extract_with_llm(self, evidence: list[Evidence], question: str = "") -> ExtractionResult:
+        evidence_text, valid_ids_by_topic = _format_evidence_by_topic(evidence, question)
         user_prompt = (
             f"Evidence, grouped by topic:\n\n{evidence_text}\n"
             f"Respond with JSON matching exactly this shape:\n{_RESPONSE_SHAPE}"

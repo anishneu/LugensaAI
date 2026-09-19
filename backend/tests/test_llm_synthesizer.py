@@ -121,3 +121,23 @@ def test_missing_topic_limitation_present_even_if_llm_omits_it():
     result = synthesizer.synthesize(_location(), "q?", plan, [], [])
 
     assert any("No evidence was found for planned topic 'housing'" in lim for lim in result.limitations)
+
+
+def test_strips_html_a_small_local_model_wraps_prose_in():
+    """Regression test: llama3.2:3b returned `<p>...</p><p>...</p>` in `details`
+    despite being asked for plain text, and the UI showed the raw tags."""
+    response = json.dumps(
+        {
+            "summary": "<p>Reviews are mixed.</p>",
+            "key_findings": ["<b>Mixed</b> reviews"],
+            "details": "<p>First point.</p><p>Second &amp; third point.</p>",
+            "recommendation": "Read recent reviews first.",
+        }
+    )
+    synthesizer = LLMSynthesizer(ScriptedLLMService([response]))
+
+    result = synthesizer.synthesize(_location(), "q?", _plan(), [_claim()], _evidence())
+
+    assert result.summary == "Reviews are mixed."
+    assert result.key_findings == ["Mixed reviews"]
+    assert result.details == "First point.\n\nSecond & third point."
