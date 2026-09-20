@@ -68,20 +68,24 @@ to made-up sample data.
   page only counts as evidence if it names the business's distinguishing words *and* the right
   city (so "SR Coffee" in Tokyo can't be answered with reviews of "SR Coffee" in Virginia). No
   soft fallback: another business's reviews are worse than an honest "nothing found".
-- **Google Maps data when the question names the place** — a pin on a street corner with the venue next to it
-  still gets that venue's Google rating, review count and reviews if the question names it ("how are the reviews
-  of this AO Arena?"); its rating opens the key findings, and the reviews appear beside those from TripAdvisor,
-  Reddit and regional forums.
+- **Google Maps ratings wherever a place has them, without having to ask for them** — a general question ("is it a
+  good place to visit as a tourist?") about a temple, a museum or a business gets its Google rating and reviews as
+  evidence, and the rating opens the key findings. An address pin adopts the most popular place at it (the address of
+  Ginkaku-ji is the temple), a corner adopts the venue the question names ("how are the reviews of this AO Arena?"),
+  and an area, which is not one place, shows the best-known places around it with Google's ratings instead of
+  attaching a neighbour's. The reviews appear beside those from TripAdvisor, Reddit and regional forums.
 - **Google Maps data for that business (optional)** — with `GOOGLE_PLACES_API_KEY`, its rating,
   review count, hours and Google's own review summary become cited evidence and get a card in the
   UI, clearly labeled as Google's. **"Around this pin"** (food, transit, groceries, health, police,
   banks with computed walking distances) comes from OpenStreetMap map data, not from an LLM. The public
   Overpass servers are often slow for a dense city centre, so it tries five of them with their own timeouts,
-  falls back to an earlier answer for that spot, and offers "Try again" rather than a dead end.
+  falls back to an earlier answer for that spot, and offers "Try again" rather than a dead end. Names and addresses in
+  another script (Japanese, Chinese, Korean, Cyrillic, Arabic, Thai) can be translated to English on request with the
+  free local translator, labeled as machine translation with the original beneath.
 - **Hybrid retrieval** — keyword scoring by default, blended with local-embedding semantic
   scoring (`sentence-transformers`, no API key) when installed.
 - **Real community voices** — a dedicated view of actual forum/review commentary (Reddit,
-  Nextdoor, Google Maps, etc.) about the specific selected location, including negative or mixed
+  Nextdoor, Google Maps, etc.), filterable by site and mixed across sites by default so one large source cannot bury the rest, about the specific selected location, including negative or mixed
   opinions and recent incident reports, shown for awareness rather than filtered out. Relevance is
   checked against the exact place (city and region, not just a same-named city elsewhere, and not
   just a chain's name with no city context) rather than the softer per-topic filter every other
@@ -113,7 +117,7 @@ to made-up sample data.
 - **Readable descriptions, not page chrome** — a search snippet is markup, timestamps, bylines and menus joined
   together. The live feed and the evidence cards show whole sentences picked out of it (`backend/app/tools/descriptions.py`),
   never rewritten, and just the headline and source when no sentence qualifies.
-- **An interface built to be read** — a landing page with the working search box over a real street map; then
+- **An interface built to be read** — a landing page over a still street-map image (search happens in the app); then
   a top bar, a zoomed-in map and question box on the left, the answer in the middle, the live feed on the right,
   built with Tailwind and Headless UI over MapLibre and free OpenFreeMap tiles (no API key). No animation or 3D
   library: they were tried and removed. See [`frontend/README.md`](frontend/README.md).
@@ -213,7 +217,22 @@ so CI is free, offline and deterministic just like a local `pytest`.
 | [`secret-scan.yml`](.github/workflows/secret-scan.yml) | every push and PR | Gitleaks over the full history, because a key committed once and deleted later is still leaked. |
 | [`dependency-audit.yml`](.github/workflows/dependency-audit.yml) | PRs, weekly, manual | Dependency review on PRs (blocks newly introduced high-severity issues), plus `pip-audit` and `npm audit` on what is actually installed. |
 | [`release.yml`](.github/workflows/release.yml) | pushing a `v*` tag | Re-runs tests, lint and build from that exact commit, then publishes a GitHub Release with generated notes and the frontend bundle attached. Never releases untested code. |
-| [`dependabot.yml`](.github/dependabot.yml) | weekly | Grouped update PRs for pip, npm and the workflows themselves. |
+| [`dependabot.yml`](.github/dependabot.yml) | monthly | Grouped update PRs for pip, npm and the workflows themselves. |
+
+**Why CodeQL failed on a private repository, and what was changed.** The analysis ran (it scanned every file) and then
+the step after it failed with "Resource not accessible by integration ... get-a-workflow-run". On a private repo the
+CodeQL action reads its own workflow run through the API, which needs the `actions: read` permission; the workflow
+granted only `contents: read` and `security-events: write`. It now grants `actions: read`. On a pull request from
+**Dependabot** the same message has a second cause that no workflow setting fixes: Dependabot's token is read-only, so it
+can never upload results. The CodeQL job therefore skips Dependabot's PRs (the push and weekly scans cover the same
+code). The same read-only token is why the dependency review no longer posts a PR comment, and why the secret scan now
+asks for `pull-requests: read` (gitleaks lists a PR's commits through the API). The dependency review still runs only on
+a public repository or when the repository variable `CODE_SCANNING` is `true`, because on a private repo it needs the
+dependency graph (Advanced Security). If the CodeQL upload is refused with "Advanced Security must be enabled", restore
+the same condition on it.
+
+Dependabot opens at most one grouped, minor-and-patch PR per ecosystem a month (two for pip and npm at a time) and no
+major-version bumps; its PRs are ordinary PRs, safe to close (`@dependabot close`) or merge once CI is green.
 
 These have been validated with `actionlint` and their commands run locally, but a workflow only
 proves itself on GitHub — the first run of each is the real test.

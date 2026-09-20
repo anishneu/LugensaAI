@@ -20,7 +20,7 @@ from app.core.config import (
 from app.models.evidence import Evidence
 from app.models.location import Location
 from app.models.nearby import NearbyPlaces
-from app.models.place import PlaceCandidate
+from app.models.place import PlaceCandidate, PopularPlace
 from app.models.place_profile import PlaceProfile
 from app.models.response import ResearchResponse
 from app.retrieval.semantic_retriever import is_model_warm
@@ -31,7 +31,7 @@ from app.tools.nominatim_tool import NominatimPlaceSearchTool, slugify
 from app.tools.overpass_tool import OverpassNearbyTool
 from app.tools.tavily_tools import TavilyLiveFeedTool
 from app.tools.post_dates import PostDateRecovery
-from app.tools.translation import default_translator
+from app.tools.translation import default_translator, translate_short_texts
 
 router = APIRouter()
 
@@ -193,6 +193,57 @@ def search_places(q: str = "") -> list[PlaceCandidate]:
             if not any(distance_m(place.latitude, place.longitude, c.latitude, c.longitude) < 150 for c in candidates)
         ]
     return candidates[:8]
+
+
+class TranslateRequest(BaseModel):
+    latitude: float
+    longitude: float
+    texts: list[str]
+
+
+class TranslatedTexts(BaseModel):
+    available: bool
+    language: str | None = None
+    translations: list[str | None] = []
+
+
+@router.post("/places/translate", response_model=TranslatedTexts)
+def translate_place_texts(request: TranslateRequest) -> TranslatedTexts:
+    """English for place names and addresses written in the local language, for the "Around this pin" card.
+
+    The language comes from where the pin is (a three-character name cannot be detected). The caller chooses what to
+    send: every name where the local language is not English, and non-Latin addresses; street names in the Latin
+    script are proper nouns and are left out by the frontend. Machine translation of a name is a gloss, not a fact,
+    and the UI labels it as such. `available` is false when translation is off, the country's language has no free
+    translation pack, or the place has no local language.
+    """
+    if not translation_enabled():
+        return TranslatedTexts(available=False)
+    texts = [t[:200] for t in request.texts[:120]]
+    pin = Location(name="pin", slug="pin", raw_query="pin", latitude=request.latitude, longitude=request.longitude)
+    try:
+        context = LocaleResolver().resolve(pin)
+    except ToolExecutionError:
+        return TranslatedTexts(available=False)
+    if context.language is None:
+        return TranslatedTexts(available=False)
+    translations = translate_short_texts(texts, context.language, default_translator())
+    return TranslatedTexts(available=True, language=context.language, translations=translations)
+
+
+@router.get("/places/popular", response_model=list[PopularPlace])
+def popular_places(latitude: float, longitude: float) -> list[PopularPlace]:
+    """Well-known places around a pin with Google Maps' own rating and review count.
+
+    For a pin that is an area or a corner rather than one place, this answers "is it worth visiting?" with
+    what Google shows. 503 when no Google key is configured; an empty list when it has nothing rated nearby."""
+    google = _google_places_tool()
+    if google is None:
+        raise HTTPException(status_code=503, detail="Google Maps is not connected on this server.")
+    try:
+        return google.popular_places(latitude, longitude)
+    except ToolExecutionError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.get("/places/nearby", response_model=NearbyPlaces)

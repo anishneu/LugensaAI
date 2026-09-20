@@ -135,22 +135,41 @@ refresh button uses it and nothing else may (the frontend auto-refreshes hourly,
 Cached results are copies, so one place relabeling an item's scope cannot change another's. A failed search is
 never cached.
 
-## Google Maps ratings when the question names the place
+## Google Maps ratings, whether or not the question asks for them
+
+A general question ("is it a good place to visit as a tourist?") used to get Google Maps data only when the pin was
+flagged a business. A temple is not (Google lists it as an *attraction*, and treating attractions, parks and islands as
+businesses was measured to break the research: strict name matching and "customer reviews" queries find nothing), so a
+tourist question about Ginkaku-ji got no Google rating or reviews, while "the reviews and ratings for Ginkaku-ji" did.
+Now, by kind of pin:
+
+| Pin | What happens |
+|---|---|
+| A business | Its Google listing is fetched as evidence (as before). |
+| A named landmark that is not a business (a temple, museum, park) | `_lookup_landmark_profile`: one quiet Google lookup with `exact=True`, which accepts a listing only if its name is the pin's name word for word (`same_place_name`). It is looked up as evidence but the pin is *not* switched to business mode. |
+| An area ("Shibuya"), or a place with no listing | The exact match fails, nothing is added, and nothing is said. The looser test used for a business would have given the area "Shibuya" the ratings of Shibuya Station. |
+| A street address | `_adopt_business_at_address` adopts the most popular place within 60 m, landmarks included. It ranks by popularity because at Ginkaku-ji's address the nearest listed "places" by distance were a hand basin and the abbot's quarters, which are parts of the temple, and the temple itself came after them. |
+| A corner or station approach, with a venue named in the question | `GooglePlacesTool.venue_named_in()` asks Google for the 20 most popular places within 300 m and takes the first whose whole distinguishing name is in the question (see below). |
+
+When a listing is found, the first key finding is always "Google Maps rates X 4.6 out of 5 from N reviews", written
+from the listing rather than left to the model, unless a finding already states the rating.
+
+`GET /api/places/popular?latitude=&longitude=` returns the best-known rated places around a pin (Google's rating and
+review count, most popular first, streets and areas excluded, at most 6). The UI shows it for a pin that is not one
+place, and beside a landmark's own listing. 503 when no Google key is connected.
+
+### When the question names the place
 
 A pin is often a street corner or a station approach ("Hunts Bank & Victoria Station Approach") with a well-known
-business beside it, and the question names that business ("how are the reviews of this AO Arena?"). Google Maps
-data (rating, review count, up to five reviews, Google's own summary) was fetched only when the pin itself was a
-business or a street address, so this question got web pages about the arena and no Google rating at all.
-Now `GooglePlacesTool.venue_named_in()` asks Google for the 20 most popular places within 300 m of the pin and
-takes the first whose whole distinguishing name appears in the question (the same strict test used for web pages).
-It ranks by popularity, not distance, and is not limited to shops: at Victoria Station the 20 *nearest* places were
-kiosks, barbers and bus stops and the arena was not among them, while by popularity it was second. Landmarks (an
-arena, a cathedral) count; streets, areas and bare addresses do not.
-That business becomes the subject: its listing is fetched as evidence, the UI switches to it and shows the
-"On Google Maps" card, and the response says so in its limitations. It costs one Google Nearby request, made
-only when the question contains a capitalized name that is not merely the start of a sentence, and a bare "is it
-good?" never attaches a neighbour's ratings to the pin. When a listing is found, the first key finding is always
-"Google Maps rates X 4.6 out of 5 from N reviews", written from the listing rather than left to the model.
+business beside it, and the question names that business ("how are the reviews of this AO Arena?").
+`GooglePlacesTool.venue_named_in()` asks Google for the 20 most popular places within 300 m of the pin and takes the
+first whose whole distinguishing name appears in the question (the same strict test used for web pages). It ranks by
+popularity, not distance, and is not limited to shops: at Victoria Station the 20 *nearest* places were kiosks, barbers
+and bus stops and the arena was not among them, while by popularity it was second. Landmarks (an arena, a cathedral)
+count; streets, areas and bare addresses do not. That business becomes the subject: its listing is fetched as
+evidence, the UI switches to it and shows its Google Maps tab, and the response says so in its limitations. It costs
+one Google Nearby request, made only when the question contains a capitalized name that is not merely the start of a
+sentence, and a bare "is it good?" never attaches a neighbour's ratings to the pin.
 
 ## "Around this pin" and the Overpass servers
 
@@ -163,6 +182,22 @@ independently of it, and two unrelated mirrors), each with its own timeout (12 s
 old) when every one of them fails. The result is cached for an hour. The query no longer ends in `out center 400`:
 in a dense centre the first 400 elements are not the nearest 400, and Manchester has 400+ food and drink places
 within 600 m.
+
+### Translating names and addresses
+
+`POST /api/places/translate` (`{latitude, longitude, texts}`) translates place names and addresses to English for the
+card. The language comes from where the pin is (`LocaleResolver`, cached), because a three-character name cannot be
+language-detected. Text in any script is translated: it was once limited to non-Latin scripts, on the reasoning that a
+German name is a proper noun, but "Bundespolizeiinspektion Erfurt" is as opaque to a visitor as a Japanese one. The caller
+chooses what to send (the UI sends every name where the local language isn't English, and only non-Latin addresses, since a
+Latin-script street name is a proper noun); Latin text long enough to detect that is confidently English is skipped. Names
+that translate to themselves, bare numbers, and single capitalised words (a brand: "REWE" came back as "REWEB") are left
+alone.
+It uses the same free local Argos translator as the research, so the first use of a language downloads its pack (about
+30 s once, measured for Japanese; the translator retries a failed download after five minutes, so the UI says to try
+again). Machine translation of a name is a gloss, not a fact ("北白川交番" came back as "North America"), so the UI
+labels it and keeps the original beneath. `available` is false when translation is off or the country has no local
+language.
 
 ## Readable descriptions
 

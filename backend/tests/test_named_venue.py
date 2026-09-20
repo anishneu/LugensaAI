@@ -28,7 +28,7 @@ class _Google:
         self.named_calls = 0
         self.lookups: list[str] = []
 
-    def venues_at(self, lat, lon, radius_m=40.0, limit=5):
+    def venues_at(self, lat, lon, radius_m=40.0, limit=5, rank="DISTANCE", businesses_only=True):
         return []
 
     def venue_named_in(self, text, lat, lon, radius_m=300.0):
@@ -37,7 +37,9 @@ class _Google:
             raise ToolExecutionError("google is down")
         return self._venue if self._venue and self._venue.name.lower() in text.lower() else None
 
-    def lookup(self, name, lat, lon, area=""):
+    def lookup(self, name, lat, lon, area="", exact=False):
+        if exact:  # the quiet lookup for a pin that is a place but not a business: the pin here is a street corner
+            return None
         self.lookups.append(name)
         return PlaceProfile(place_id="p", name=name, rating=self._rating, review_count=48_213)
 
@@ -113,3 +115,37 @@ def test_the_rating_line_is_not_repeated_when_a_finding_already_states_it():
     response = agent.run(_pin(), "How are the reviews of this AO Arena?")
 
     assert response.key_findings == ["4.6/5 average rating from 48,213 Google Maps reviews"]
+
+
+class _LandmarkGoogle(_Google):
+    """Answers the quiet exact lookup for one named place, as Google does for a temple on its own listing."""
+
+    def __init__(self, listed_as: str) -> None:
+        super().__init__(None)
+        self._listed_as, self.exact_calls = listed_as, []
+
+    def lookup(self, name, lat, lon, area="", exact=False):
+        if exact:
+            self.exact_calls.append(name)
+            return PlaceProfile(place_id="p", name=name, rating=4.5, review_count=17_998) if name == self._listed_as else None
+        return super().lookup(name, lat, lon, area, exact)
+
+
+def test_a_pin_that_is_a_named_landmark_gets_its_google_rating_without_being_treated_as_a_business():
+    google = _LandmarkGoogle("Ginkaku-ji")
+    temple = _pin(name="Ginkaku-ji", city="Kyoto", region="Kyoto", country="Japan", slug="gj")
+
+    response = _run("Is it a good place to visit as a tourist?", google, temple)
+
+    assert google.exact_calls == ["Ginkaku-ji"] and not response.location.is_business
+    assert response.key_findings[0] == "Google Maps rates Ginkaku-ji 4.5 out of 5 from 17,998 reviews."
+    assert not any("Google Maps listing" in lim for lim in response.limitations), "no fuss when nothing matches"
+
+
+def test_an_area_pin_gets_no_google_listing_and_no_limitation_about_it():
+    google = _LandmarkGoogle("Shibuya Station")
+
+    response = _run("Is it a good place to visit as a tourist?", google, _pin(name="Shibuya", city="Tokyo", region="Tokyo", country="Japan", slug="sh"))
+
+    assert google.exact_calls == ["Shibuya"] and response.key_findings[:1] != ["Google Maps rates Shibuya 4.5 out of 5"]
+    assert not any("Google" in lim for lim in response.limitations)

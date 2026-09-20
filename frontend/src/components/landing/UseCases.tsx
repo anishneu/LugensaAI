@@ -86,7 +86,7 @@ export function UseCases({ onTry }: { onTry: (question: string) => void }) {
                   <ArrowRightIcon className="h-4 w-4 flex-shrink-0 text-white/40 transition group-hover:translate-x-0.5 group-hover:text-violet-300" aria-hidden="true" />
                 </button>
               ))}
-              <p className="m-0 mt-auto pt-2 text-xs leading-relaxed text-white/40">You pick the place first; the question is then asked about it.</p>
+              <p className="m-0 mt-auto pt-2 text-xs leading-relaxed text-white/40">Opens the app with the question ready in the ask box; you choose the place, then send it.</p>
             </div>
           </TabPanel>
         ))}

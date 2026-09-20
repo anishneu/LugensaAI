@@ -57,6 +57,16 @@ def test_newsletter_cookie_and_navigation_text_is_dropped():
     assert readable_description(raw) == "The council says the road will reopen to traffic on Friday after weeks of repairs."
 
 
+def test_privacy_and_consent_notices_are_not_descriptions():
+    raw = (
+        'You can opt out of the sale of your personal information by clicking on the "Do Not Sell" link. '
+        "By continuing to use this website you agree to our terms of service. "
+        "Kyoto will host sixteen events during Silver Week, from temple illuminations to a night market."
+    )
+
+    assert readable_description(raw) == "Kyoto will host sixteen events during Silver Week, from temple illuminations to a night market."
+
+
 def test_a_sentence_that_only_repeats_the_title_is_skipped():
     raw = "England completes series sweep over Sri Lanka. The hosts won by eight wickets to take the series three-nil."
 

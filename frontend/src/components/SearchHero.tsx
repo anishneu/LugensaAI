@@ -10,9 +10,11 @@ interface SearchHeroProps {
   onQueryChange: (value: string) => void;
   onSelect: (location: ActiveLocation) => void;
   onSubmit: (text: string) => void;
+  /** A question chosen on the landing page: it waits in the question box once a place is picked. */
+  pendingQuestion?: string | null;
 }
 
-export function SearchHero({ query, onQueryChange, onSelect, onSubmit }: SearchHeroProps) {
+export function SearchHero({ query, onQueryChange, onSelect, onSubmit, pendingQuestion }: SearchHeroProps) {
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#0b0a14] px-6 py-12 text-white">
       <Suspense fallback={null}>
@@ -37,6 +39,11 @@ export function SearchHero({ query, onQueryChange, onSelect, onSubmit }: SearchH
             placeholder="Try “Shibuya, Tokyo” or “Le Marais, Paris”…"
             autoFocus
           />
+          {pendingQuestion && (
+            <p className="mt-3 mb-0 rounded-xl border border-violet-400/30 bg-violet-400/10 px-4 py-2.5 text-sm text-violet-100">
+              Pick a place, and this will be ready to ask: <em className="text-white">“{pendingQuestion}”</em>
+            </p>
+          )}
         </div>
       </div>
     </div>

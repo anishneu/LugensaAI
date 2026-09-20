@@ -224,17 +224,21 @@ export function ResponsePanel({ session }: ResponsePanelProps) {
 
       {/* Keyed by question, so each answer opens on Overview rather than on whatever tab the last one left. */}
       <TabGroup key={session.id}>
-        <TabList className="mb-4 flex gap-1 overflow-x-auto rounded-full border border-[var(--border)] bg-[var(--bg-alt)] p-1">
+        <TabList className="mb-5 flex gap-x-6 overflow-x-auto shadow-[inset_0_-1px_0_var(--border)]">
           {tabs.map((tab) => (
             <Tab
               key={tab.id}
-              className="flex flex-shrink-0 items-center gap-1 rounded-full px-2 py-1.5 text-[12.5px] font-medium xl:gap-1.5 xl:px-4 xl:text-[13px] whitespace-nowrap text-[var(--text-muted)] outline-none transition-colors data-[hover]:text-[var(--text-h)] data-[selected]:bg-[var(--accent)] data-[selected]:text-white data-[focus]:ring-2 data-[focus]:ring-violet-500"
+              className="flex flex-shrink-0 items-center gap-2 border-b-2 border-transparent px-1 pt-1 pb-3 text-sm font-medium whitespace-nowrap text-[var(--text-muted)] outline-none transition-colors data-[focus]:rounded-sm data-[focus]:ring-2 data-[focus]:ring-violet-500 data-[hover]:border-[var(--text-muted)] data-[hover]:text-[var(--text-h)] data-[selected]:border-[var(--accent)] data-[selected]:text-[var(--accent)]"
             >
               {({ selected }) => (
                 <>
                   {tab.label}
                   {tab.count != null && (
-                    <span className={`rounded-full px-1.5 text-[10.5px] ${selected ? "bg-white/25" : "bg-[var(--bg)]"}`}>{tab.count}</span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${selected ? "bg-[var(--accent-bg)] text-[var(--accent)]" : "bg-[var(--bg-alt)] text-[var(--text-muted)]"}`}
+                    >
+                      {tab.count}
+                    </span>
                   )}
                 </>
               )}

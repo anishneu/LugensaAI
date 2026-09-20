@@ -3,6 +3,13 @@ name: CodeQL
 # GitHub's static security analysis. Finds injection, unsafe deserialization,
 # path traversal and similar bug classes in the Python backend and the
 # TypeScript frontend. Free for public repositories.
+#
+# The analysis itself works here (it scans every file). What failed, on a private repository, was the step after it,
+# with "Resource not accessible by integration ... get-a-workflow-run": on a private repo the CodeQL action reads its
+# own workflow run through the API, which needs the `actions: read` permission, and the workflow did not grant it. The
+# same message on a pull request from Dependabot has a second cause: Dependabot's token is read-only by design, so it
+# can never upload results. Both are handled below: `actions: read` is granted, and the job skips Dependabot's PRs
+# (the push and weekly scans cover the same code).
 
 on:
   push:
@@ -23,24 +30,27 @@ permissions:
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
+    # Dependabot's token is read-only, so it cannot upload results whatever the workflow grants.
+    if: ${{ github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      actions: read
       security-events: write
     strategy:
       fail-fast: false
       matrix:
         language: [python, javascript-typescript]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           build-mode: none
 
       - name: Analyze
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: "/language:${{ matrix.language }}"

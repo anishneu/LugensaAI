@@ -3,7 +3,7 @@ import { Map as MapLibreMap, Marker } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { ArrowTopRightOnSquareIcon, MapPinIcon } from "@heroicons/react/24/outline";
 import { MAP_STYLE } from "../mapSetup";
-import { googleMapsUrl } from "../maps";
+import { pinMapsUrl } from "../maps";
 import type { ActiveLocation } from "../types";
 
 const ZOOM = 16.2;
@@ -18,8 +18,9 @@ function createPin(): HTMLDivElement {
 }
 
 /**
- * The researched place on a zoomed-in map. Clicking the map (not dragging it) opens that spot in Google Maps in a
- * new window, so the pin can be checked against a map you already trust.
+ * The researched place on a zoomed-in map. Clicking the map (not dragging it) opens that place in Google Maps in a
+ * new window (its listing, not a bare coordinate: see `pinMapsUrl`), so the pin can be checked against a map you already
+ * trust.
  */
 export default function MapPanel({ location }: { location: ActiveLocation }) {
   const { latitude, longitude } = location;
@@ -28,7 +29,7 @@ export default function MapPanel({ location }: { location: ActiveLocation }) {
   const markerRef = useRef<Marker | null>(null);
   const [failed, setFailed] = useState(false);
   const hasCoords = latitude != null && longitude != null;
-  const url = hasCoords ? googleMapsUrl(latitude, longitude) : null;
+  const url = hasCoords ? pinMapsUrl({ ...location, latitude, longitude }) : null;
   // The click handler is attached once, so it reads the current URL from here rather than closing over the first one.
   const urlRef = useRef(url);
   useEffect(() => {

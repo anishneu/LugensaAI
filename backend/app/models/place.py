@@ -21,3 +21,19 @@ class PlaceCandidate(BaseModel):
     longitude: float
     is_business: bool = Field(default=False, description="A specific business/venue rather than an area")
     is_address: bool = Field(default=False, description="A street address or building, not a named place")
+    google_place_id: str | None = Field(
+        default=None, description="Google's id for the place, when the candidate came from Google Maps: it opens the exact listing"
+    )
+
+
+class PopularPlace(BaseModel):
+    """A well-known place near a pin, with Google's own rating. Google's data, shown with attribution."""
+
+    name: str
+    category: str
+    rating: float
+    review_count: int | None = None
+    distance_m: int
+    maps_url: str | None = None
+    latitude: float
+    longitude: float

@@ -189,3 +189,69 @@ def test_the_translation_cap_is_respected():
     translate_evidence(items, translator, max_translations=2)
 
     assert sum("original_text" in i.metadata for i in items) == 2
+
+
+# ---- short texts: place names and addresses for "Around this pin"
+
+
+class _Glossary(Translator):
+    def __init__(self, glossary: dict[str, str], detected: dict[str, str] | None = None) -> None:
+        self._glossary, self._detected, self.calls = glossary, detected or {}, []
+
+    def detect(self, text):
+        return self._detected.get(text)
+
+    def translate_to_english(self, text, source_language):
+        self.calls.append((text, source_language))
+        return self._glossary.get(text)
+
+
+def test_names_in_any_script_are_translated_and_labels_without_letters_are_not():
+    from app.tools.translation import has_non_latin_letters, translate_short_texts
+
+    assert has_non_latin_letters("円通殿") and has_non_latin_letters("Кофейня") and has_non_latin_letters("Ginkaku-ji 銀閣寺")
+    assert not has_non_latin_letters("Café du Coin") and not has_non_latin_letters("Bäckerei 24") and not has_non_latin_letters("")
+
+    glossary = _Glossary({"円通殿": "Entsu Hall", "銀閣寺交番": "Ginkakuji police box", "Bundespolizeiinspektion": "Federal police inspectorate"})
+    out = translate_short_texts(["円通殿", "24", "Bundespolizeiinspektion", "銀閣寺交番"], "ja", glossary)
+
+    assert out == ["Entsu Hall", None, "Federal police inspectorate", "Ginkakuji police box"]
+    assert [c[0] for c in glossary.calls] == ["円通殿", "Bundespolizeiinspektion", "銀閣寺交番"], "a bare number is never sent"
+
+
+def test_a_brand_or_proper_name_that_translates_to_itself_is_dropped():
+    from app.tools.translation import translate_short_texts
+
+    glossary = _Glossary({"Starbucks": "Starbucks", "Apotheke am Anger": "Pharmacy on the Anger"})
+
+    assert translate_short_texts(["Starbucks", "Apotheke am Anger"], "de", glossary) == [None, "Pharmacy on the Anger"]
+
+
+def test_a_single_capitalised_word_is_a_brand_and_is_not_sent():
+    from app.tools.translation import translate_short_texts
+
+    glossary = _Glossary({"REWE": "REWEB", "Sparkasse": "Savings Bank"})
+
+    assert translate_short_texts(["REWE", "Sparkasse"], "de", glossary) == [None, "Savings Bank"]
+    assert [c[0] for c in glossary.calls] == ["Sparkasse"]
+
+
+def test_latin_text_that_is_confidently_english_is_left_alone():
+    from app.tools.translation import translate_short_texts
+
+    text = "The Old Post Office Cafe and Bar"
+    glossary = _Glossary({text: "should not be used"}, detected={text: "en"})
+
+    assert translate_short_texts([text], "de", glossary) == [None]
+    assert glossary.calls == []
+
+
+def test_english_places_and_untranslatable_text_come_back_as_none():
+    from app.tools.translation import translate_short_texts
+
+    glossary = _Glossary({"円通殿": "円通殿"})  # a "translation" identical to the input is no translation
+
+    assert translate_short_texts(["円通殿"], "en", glossary) == [None]
+    assert translate_short_texts(["円通殿"], None, glossary) == [None]
+    assert translate_short_texts(["円通殿"], "ja", glossary) == [None]
+    assert translate_short_texts(["未知"], "ja", glossary) == [None]
