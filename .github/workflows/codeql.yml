@@ -49,7 +49,7 @@ jobs:
       matrix:
         language: [python, javascript-typescript]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
@@ -72,7 +72,7 @@ jobs:
 
       - name: Keep the results file
         if: ${{ env.UPLOAD_TO_CODE_SCANNING != 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: codeql-results-${{ matrix.language }}
           path: codeql-results
