@@ -26,7 +26,9 @@ Wikivoyage say, and what has been published about the place in the last 30 days 
 safety, business and events). It runs on a local model through Ollama, so **there is no billed model API anywhere in
 the project**, and it never invents data: with nothing configured it says so instead of making something up.
 
-**Author:** [Anish Kuila](https://github.com/anishneu)
+**Author:** Anish Kuila
+
+**Status:** Working Progress
 
 ## Table of contents
 
@@ -587,37 +589,6 @@ Runs the benchmark described in [`docs/evaluation.md`](docs/evaluation.md) for r
 vs. the proposed system's orchestration — and prints/saves actual measured results, including
 tradeoffs where the proposed system does *not* clearly win (e.g. more tool calls, more latency,
 occasionally less source diversity). Requires `TAVILY_API_KEY`.
-
-## Status
-
-The 8 originally planned milestones are implemented (adaptive planning, hybrid retrieval, persistent
-evidence storage, claim verification with contradiction detection, live web search, optional LLM
-reasoning, a React frontend, and a real evaluation run), followed by live place search, an
-independent live feed (the last 30 days at and around the place, then the city), real
-per-item timestamps, forum and regional-community sources with their real dates, translation of foreign-language sources,
-business-specific research, OpenStreetMap "around this pin" data, and optional Google Maps data (including a venue
-named in the question), readable feed descriptions and a rebuilt interface. See
-the Milestone status table in [`docs/architecture.md`](docs/architecture.md) for what's opt-in vs.
-free-by-default.
-
-**What it is, honestly:** a RAG pipeline with a small, bounded agent loop. It retrieves live web
-evidence, reranks, grounds, generates and verifies with citations. After the first search pass the
-agent *looks at what it found and decides what to do next*: search again with a query aimed at the
-question, or consult Wikipedia/Wikivoyage, at most twice (`AgentConfig.max_research_rounds`). The model
-makes that choice when one is available; a rule-based judge does otherwise. It is a bounded loop over
-a fixed menu of two tools, not an open-ended autonomous agent: it does not write code, browse
-freely, or plan across questions. Claims written by the model are checked against the words and
-figures of the sources they cite, and overview sentences that no source backs are flagged as the
-model's inference. What that check is and isn't is in [`docs/architecture.md`](docs/architecture.md).
-[`docs/evaluation.md`](docs/evaluation.md) covers what has and hasn't been measured (Baseline A and
-claim-level metrics are not measured; the new loop has been checked on one live question, not
-benchmarked).
-
-**Known limits, stated plainly.** The live feed's news comes as headlines only (Google News' unofficial RSS gives no article
-text), so whether a headline is about a street is inferred from its wording and outlet; its politics and irrelevance filters
-are keyword rules on the headline and will occasionally drop something useful or let something through. When even one item is
-found at or near the pin, the city's news is not mixed in. Nothing about the live feed's Tavily fallback has been run against the
-live API, only against fakes. Answers depend on what the local model can read: a run takes several minutes on a CPU.
 
 ## Documentation
 
