@@ -551,7 +551,7 @@ All eight milestones from the original project plan are implemented, plus later 
   covered: article text (headlines only), languages other than the country's English edition, and street-level Reddit (it has
   city subreddits, not street ones).
 - **Milestone 32:** documentation and a landing-page fix. The README gained the landing-page screenshot, a tech-stack section,
-  author and status lines, a table of contents, and five Mermaid diagrams (system, research pipeline, retrieval and
+  an author line, a table of contents, and five Mermaid diagrams (system, research pipeline, retrieval and
   verification, live feed, one request end to end), also placed in this file, `research-workflow.md` and the backend README.
   The diagrams are validated by rendering them, and four of them were redrawn after the first renders were hard to read (a system
   diagram with 27 crossing lines, a 3,200-pixel-tall pipeline). The screenshots were taken from a headless browser against

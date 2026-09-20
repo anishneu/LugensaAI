@@ -2,7 +2,7 @@
 
 # Lugensa AI
 
-### An agentic location web-intelligence system: ask about any place, get an answer you can check
+### Every claim about a place, traced to its source
 
 [![CI](https://github.com/anishneu/agentic-ai-location-web/actions/workflows/ci.yml/badge.svg)](https://github.com/anishneu/agentic-ai-location-web/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -25,6 +25,50 @@ their own language, translated to English), what the map data says is nearby (Op
 Wikivoyage say, and what has been published about the place in the last 30 days (a live feed of news,
 safety, business and events). It runs on a local model through Ollama, so **there is no billed model API anywhere in
 the project**, and it never invents data: with nothing configured it says so instead of making something up.
+
+**Author:** [Anish Kuila](https://github.com/anishneu)
+
+## Table of contents
+
+- [Overview](#overview)
+- [Tech stack](#tech-stack)
+- [Screenshots](#screenshots)
+- [Architecture](#architecture)
+  - [System](#system)
+  - [The research pipeline](#the-research-pipeline)
+  - [Retrieval-augmented generation and verification](#retrieval-augmented-generation-and-verification)
+  - [The live feed](#the-live-feed)
+  - [One request, end to end](#one-request-end-to-end)
+  - [Where the agentic AI and the RAG are](#where-the-agentic-ai-and-the-rag-are)
+- [Features](#features)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Project structure](#project-structure)
+- [Testing](#testing)
+- [Continuous integration](#continuous-integration)
+- [Evaluation](#evaluation)
+- [Documentation](#documentation)
+- [License](#license)
+
+## Overview
+
+Given a location and a question, the agent:
+
+1. Resolves the location.
+2. Plans which research topics are actually relevant to the question (not a fixed checklist).
+3. Retrieves evidence for each topic from live web search (including community and forum
+   commentary), Wikipedia and Wikivoyage, OpenStreetMap and, optionally, Google Places.
+4. Extracts and verifies claims against that evidence, including a cross-source contradiction
+   check.
+5. Synthesizes a cited, hedged answer — never a confident-sounding guess with no source behind
+   it — and reports what it couldn't confirm.
+
+Real research needs two things, both free: live web search (`TAVILY_API_KEY`, free tier) and
+LLM-backed reasoning through a local model, `OLLAMA_ENABLED` (needs [Ollama](https://ollama.com)
+installed; nothing leaves your machine, and there is no billed model API anywhere in the project)
+— see [Configuration](#configuration). **Nothing is faked:** with neither set, the app runs but has
+nothing to search, returns no evidence or claims, and says so in every response. It never falls back
+to made-up sample data.
 
 ## Tech stack
 
@@ -73,57 +117,6 @@ Every badge links to the project's own site.
 <a href="https://docs.github.com/en/code-security/dependabot"><img src="https://img.shields.io/badge/Dependabot-025E8C?style=for-the-badge&logo=dependabot&logoColor=white" alt="Dependabot"></a>
 <a href="https://mermaid.js.org"><img src="https://img.shields.io/badge/Mermaid-FF3670?style=for-the-badge&logo=mermaid&logoColor=white" alt="Mermaid"></a>
 </p>
-
-<table>
-  <tr>
-    <td><b>Author</b></td>
-    <td><a href="https://github.com/anishneu">Anish Kuila</a></td>
-    <td><b>Status</b></td>
-    <td><img src="https://img.shields.io/badge/In--Progress-F59E0B?style=flat-square" alt="Status: In-Progress"></td>
-  </tr>
-</table>
-
-## Table of contents
-
-- [Overview](#overview)
-- [Screenshots](#screenshots)
-- [Architecture](#architecture)
-  - [System](#system)
-  - [The research pipeline](#the-research-pipeline)
-  - [Retrieval-augmented generation and verification](#retrieval-augmented-generation-and-verification)
-  - [The live feed](#the-live-feed)
-  - [One request, end to end](#one-request-end-to-end)
-  - [Where the agentic AI and the RAG are](#where-the-agentic-ai-and-the-rag-are)
-- [Features](#features)
-- [Quick start](#quick-start)
-- [Configuration](#configuration)
-- [Project structure](#project-structure)
-- [Testing](#testing)
-- [Continuous integration](#continuous-integration)
-- [Evaluation](#evaluation)
-- [Status](#status)
-- [Documentation](#documentation)
-- [License](#license)
-
-## Overview
-
-Given a location and a question, the agent:
-
-1. Resolves the location.
-2. Plans which research topics are actually relevant to the question (not a fixed checklist).
-3. Retrieves evidence for each topic from live web search (including community and forum
-   commentary), Wikipedia and Wikivoyage, OpenStreetMap and, optionally, Google Places.
-4. Extracts and verifies claims against that evidence, including a cross-source contradiction
-   check.
-5. Synthesizes a cited, hedged answer — never a confident-sounding guess with no source behind
-   it — and reports what it couldn't confirm.
-
-Real research needs two things, both free: live web search (`TAVILY_API_KEY`, free tier) and
-LLM-backed reasoning through a local model, `OLLAMA_ENABLED` (needs [Ollama](https://ollama.com)
-installed; nothing leaves your machine, and there is no billed model API anywhere in the project)
-— see [Configuration](#configuration). **Nothing is faked:** with neither set, the app runs but has
-nothing to search, returns no evidence or claims, and says so in every response. It never falls back
-to made-up sample data.
 
 ## Screenshots
 
