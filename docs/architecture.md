@@ -95,8 +95,8 @@ All eight milestones from the original project plan are implemented, plus later 
   actual default (`InMemoryEvidenceRepository` still exists and is used directly in unit tests).
 - **Milestone 6:** cross-source contradiction detection in `ClaimVerifier` — a coarse,
   deterministic antonym heuristic, not full NLU (see above).
-- **Milestone 7:** the React + TypeScript frontend (`frontend/`) with a Leaflet/OpenStreetMap
-  map — a thin client that renders exactly what the API returns; see `frontend/README.md`.
+- **Milestone 7:** the React + TypeScript frontend (`frontend/`) with an OpenStreetMap-based
+  map (Leaflet at the time, MapLibre since Milestone 17) — a thin client that renders exactly what the API returns; see `frontend/README.md`.
 - **Milestone 8:** the evaluation benchmark was actually run (Baseline B vs. the proposed
   system's orchestration, live search, without the LLM-backed components) and results — including where the
   proposed system did *not* win — are reported in `docs/evaluation.md`, not just planned.
@@ -211,4 +211,70 @@ All eight milestones from the original project plan are implemented, plus later 
   nothing and say so, `LLMClaimExtractor` no longer falls back to canned claims, and the landing page
   describes what a response contains without asserting anything about a place. Also removed the unused
   `FakeLLMService`, and merged two duplicate copies of the resolver-chain builder.
+
+- **Milestone 17:** sources beyond Google, a live feed about a place rather than its last week, and a
+  rebuilt UI. (1) *Community and regional sources*: `app/tools/community_sources.py` holds two curated
+  domain lists, global (Reddit, TripAdvisor, Wikivoyage, Quora, Lonely Planet, ...) and per-country (for
+  example PTT and Dcard for Taiwan, Naver for Korea, Tabelog for Japan, Pantip for Thailand), and
+  `community_domains(country_code)` puts the country's own first. A second `TavilyWebSearchTool`, built in
+  `agents/factory.py` with `include_domains_for`, searches only those domains and feeds the same
+  translate-then-filter pipeline, so a forum page has to name the right place exactly as a web page does.
+  This first version mixed every community site into one English query, and a search for Taiwan appeared to
+  find nothing on PTT or Dcard, which I first wrote up as Tavily not indexing them. That was wrong: searched on
+  their own (PTT and Dcard in Chinese) they return real threads, and the mixed query was simply dominated by
+  Pixnet and TripAdvisor. The community search is now split (see `docs/research-workflow.md`), and the live
+  feed searches Reddit plus the country's forums only. Login-walled social networks still contribute little. (2) *English first*: `ingest` orders
+  evidence so English and machine-translated-to-English items come before untranslated local-language ones,
+  which stay available and labeled. (3) *Live feed*: `TavilyLiveFeedTool` no longer means "last 7 days
+  around the exact point". It searches the place's city and widens once to the region around it (Xinyi
+  District, then Taipei City) when the city yields under 6 items, over a 30-day window, and returns news and
+  community conversation, each item tagged with the scope it came from. It first widened all the way to the
+  country, which cost up to 9 billed searches a load on a plan of 1,000 credits a month and returned stories
+  about Taiwan rather than Taipei, so it was cut back: two scopes, one news query and one community query
+  each (2 to 4 searches), decided on the total rather than per kind, cached for an hour per place and per city
+  (so a second place in the same city reuses the region's search), one shared load for simultaneous requests,
+  a failed search never cached, and `search_depth="basic"` set explicitly. `refresh=true` bypasses the cache
+  for the refresh button. `/api/live-feed` resolves the country code with the same `LocaleResolver` the
+  research agent uses. (4) *UI*: the workspace is now a top navigation bar over three columns (map and question box,
+  answer, live feed); see `frontend/README.md`. Leaflet and the hand-written CSS files were replaced
+  by MapLibre GL with free OpenFreeMap vector tiles (English label first, local script beneath), Tailwind
+  utilities and Headless UI (a three.js globe and framer-motion were added here and removed in Milestone 19). (5) *CI*:
+  `pip-audit` failed on two transitive advisories; raising the `pytest`, `sentence-transformers` and
+  `transformers` floors fixed all but one (PYSEC-2026-3075 in `stanza`), which is explicitly ignored in
+  `dependency-audit.yml` with the reason: `argostranslate` pins `stanza` below the fixed version. Remove
+  the exception when Argos allows `stanza >= 1.12.2`.
+- **Milestone 18:** dates on forum posts, and the community sources that were wrongly written off. Tavily returns
+  no `published_date` for Reddit, PTT or Dcard, so `app/tools/post_dates.py` reads it from the post: the creation
+  time in a PTT URL, a batch lookup of Reddit thread ids in the Arctic Shift archive (one request, checked against
+  Reddit's own feed for a sample), and JSON-LD or `article:published_time` metadata on blogs. It is applied to
+  forum, review and blog evidence that survived the relevance filters, and to the live feed's community posts, which
+  are then listed newest first. Reddit's own feed is throttled to about one request a minute, which is why it is only
+  a fallback. The requests use no search credits, are capped and time-limited, refuse private addresses, and can be
+  turned off with `DISABLE_POST_DATE_FETCH=1`. Dcard (Cloudflare 403) and the login-walled networks stay undated.
+  Also fixed: the live feed's place filter rejected almost every Reddit thread because it wanted "Taipei City" and
+  people write "Taipei"; a name is now also accepted without its trailing "City" or "District" (the region check still
+  applies, so a Cambridge, New York report still cannot appear in a Cambridge, MA feed). The feed's community search
+  is now Reddit plus the country's forums (TripAdvisor, YouTube and the social networks crowded it with listings
+  and videos) with wording that finds discussion, and research questions get a separate local-language forum search.
+- **Milestone 19:** fixes from using it on a real place (Hunts Bank & Victoria Station Approach, Manchester).
+  (1) *Google Maps content missing for a named venue*: the pin was a station approach, not a business, so Google was
+  never asked about the AO Arena the question named. `venue_named_in` now adopts a place the question names that
+  stands within 300 m (found by popularity, since by distance the arena was not in the nearest 20), and its Google rating opens the key findings. (2) *"Around this pin" empty*: the public Overpass
+  servers were slow or shedding load for a dense centre and every attempt had the same 15 s timeout; now five servers
+  with their own timeouts, a stale-answer fallback, a one-hour cache and no 400-element cap. (3) *Live feed descriptions were
+  page chrome*: `app/tools/descriptions.py` keeps only whole sentences; the source link now sits under the headline. (4)
+  *The map was near-black*: the dark OpenFreeMap style was used in dark mode; both maps now use the light style.
+  (5) *three.js and framer-motion removed*: they were asked for, then judged unnecessary. The globe is gone (search is
+  back to a street-map backdrop), every transition is CSS, and the main bundle fell from 542 KB to 411 KB. Also learned
+  the hard way: MapLibre's unlayered stylesheet overrides Tailwind's `absolute` on the map's element.
+- **Milestone 20:** the landing page was rebuilt as a dark single-page product page (a sticky nav, a hero over a real
+  street map holding the working search, a preview of an answer's shape drawn with placeholder bars, a source strip,
+  tabs by kind of question, three facts about the design, the five steps, principles and honest limits, an FAQ), after
+  studying five product pages. What it copied is layout and pacing. What it deliberately did not copy is the social proof:
+  no testimonials, user counts, customer logos or sample answer, because there are none to show and an invented one is
+  what this project exists not to do. A place chosen in its search opens the workspace directly through router state,
+  and a question chosen there waits in the question box; nothing is run for the user. Also cleaned the working tree of
+  generated caches (`__pycache__`, `.pytest_cache`, `.ruff_cache`, `frontend/dist`, Vite's `.vite` and `.tmp`, and the
+  local `backend/data/evidence.db` of past runs), all regenerated on demand and gitignored, and confirmed that no commit on
+  any branch carries a `Co-Authored-By` trailer.
 

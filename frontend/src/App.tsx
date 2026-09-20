@@ -1,6 +1,4 @@
-import "leaflet/dist/leaflet.css";
 import { Route, Routes } from "react-router-dom";
-import "./App.css";
 import { LandingPage } from "./pages/LandingPage";
 import { ResearchWorkspace } from "./pages/ResearchWorkspace";
 

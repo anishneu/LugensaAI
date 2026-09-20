@@ -31,6 +31,11 @@ def _isolated_test_environment(monkeypatch, tmp_path):
 
     google_places_tool._CACHE.clear()
     google_places_tool._SEARCH_CACHE.clear()
+    from app.tools import tavily_tools
+
+    tavily_tools._FEED_CACHE.clear()
+    tavily_tools._SCOPE_CACHE.clear()
+    tavily_tools._FEED_INFLIGHT.clear()
 
 
 @pytest.fixture

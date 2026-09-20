@@ -142,6 +142,17 @@ terminates. Every decision is a trace step (`ADDITIONAL_RESEARCH`), including "e
 The loop is only wired when live search is on: with no search configured there is nothing to search again.
 documents. Without it the run is the single fixed pass.
 
+## A place named in the question
+
+Before planning, `LocationResearchAgent` checks whether the pin is really the place the question is about. A pin
+on a street address adopts the business standing at it (`_adopt_business_at_address`). A pin on a corner or a
+station approach adopts a place the *question names* (`_adopt_venue_named_in_question`): Google is asked for the 20
+most popular places within 300 m (popularity, because by distance the arena beside Manchester Victoria was not among
+the nearest 20), and the first whose whole distinguishing name is in the question becomes the subject. It is asked
+only when the question contains a capitalized word that does not merely start a sentence, streets and areas are never
+adopted, and the response says what happened in its limitations. The business's Google listing then enters as
+evidence, and its rating opens the key findings unless a finding already states it.
+
 ## Places outside the English-speaking world
 
 Before the first search, `LocaleResolver` reverse-geocodes the pin to find the country and looks up the
@@ -152,6 +163,28 @@ query and merges the results by URL; the retrievers still score only the English
 they score English text. Pages are accepted on the native name as well as the English one. For an
 English-speaking place, or one whose language can't be translated, nothing changes and the trace says
 why (`RESEARCH_PLANNING`). Any failure in the lookup is a limitation, never an error.
+
+## Forums and regional communities
+
+Web search alone returns listicles and hotel pages; what a place is *like* is said in threads. After the
+per-topic searches, `LocationResearchAgent` runs up to two more, through their own `TavilyWebSearchTool`
+instances restricted (`include_domains`) to community sites (`app/tools/community_sources.py`):
+
+- an **English community search** over Reddit, Quora, TripAdvisor, Lonely Planet, YouTube and the social
+  networks, with `community_query()`: a business by its name plus city, an area by its name plus the question;
+- a **regional forum search in the local language** over the country's own forums (PTT, Dcard, Pixnet, Naver,
+  Pantip, ...), for a place that has a native name. It is separate because an English query never reaches
+  those forums, and mixing them into one query let Pixnet and TripAdvisor crowd out PTT and Dcard. It uses the
+  plan's first local-language query (a topic as well as the name finds threads about the place; the name alone
+  finds threads that merely mention it), else the native name.
+
+Results go through exactly the same steps as any web page (translation first, then the place-relevance
+filters), so a forum thread has to name the right place to count, and a page is classified forum, then review
+site, then community list (`_classify_source_type`). Forum, review and blog results that survive get their real
+publication date from `post_dates.py` (URL, a Reddit archive, page metadata) because the search API supplies
+none. During evidence ingestion, English and machine-translated-to-English items sort before untranslated
+local-language ones; nothing is dropped for its language. Not everything is reachable: login-walled social
+networks and Dcard refuse a plain request, which shows up as fewer sources or "date unknown", not as an error.
 
 ## Claim extraction without an LLM
 

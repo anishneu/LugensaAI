@@ -24,6 +24,7 @@ the loop is guaranteed to terminate.
 
 from __future__ import annotations
 
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
@@ -33,6 +34,7 @@ from app.evidence.repository import EvidenceRepository
 from app.models.claim import ClaimStatus
 from app.models.evidence import Evidence
 from app.models.location import Location
+from app.models.place_profile import PlaceProfile
 from app.models.response import ResearchResponse
 from app.models.trace import ResearchTraceStep, TraceStage
 from app.planning.planner import ResearchPlanner
@@ -41,6 +43,7 @@ from app.synthesis.claim_extractor import ClaimExtractor
 from app.synthesis.synthesizer import Synthesizer
 from app.agents.reflection import Reflector
 from app.planning.local_queries import LocalQueryWriter
+from app.tools.community_sources import community_domains, community_query, native_query, regional_domains
 from app.tools.locale import LocaleResolver
 from app.evidence.place_profile_evidence import pick_topic, profile_to_evidence
 from app.tools.base import LocationResolverTool, PageRetrievalTool, ToolExecutionError, WebSearchTool
@@ -53,6 +56,17 @@ from app.verification.verifier import ClaimVerifier
 # Caps concurrent outbound searches. Bounded because the far end is a rate-
 # limited third-party API, not because of local CPU.
 _MAX_SEARCH_WORKERS = 4
+
+
+
+def _names_something(question: str) -> bool:
+    """Whether a question looks like it names a place or business: a capitalized word that does not merely
+    start a sentence (and is not "I")."""
+    for sentence in re.split(r"[.?!]+", question):
+        words = sentence.replace(",", " ").split()
+        if any(w[:1].isupper() and w not in {"I", "I'm", "I'd", "I've", "I'll"} for w in words[1:]):
+            return True
+    return False
 
 
 class LocationResearchAgent:
@@ -73,6 +87,8 @@ class LocationResearchAgent:
         wiki_tool: WikiContextTool | None = None,
         locale_resolver: LocaleResolver | None = None,
         local_query_writer: LocalQueryWriter | None = None,
+        community_search_tool: WebSearchTool | None = None,
+        regional_search_tool: WebSearchTool | None = None,
     ) -> None:
         self.location_resolver = location_resolver
         self.web_search_tool = web_search_tool
@@ -92,6 +108,18 @@ class LocationResearchAgent:
         # Optional, for research outside English-speaking countries: also search in the local language.
         self.locale_resolver = locale_resolver
         self.local_query_writer = local_query_writer
+        # Forums, Reddit, Quora and regional communities: what people say, as opposed to what pages say.
+        self.community_search_tool = community_search_tool
+        # The country's own forums (PTT, Dcard, Naver, ...) searched in their own language, by the place's native name.
+        self.regional_search_tool = regional_search_tool
+
+    def _regional_is_separate(self, location: Location) -> bool:
+        """Whether the country's forums get their own local-language search instead of riding along in the English one."""
+        return bool(
+            self.regional_search_tool is not None
+            and native_query(location)
+            and regional_domains(location.country_code)
+        )
 
     def run(self, raw_location: str | Location, question: str) -> ResearchResponse:
         """Run the full research lifecycle and always release the evidence
@@ -114,31 +142,31 @@ class LocationResearchAgent:
 
     def _lookup_place_profile(
         self, location: Location, plan, limitations: list[str], log
-    ) -> list[Evidence]:
+    ) -> tuple[list[Evidence], PlaceProfile | None]:
         """Google Maps rating, hours and reviews for a specific business, as
         evidence. Every failure mode is recorded as a limitation, never hidden."""
         if not location.is_business or location.latitude is None or location.longitude is None:
-            return []
+            return [], None
         if self.place_profile_tool is None:
             limitations.append(
                 "Google Maps ratings and reviews are not connected (set GOOGLE_PLACES_API_KEY), so review "
                 "coverage for this business comes only from what the open web surfaced."
             )
-            return []
+            return [], None
 
         topic_id = pick_topic([t.topic_id for t in plan.topics])
         if topic_id is None:
-            return []
+            return [], None
         try:
             profile = self.place_profile_tool.lookup(
                 location.name, location.latitude, location.longitude, location.city or ""
             )
         except ToolExecutionError as exc:
             limitations.append(f"The Google Maps lookup failed ({exc}); its reviews are not included.")
-            return []
+            return [], None
         if profile is None:
             limitations.append("No matching Google Maps listing was found within a few hundred meters of this pin.")
-            return []
+            return [], None
 
         evidence = profile_to_evidence(
             profile, topic_id, f"{location.city}, {location.region}", datetime.now(timezone.utc)
@@ -148,7 +176,7 @@ class LocationResearchAgent:
             f"Added Google Maps listing for '{profile.name}' ({len(profile.reviews)} review(s) of "
             f"{profile.review_count or 'unknown'} total) as evidence for '{topic_id}'",
         )
-        return evidence
+        return evidence, profile
 
     def _adopt_business_at_address(self, location: Location, limitations: list[str], log) -> Location:
         """A street address usually means the business standing at it.
@@ -185,6 +213,48 @@ class LocationResearchAgent:
             f"Address matched to the business '{venue.name}' listed there on Google Maps",
             others=", ".join(others) or "none",
         )
+        return location.model_copy(
+            update={
+                "name": venue.name,
+                "is_business": True,
+                "is_address": False,
+                "latitude": venue.latitude,
+                "longitude": venue.longitude,
+                "city": location.city or venue.city,
+                "region": location.region or venue.region,
+                "country": location.country or venue.country,
+            }
+        )
+
+    def _adopt_venue_named_in_question(self, location: Location, question: str, limitations: list[str], log) -> Location:
+        """The question names a business that stands near the pin: research that business.
+
+        A pin dropped on "Hunts Bank & Victoria Station Approach" is not a business, so Google Maps was never
+        asked about the arena beside it, however plainly the question said "the reviews of this AO Arena".
+        When Google lists a business within a few hundred meters whose whole distinguishing name is in the
+        question, that business becomes the subject (its ratings and reviews are fetched, and the response
+        says so). Only asked when the question looks like it names something, to spare the API call."""
+        if (
+            location.is_business
+            or self.place_profile_tool is None
+            or location.latitude is None
+            or location.longitude is None
+            or not _names_something(question)
+        ):
+            return location
+        try:
+            venue = self.place_profile_tool.venue_named_in(question, location.latitude, location.longitude)
+        except ToolExecutionError as exc:
+            limitations.append(f"Could not check Google Maps for a business named in the question ({exc}).")
+            return location
+        if venue is None:
+            return location
+
+        limitations.append(
+            f"The question names {venue.name}, which Google Maps lists near this pin, so it was researched as that "
+            "business, with its Google Maps ratings and reviews."
+        )
+        log(TraceStage.LOCATION_RESOLUTION, f"Question names '{venue.name}', a business listed near the pin on Google Maps")
         return location.model_copy(
             update={
                 "name": venue.name,
@@ -271,6 +341,7 @@ class LocationResearchAgent:
 
         limitations: list[str] = []
         location = self._adopt_business_at_address(location, limitations, log)
+        location = self._adopt_venue_named_in_question(location, question, limitations, log)
 
         plan = self.planner.plan(location, question)
         log(
@@ -287,7 +358,7 @@ class LocationResearchAgent:
         if unconfigured:
             limitations.append(unconfigured)
         location, plan = self._add_local_language(location, plan, limitations, log)
-        profile_evidence = self._lookup_place_profile(location, plan, limitations, log)
+        profile_evidence, place_profile = self._lookup_place_profile(location, plan, limitations, log)
 
         searchable_topics = []
         for topic in plan.topics:
@@ -326,6 +397,12 @@ class LocationResearchAgent:
             log(TraceStage.RETRIEVAL, f"Scored {len(scored)} candidate(s) for '{topic.topic_id}'")
 
             accepted_candidates = [e for e in scored if (e.relevance_score or 0.0) >= self.config.min_relevance_score]
+            # English is primary and other languages secondary: a source in the reader's language comes
+            # first, and a translated one only fills the places English sources didn't. Within each, the
+            # best-matching source wins.
+            accepted_candidates.sort(
+                key=lambda e: (e.metadata.get("language") not in (None, "en"), -(e.relevance_score or 0.0))
+            )
             accepted_candidates = accepted_candidates[: self.config.max_evidence_per_topic]
 
             enriched: list[Evidence] = []
@@ -359,6 +436,50 @@ class LocationResearchAgent:
                     f"No candidate sources found for '{topic.topic_id}' in the first pass.",
                 )
             ingest(topic, candidates, topic.search_queries)
+
+        if self.community_search_tool is not None and plan.topics and tool_calls_made < self.config.max_tool_calls:
+            community_topic = next((t for t in plan.topics if t.topic_id == "community_sentiment"), plan.topics[0])
+            query = community_query(location, question)
+            probe = community_topic.model_copy(update={"search_queries": [query], "local_queries": []})
+            log(
+                TraceStage.TOOL_SELECTION,
+                f"Selected community search for '{community_topic.topic_id}' (forums, Reddit, Quora, social media and "
+                f"{location.country_code or 'regional'} communities)",
+                query=query,
+                domains=", ".join(community_domains(location.country_code, include_regional=not self._regional_is_separate(location))[:8]),
+            )
+            try:
+                found = self.community_search_tool.search(location, probe)
+                tool_calls_made += 1
+                seen_urls = {e.source_url for e in self.evidence_repository.list_all()}
+                ingest(community_topic, [c for c in found if c.source_url not in seen_urls], [question, location.name])
+            except ToolExecutionError as exc:
+                limitations.append(f"Community search failed ({exc}); forum and social-media sources are not included.")
+
+        # The country's own forums, in their own language. An English query never reaches them, so this is a
+        # separate search by the place's native name, run only where there is one and the country has such forums.
+        if plan.topics and self._regional_is_separate(location) and tool_calls_made < self.config.max_tool_calls:
+            regional_topic = next((t for t in plan.topics if t.topic_id == "community_sentiment"), plan.topics[0])
+            # A query about the place *and* the topic ("台北101 觀景台 心得") finds threads about it; the name alone
+            # finds threads that merely mention it (measured: 8 of 8 relevant against a scatter of unrelated
+            # posts). The local-language queries the plan already has are exactly that, so use the first.
+            native = next(
+                (q for t in [regional_topic, *plan.topics] for q in t.local_queries if q), native_query(location)
+            )
+            probe = regional_topic.model_copy(update={"search_queries": [native], "local_queries": []})
+            log(
+                TraceStage.TOOL_SELECTION,
+                f"Selected regional forum search in the local language ({location.country_code}): {native}",
+                query=native,
+                domains=", ".join(regional_domains(location.country_code)[:8]),
+            )
+            try:
+                found = self.regional_search_tool.search(location, probe)  # type: ignore[union-attr]
+                tool_calls_made += 1
+                seen_urls = {e.source_url for e in self.evidence_repository.list_all()}
+                ingest(regional_topic, [c for c in found if c.source_url not in seen_urls], [question, location.name])
+            except ToolExecutionError as exc:
+                limitations.append(f"Regional forum search failed ({exc}); local forums are not included.")
 
         if profile_evidence:
             self.evidence_repository.add_all([enrich_evidence(item) for item in profile_evidence])
@@ -452,6 +573,17 @@ class LocationResearchAgent:
         )
         log(TraceStage.SYNTHESIS, "Generated summary and recommendation from verified claims and evidence")
 
+        key_findings = list(synthesis.key_findings)
+        if place_profile is not None and place_profile.rating is not None and not any(
+            f"{place_profile.rating:.1f}" in finding and "Google" in finding for finding in key_findings
+        ):
+            # Google's own rating is a fact the model may or may not mention; a question about a business's
+            # reviews should always open with it, stated from the listing rather than from anyone's prose.
+            count = f" from {place_profile.review_count:,} reviews" if place_profile.review_count else ""
+            key_findings.insert(
+                0, f"Google Maps rates {place_profile.name} {place_profile.rating:.1f} out of 5{count}."
+            )
+
         limitations.extend(synthesis.limitations)
         if getattr(self.synthesizer, "writes_free_text", False):
             sources = [f"{e.source_title} {e.text}" for e in all_evidence]
@@ -474,7 +606,7 @@ class LocationResearchAgent:
             location=location,
             question=question,
             summary=synthesis.summary,
-            key_findings=synthesis.key_findings,
+            key_findings=key_findings,
             details=synthesis.details,
             recommendation=synthesis.recommendation,
             topics=plan.topics,

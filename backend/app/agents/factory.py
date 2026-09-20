@@ -59,8 +59,10 @@ from app.tools.google_places_tool import GooglePlacesLocationResolver, GooglePla
 from app.tools.unconfigured import UnconfiguredLocationResolver, UnconfiguredPageRetrievalTool, UnconfiguredWebSearchTool
 from app.tools.nominatim_tool import NominatimLocationResolverTool
 from app.tools.tavily_tools import TavilyPageRetrievalTool, TavilyWebSearchTool
+from app.tools.post_dates import PostDateRecovery
 from app.tools.translation import default_translator
 from app.tools.wiki_tool import WikiContextTool
+from app.tools.community_sources import community_domains, native_query, regional_domains
 from app.tools.locale import LocaleResolver
 from app.planning.local_queries import LLMLocalQueryWriter, LocalQueryWriter, RuleBasedLocalQueryWriter
 from app.verification.verifier import EvidenceBasedClaimVerifier
@@ -133,15 +135,41 @@ def build_default_agent(
 
     web_search_tool: WebSearchTool
     page_retrieval_tool: PageRetrievalTool
+    community_search_tool: WebSearchTool | None = None
+    regional_search_tool: WebSearchTool | None = None
 
     if use_live_search:
+        # Real dates for forum and blog posts whose search result has none (URL, Reddit's feed, page metadata).
+        date_recovery = PostDateRecovery()
         tavily_search = TavilyWebSearchTool(
             api_key=os.environ.get(TAVILY_API_KEY_ENV_VAR),
             max_results=TAVILY_MAX_RESULTS,
             translator=default_translator() if translation_enabled() else None,
+            date_recovery=date_recovery,
         )
         web_search_tool = tavily_search
         page_retrieval_tool = TavilyPageRetrievalTool(tavily_search.raw_content_cache)
+        # Same search, restricted to forums and communities, sharing the page cache and all the relevance filters.
+        # The country's own forums ride along here only when there is no native name to search them by; otherwise
+        # they get their own search below, in their own language.
+        community_search_tool = TavilyWebSearchTool(
+            api_key=os.environ.get(TAVILY_API_KEY_ENV_VAR),
+            max_results=TAVILY_MAX_RESULTS,
+            translator=default_translator() if translation_enabled() else None,
+            include_domains_for=lambda place: community_domains(
+                place.country_code, include_regional=not (native_query(place) and regional_domains(place.country_code))
+            ),
+            raw_content_cache=tavily_search.raw_content_cache,
+            date_recovery=date_recovery,
+        )
+        regional_search_tool = TavilyWebSearchTool(
+            api_key=os.environ.get(TAVILY_API_KEY_ENV_VAR),
+            max_results=TAVILY_MAX_RESULTS,
+            translator=default_translator() if translation_enabled() else None,
+            include_domains_for=lambda place: regional_domains(place.country_code),
+            raw_content_cache=tavily_search.raw_content_cache,
+            date_recovery=date_recovery,
+        )
     else:
         web_search_tool = UnconfiguredWebSearchTool()
         page_retrieval_tool = UnconfiguredPageRetrievalTool()
@@ -186,4 +214,6 @@ def build_default_agent(
         wiki_tool=WikiContextTool() if (use_live_search and use_live_geocoding) else None,
         locale_resolver=locale_resolver,
         local_query_writer=local_query_writer,
+        community_search_tool=community_search_tool,
+        regional_search_tool=regional_search_tool,
     )

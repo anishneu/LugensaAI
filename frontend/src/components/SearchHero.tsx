@@ -1,21 +1,9 @@
-import { useState } from "react";
-import { MapContainer, TileLayer } from "react-leaflet";
+import { lazy, Suspense } from "react";
 import type { ActiveLocation } from "../types";
 import { LocationSearchInput } from "./LocationSearchInput";
 
-// A decorative street-map backdrop, a different world city each visit. It carries no data and implies
-// no particular place: the app is not about any one city.
-const BACKDROP_CITIES: [number, number][] = [
-  [35.6595, 139.7005], // Tokyo
-  [48.8534, 2.3488], // Paris
-  [30.0444, 31.2357], // Cairo
-  [-1.2921, 36.8219], // Nairobi
-  [-23.5505, -46.6333], // Sao Paulo
-  [-33.8688, 151.2093], // Sydney
-  [41.0082, 28.9784], // Istanbul
-  [19.076, 72.8777], // Mumbai
-  [52.52, 13.405], // Berlin
-];
+// The map library is large and the backdrop is decoration: load it after the page is usable, in its own chunk.
+const MapBackdrop = lazy(() => import("./MapBackdrop"));
 
 interface SearchHeroProps {
   query: string;
@@ -25,36 +13,31 @@ interface SearchHeroProps {
 }
 
 export function SearchHero({ query, onQueryChange, onSelect, onSubmit }: SearchHeroProps) {
-  const [backdrop] = useState(() => BACKDROP_CITIES[Math.floor(Math.random() * BACKDROP_CITIES.length)]);
   return (
-    <div className="search-hero">
-      <MapContainer
-        center={backdrop}
-        zoom={13}
-        zoomControl={false}
-        scrollWheelZoom={false}
-        dragging={false}
-        doubleClickZoom={false}
-        className="search-hero-map"
-      >
-        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-      </MapContainer>
-      <div className="search-hero-overlay" />
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#0b0a14] px-6 py-12 text-white">
+      <Suspense fallback={null}>
+        <MapBackdrop />
+      </Suspense>
+      {/* Dims the map so the text reads, and settles into the same dark tone the page starts with. */}
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#0b0a14]/80 via-[#0b0a14]/70 to-[#0b0a14]/90" />
 
-      <div className="search-hero-content">
-        <h1>Where should the agent investigate?</h1>
-        <p>
-          Any real place, anywhere in the world: a neighborhood, a specific restaurant, an address, or a Google
-          Maps plus code.
+      <div className="relative flex w-full max-w-2xl flex-col gap-6 text-center">
+        <p className="m-0 text-xs font-semibold tracking-[0.16em] text-violet-300 uppercase">Lugensa AI · location intelligence</p>
+        <h1 className="m-0 text-4xl leading-tight font-semibold tracking-tight text-white sm:text-5xl">Where should the agent investigate?</h1>
+        <p className="mx-auto m-0 max-w-xl text-base leading-relaxed text-white/70">
+          Any real place, anywhere in the world: a neighborhood, a specific restaurant, an address, or a Google Maps plus code. It
+          reads reviews, forums and news in the local language, and answers in English with a source next to every claim.
         </p>
-        <LocationSearchInput
-          value={query}
-          onChange={onQueryChange}
-          onSelect={onSelect}
-          onSubmit={onSubmit}
-          placeholder="Try “Shibuya, Tokyo” or “Le Marais, Paris”…"
-          autoFocus
-        />
+        <div className="mx-auto w-full max-w-xl text-left">
+          <LocationSearchInput
+            value={query}
+            onChange={onQueryChange}
+            onSelect={onSelect}
+            onSubmit={onSubmit}
+            placeholder="Try “Shibuya, Tokyo” or “Le Marais, Paris”…"
+            autoFocus
+          />
+        </div>
       </div>
     </div>
   );

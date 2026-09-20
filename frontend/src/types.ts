@@ -158,6 +158,15 @@ export interface NearbyItem {
   name: string;
   kind: string;
   distance_m: number;
+  /** What OpenStreetMap knows beyond the name. Absent means "not in the map", never "doesn't have one". */
+  latitude?: number | null;
+  longitude?: number | null;
+  opening_hours?: string | null;
+  website?: string | null;
+  phone?: string | null;
+  cuisine?: string | null;
+  address?: string | null;
+  wheelchair?: string | null;
 }
 
 export interface NearbyGroup {

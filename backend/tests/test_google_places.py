@@ -437,6 +437,50 @@ def test_venues_at_a_point_lists_businesses_nearest_first_and_skips_parks():
     assert seen["body"]["rankPreference"] == "DISTANCE"
 
 
+_KIOSK = {**_CAFE, "id": "kiosk", "displayName": {"text": "TopGift Mobile Phone Accessories"}, "types": ["point_of_interest", "establishment"]}
+_ARENA = {
+    "id": "arena1", "displayName": {"text": "AO Arena"}, "formattedAddress": "Victoria Station Approach, Manchester M3 1AR, UK",
+    "location": {"latitude": 53.4880, "longitude": -2.2440}, "types": ["arena", "performing_arts_theater", "point_of_interest"],
+}
+_CATHEDRAL = {**_ARENA, "id": "cath", "displayName": {"text": "Manchester Cathedral"}, "types": ["tourist_attraction", "church", "place_of_worship"]}
+_STREET = {**_ARENA, "id": "street", "displayName": {"text": "Victoria Street"}, "types": ["route"]}
+
+
+def test_a_venue_named_in_the_question_is_found_by_popularity_not_distance():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"places": [_KIOSK, _ARENA]})
+
+    tool = GooglePlacesTool(api_key="k", transport=httpx.MockTransport(handler))
+
+    venue = tool.venue_named_in("How are the reviews of this AO Arena?", 53.4873, -2.2430)
+
+    assert venue is not None and venue.name == "AO Arena"
+    body = seen["body"]
+    assert body["rankPreference"] == "POPULARITY" and body["maxResultCount"] == 20 and body["locationRestriction"]["circle"]["radius"] == 300.0
+
+
+def test_a_landmark_that_is_not_a_shop_can_be_named_but_a_street_cannot():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"places": [_STREET, _CATHEDRAL]})
+
+    tool = GooglePlacesTool(api_key="k", transport=httpx.MockTransport(handler))
+
+    assert tool.venue_named_in("What is Manchester Cathedral like?", 53.4873, -2.2430).name == "Manchester Cathedral"
+    assert tool.venue_named_in("Is Victoria Street busy?", 53.4873, -2.2430) is None
+
+
+def test_a_place_the_question_does_not_name_is_not_picked():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"places": [_KIOSK, _ARENA]})
+
+    tool = GooglePlacesTool(api_key="k", transport=httpx.MockTransport(handler))
+
+    assert tool.venue_named_in("is it a good place to visit?", 53.4873, -2.2430) is None
+
+
 def test_the_price_is_googles_real_range_in_the_local_currency_when_it_has_one():
     """Google Maps shows '€10–20' for a cafe in Germany; '$$' would read as dollars."""
     from app.tools.google_places_tool import _price_text

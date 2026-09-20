@@ -1,7 +1,7 @@
 fastapi>=0.115,<1.0
 uvicorn[standard]>=0.30,<1.0
 pydantic>=2.8,<3.0
-pytest>=8.0,<9.0
+pytest>=9.0.3,<10.0
 httpx>=0.27,<1.0
 
 # Milestone 3 (live web search). Installing this costs nothing; only calling
@@ -17,7 +17,10 @@ python-dotenv>=1.0,<2.0
 # Optional: the app runs fine without it (keyword-only retrieval); omit this
 # line from your install if you want to skip the download entirely and set
 # DISABLE_SEMANTIC_RETRIEVAL=1.
-sentence-transformers>=3.0,<4.0
+sentence-transformers>=5.0,<6.0
+# A security floor, not a feature: transformers 4.x has known advisories fixed only in 5.x, and
+# sentence-transformers 3.x/4.x would pin it to 4.x. Verified with this project's semantic retriever.
+transformers>=5.10,<6.0
 
 # Translation of foreign-language evidence into English (a place in Japan or
 # Germany is mostly written about in that language). Free and local — no API

@@ -26,9 +26,11 @@ from app.models.response import ResearchResponse
 from app.retrieval.semantic_retriever import is_model_warm
 from app.tools.base import LocationNotFoundError, LocationResolverTool, ToolExecutionError
 from app.tools.google_places_tool import GooglePlacesTool, distance_m
+from app.tools.locale import LocaleResolver
 from app.tools.nominatim_tool import NominatimPlaceSearchTool, slugify
 from app.tools.overpass_tool import OverpassNearbyTool
 from app.tools.tavily_tools import TavilyLiveFeedTool
+from app.tools.post_dates import PostDateRecovery
 from app.tools.translation import default_translator
 
 router = APIRouter()
@@ -238,15 +240,19 @@ def live_feed(
     city: str | None = None,
     region: str | None = None,
     country: str | None = None,
+    refresh: bool = False,
 ) -> list[Evidence]:
-    """What's currently being said about this place — independent of any
-    specific research question. Real, recency-biased web search (Reddit,
-    news, review sites, etc.), not derived from the Q&A pipeline's evidence.
+    """What's being said about this place lately — independent of any specific research question.
 
-    Returns an empty list (not an error) if `TAVILY_API_KEY` isn't set —
-    there is no "live" surface at all without live search. Every call here
-    is a real, billed Tavily search; the frontend should not poll this
-    aggressively (see `frontend/README.md`).
+    Recent news (last 30 days) and community conversation (Reddit, Quora, regional forums) about the
+    place's city, widening once to the region around it when the city has little (never to the whole
+    country). Each item's metadata says which (`feed_kind`, `feed_scope`). Real web search, not derived
+    from the Q&A pipeline's evidence.
+
+    Returns an empty list (not an error) if `TAVILY_API_KEY` isn't set — there is no "live" surface at
+    all without live search. A cold load is 2 to 4 billed Tavily searches; the result is cached for an hour
+    (and each city's search is shared by every place in it). `refresh=true` skips the cache, for the
+    refresh button: the frontend must not use it to poll (see `frontend/README.md`).
     """
     if not search_enabled():
         return []
@@ -259,11 +265,19 @@ def live_feed(
     except LocationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    if geocoding_enabled():
+        # The country's code picks which regional forums to search (PTT and Dcard for Taiwan, and so on).
+        try:
+            resolved = resolved.model_copy(update={"country_code": LocaleResolver().resolve(resolved).country_code})
+        except ToolExecutionError:
+            pass  # only the global communities are searched
+
     tool = TavilyLiveFeedTool(
         api_key=os.environ.get(TAVILY_API_KEY_ENV_VAR),
         translator=default_translator() if translation_enabled() else None,
+        date_recovery=PostDateRecovery(),
     )
     try:
-        return tool.fetch(resolved)
+        return tool.fetch(resolved, refresh=refresh)
     except ToolExecutionError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

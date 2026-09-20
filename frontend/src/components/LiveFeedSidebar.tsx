@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Tab, TabGroup, TabList, TabPanel, TabPanels } from "@headlessui/react";
+import { ArrowPathIcon, ClockIcon, NewspaperIcon, UserGroupIcon } from "@heroicons/react/24/outline";
 import { fetchCapabilities, fetchLiveFeed, ResearchApiError } from "../api";
-import { absoluteTimeFrom, cleanDisplayText, formatFeedTimestamp, relativeTimeFrom } from "../textUtils";
+import { absoluteTimeFrom, evidenceText, relativeTimeFrom } from "../textUtils";
 import { TranslationNote } from "./TranslationNote";
 import { SOURCE_TYPE_ICON } from "../sourceTypeIcon";
 import type { ActiveLocation, Evidence } from "../types";
@@ -9,33 +11,110 @@ interface LiveFeedSidebarProps {
   location: ActiveLocation;
 }
 
-// Every fetch is several real, billed Tavily searches (the backend queries
-// a few complementary regional facets and merges them), so auto-refresh is
-// deliberately infrequent; the manual button covers "I want it now."
-const AUTO_REFRESH_MS = 10 * 60 * 1000;
-const PAGE_SIZE = 5;
-const MAX_PAGES = 3;
+// A cold load is two to four real, billed Tavily searches (the backend caches them for an hour). Auto-refresh
+// matches that hour, so it costs nothing while the cache is warm; only the manual button forces a fresh search.
+const AUTO_REFRESH_MS = 60 * 60 * 1000;
+const PAGE_SIZE = 6;
 
 function regionLabel(location: ActiveLocation): string {
   return [location.city, location.region].filter(Boolean).join(", ") || location.displayName;
 }
 
+const SCOPE_CHIP: Record<string, string> = { region: "Wider region" };
+
 function FeedMedia({ item }: { item: Evidence }) {
   const [failed, setFailed] = useState(false);
   if (item.image_url && !failed) {
     return (
-      <img
-        className="feed-thumbnail"
-        src={item.image_url}
-        alt={item.source_title}
-        loading="lazy"
-        onError={() => setFailed(true)}
-      />
+      <img className="h-14 w-14 flex-shrink-0 rounded-lg object-cover" src={item.image_url} alt="" loading="lazy" onError={() => setFailed(true)} />
     );
   }
   return (
-    <div className={`feed-thumbnail media-fallback type-${item.source_type}`} aria-hidden="true">
+    <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--bg)] text-xl" aria-hidden="true">
       {SOURCE_TYPE_ICON[item.source_type]}
+    </div>
+  );
+}
+
+function FeedCard({ item }: { item: Evidence }) {
+  const scope = item.metadata.feed_scope;
+  const description = evidenceText(item);
+  return (
+    <article
+      className="flex gap-3 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3"
+    >
+      <FeedMedia item={item} />
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10.5px] text-[var(--text-muted)]">
+          {item.published_at ? (
+            <span className="flex items-center gap-1" title={absoluteTimeFrom(item.published_at)}>
+              <ClockIcon className="h-3 w-3" aria-hidden="true" />
+              {relativeTimeFrom(item.published_at)}
+            </span>
+          ) : (
+            <span>date unknown</span>
+          )}
+          {scope && SCOPE_CHIP[scope] && (
+            <span
+              className="rounded-full bg-[var(--accent-bg)] px-2 py-px font-medium text-[var(--accent)]"
+              title={`Not much was found for the exact area, so this is about ${item.location_scope}`}
+            >
+              {SCOPE_CHIP[scope]} · {item.location_scope}
+            </span>
+          )}
+        </div>
+        <a
+          href={item.source_url}
+          target="_blank"
+          rel="noreferrer"
+          className="line-clamp-2 text-[13px] leading-snug font-semibold text-[var(--text-h)] no-underline hover:text-[var(--accent)]"
+          dir="auto"
+        >
+          {item.source_title}
+        </a>
+        {item.publisher && (
+          <a
+            href={item.source_url}
+            target="_blank"
+            rel="noreferrer"
+            className="truncate text-[11px] text-[var(--accent)] no-underline hover:underline"
+            title={item.source_url}
+          >
+            {item.publisher}
+          </a>
+        )}
+        {description && (
+          <p className="m-0 line-clamp-3 text-xs leading-relaxed text-[var(--text-muted)]" dir="auto">
+            {description}
+          </p>
+        )}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <TranslationNote item={item} inline />
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function FeedList({ items, empty }: { items: Evidence[]; empty: string }) {
+  const [visible, setVisible] = useState(PAGE_SIZE);
+  if (items.length === 0) {
+    return <p className="m-0 rounded-xl border border-dashed border-[var(--border)] p-4 text-center text-xs leading-relaxed text-[var(--text-muted)]">{empty}</p>;
+  }
+  return (
+    <div className="flex flex-col gap-2.5">
+      {items.slice(0, visible).map((item) => (
+        <FeedCard key={item.evidence_id} item={item} />
+      ))}
+      {items.length > visible && (
+        <button
+          type="button"
+          onClick={() => setVisible((v) => v + PAGE_SIZE)}
+          className="self-center rounded-full border border-[var(--border)] px-4 py-1.5 text-xs font-medium text-[var(--text)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
+        >
+          Show {Math.min(PAGE_SIZE, items.length - visible)} more
+        </button>
+      )}
     </div>
   );
 }
@@ -45,14 +124,12 @@ export function LiveFeedSidebar({ location }: LiveFeedSidebarProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
-  const [unavailable, setUnavailable] = useState(false);
-  const [page, setPage] = useState(1);
-  // Whether the backend has live search at all. An empty feed means two different things: no key, or
-  // simply nothing published about this place in the last 7 days (normal for a village).
+  // Whether the backend has live search at all. An empty feed means two different things: no key, or nothing
+  // published about this place lately (normal for a village).
   const [liveSearch, setLiveSearch] = useState<boolean | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  const load = useCallback(() => {
+  const load = useCallback((refresh = false) => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -69,12 +146,11 @@ export function LiveFeedSidebar({ location }: LiveFeedSidebarProps) {
         country: location.country,
       },
       controller.signal,
+      refresh,
     )
       .then((items) => {
         setFeed(items);
-        setUnavailable(items.length === 0);
         setLastUpdated(new Date().toISOString());
-        setPage(1);
       })
       .catch((err) => {
         if (controller.signal.aborted) return;
@@ -91,101 +167,88 @@ export function LiveFeedSidebar({ location }: LiveFeedSidebarProps) {
 
   useEffect(() => {
     load();
-    const interval = window.setInterval(load, AUTO_REFRESH_MS);
+    const interval = window.setInterval(() => load(), AUTO_REFRESH_MS);
     return () => {
       window.clearInterval(interval);
       abortRef.current?.abort();
     };
   }, [load]);
 
-  const totalPages = Math.min(Math.ceil(feed.length / PAGE_SIZE) || 1, MAX_PAGES);
-  const pageItems = feed.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const news = feed.filter((item) => item.metadata.feed_kind !== "community");
+  const community = feed.filter((item) => item.metadata.feed_kind === "community");
+  const label = regionLabel(location);
+  const noKey = liveSearch === false;
+  const tabs = [
+    { id: "news", label: "News", Icon: NewspaperIcon, items: news, empty: `No news about ${label} or the region around it in the last 30 days.` },
+    { id: "community", label: "Community", Icon: UserGroupIcon, items: community, empty: `No forum or Reddit conversation about ${label} was found.` },
+  ];
 
   return (
-    <aside className="live-feed-sidebar">
-      <div className="sidebar-heading">
-        <div className="feed-heading-row">
-          <h2>Live feed</h2>
-          <button type="button" className="feed-refresh-button" onClick={load} disabled={loading} title="Refresh now">
-            {loading ? "⏳" : "↻"}
+    <div className="flex flex-col gap-4 p-5">
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center justify-between">
+          <h2 className="m-0 text-[15px] font-bold text-[var(--text-h)]">Live feed</h2>
+          <button
+            type="button"
+            onClick={() => load(true)}
+            disabled={loading}
+            title="Refresh now"
+            aria-label="Refresh the live feed"
+            className="rounded-full border border-[var(--border)] p-1.5 text-[var(--text)] transition hover:border-[var(--accent)] disabled:cursor-wait disabled:opacity-60"
+          >
+            <ArrowPathIcon className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} aria-hidden="true" />
           </button>
         </div>
-        <p>
-          Recent local reporting from around {regionLabel(location)} — published in the last 7 days, each item
-          showing its own publication time. Independent of the questions on the left, and not limited to{" "}
-          {location.displayName} itself.
+        <p className="m-0 text-xs leading-relaxed text-[var(--text-muted)]">
+          What's being said about {label}: news from the last 30 days and community conversation. When the area itself has
+          little, it widens once to the region around it, and says so. It never goes country-wide.
         </p>
-        {lastUpdated && (
-          <p className="feed-updated-at">{loading ? "Refreshing…" : `Updated ${relativeTimeFrom(lastUpdated)}`}</p>
-        )}
+        {lastUpdated && <p className="m-0 text-[10.5px] text-[var(--text-muted)]">{loading ? "Refreshing…" : `Updated ${relativeTimeFrom(lastUpdated)}`}</p>}
       </div>
 
-      {error && <p className="empty-note">{error}</p>}
+      {error && <p className="m-0 rounded-xl border border-red-500/40 bg-red-500/[0.07] p-3 text-xs text-[var(--contradicted)]">{error}</p>}
 
-      {!error && unavailable && !loading && (
-        <p className="empty-note">
-          {liveSearch === false
-            ? "No live feed available — this needs a Tavily API key configured on the backend (`TAVILY_API_KEY`)."
-            : `Nothing was published about ${regionLabel(location)} in the last 7 days. Small places often have no local news; this is not an error.`}
+      {!error && noKey && (
+        <p className="m-0 rounded-xl border border-dashed border-[var(--border)] p-4 text-center text-xs leading-relaxed text-[var(--text-muted)]">
+          No live feed available: this needs a Tavily API key configured on the backend (<code>TAVILY_API_KEY</code>).
         </p>
       )}
 
-      {!error && pageItems.length > 0 && (
-        <>
-          <div className="feed-items">
-            {pageItems.map((item) => (
-              <a key={item.evidence_id} href={item.source_url} target="_blank" rel="noreferrer" className="feed-item">
-                <FeedMedia item={item} />
-                <div className="feed-item-body">
-                  <div className="feed-item-meta">
-                    <span className={`feed-source-type type-${item.source_type}`}>
-                      {item.source_type.replace(/_/g, " ")}
-                    </span>
-                    <span className="feed-time" title={item.published_at ?? undefined}>
-                      {formatFeedTimestamp(item.published_at, item.retrieved_at)}
-                    </span>
-                  </div>
-                  <TranslationNote item={item} inline />
-                  <div className="feed-item-title" dir="auto">{item.source_title}</div>
-                  <p className="feed-item-snippet" dir="auto">{cleanDisplayText(item.text)}</p>
-                  <div className="feed-item-footer">
-                    <span className="feed-item-location">📍 {item.location_scope}</span>
-                    {item.publisher && <span className="feed-item-publisher">{item.publisher}</span>}
-                  </div>
-                  {item.published_at && (
-                    <div className="feed-item-posted">🕒 Posted {absoluteTimeFrom(item.published_at)}</div>
-                  )}
-                </div>
-              </a>
-            ))}
-          </div>
-
-          {totalPages > 1 && (
-            <div className="feed-pagination">
-              <button type="button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
-                ‹
-              </button>
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  className={n === page ? "active" : ""}
-                  onClick={() => setPage(n)}
-                >
-                  {n}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
+      {!error && !noKey && (
+        <TabGroup>
+          <TabList className="mb-3 flex gap-1 rounded-full border border-[var(--border)] bg-[var(--bg-alt)] p-1">
+            {tabs.map(({ id, label: tabLabel, Icon, items }) => (
+              <Tab
+                key={id}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-[var(--text-muted)] outline-none transition-colors data-[hover]:text-[var(--text-h)] data-[selected]:bg-[var(--accent)] data-[selected]:text-white data-[focus]:ring-2 data-[focus]:ring-violet-500"
               >
-                ›
-              </button>
-            </div>
-          )}
-        </>
+                {({ selected }) => (
+                  <>
+                    <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                    {tabLabel}
+                    <span className={`rounded-full px-1.5 text-[10px] ${selected ? "bg-white/25" : "bg-[var(--bg)]"}`}>{items.length}</span>
+                  </>
+                )}
+              </Tab>
+            ))}
+          </TabList>
+          <TabPanels>
+            {tabs.map(({ id, items, empty }) => (
+              <TabPanel key={id} className="outline-none">
+                {loading && feed.length === 0 ? (
+                  <div className="flex flex-col gap-2.5" aria-busy="true">
+                    {[0, 1, 2].map((n) => (
+                      <div key={n} className="h-24 animate-pulse rounded-xl bg-[var(--bg-alt)]" />
+                    ))}
+                  </div>
+                ) : (
+                  <FeedList items={items} empty={empty} />
+                )}
+              </TabPanel>
+            ))}
+          </TabPanels>
+        </TabGroup>
       )}
-    </aside>
+    </div>
   );
 }

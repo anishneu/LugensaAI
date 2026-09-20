@@ -43,6 +43,9 @@ from __future__ import annotations
 
 import hashlib
 import re
+import threading
+import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
@@ -51,7 +54,16 @@ from app.models.evidence import Evidence, SourceType
 from app.models.location import Location
 from app.models.plan import ResearchTopic
 from app.tools.base import PageRetrievalTool, ToolConfigurationError, ToolExecutionError, WebSearchTool
-from app.tools.translation import META_ORIGINAL_TEXT, META_ORIGINAL_TITLE, Translator, translate_evidence
+from app.tools.community_sources import feed_domains, is_community_domain
+from app.tools.descriptions import readable_description
+from app.tools.post_dates import PostDateRecovery
+from app.tools.translation import (
+    META_ORIGINAL_TEXT,
+    META_ORIGINAL_TITLE,
+    META_TRANSLATED_BY,
+    Translator,
+    translate_evidence,
+)
 
 # Government and university sites are not just `.gov` / `.edu`: Japan uses go.jp and lg.jp (local
 # government), the UK gov.uk and ac.uk, France gouv.fr, Mexico gob.mx, Korea go.kr, India nic.in and
@@ -65,7 +77,7 @@ _FORUM_DOMAINS = ("reddit.com", "quora.com", "nextdoor.com")
 _REVIEW_DOMAINS = (
     "yelp.com", "tripadvisor.", "zillow.com", "apartments.com", "google.com/maps", "tabelog.com", "retty.me",
     "gurunavi.com", "hotpepper.jp", "booking.com", "agoda.com", "trip.com", "zomato.com", "foursquare.com",
-    "opentable.com", "thefork.", "dianping.com", "naver.com/", "kakao.com", "wongnai.com", "map.yahoo.co.jp",
+    "opentable.com", "thefork.", "dianping.com", "map.naver.com", "kakao.com", "wongnai.com", "map.yahoo.co.jp",
 )
 _BLOG_DOMAINS = ("medium.com", "substack.com", "blogspot.com")
 
@@ -136,23 +148,40 @@ _KNOWN_UI_JUNK_LINES = {
 
 # How far back the live feed looks. Also the window named in the UI, so the
 # feed never implies more coverage than it actually searched.
-LIVE_FEED_WINDOW_DAYS = 7
+# How far back "recent" reaches. Seven days was too tight: a village, or a whole country's general
+# coverage, often has nothing in a week, and a feed that is empty most of the time is not a feed.
+LIVE_FEED_WINDOW_DAYS = 30
 
-# Tavily's news topic returns roughly 8-9 results for a single regional query
-# in a 7-day window regardless of `max_results`, which isn't enough to fill
-# the feed. These complementary facets are issued as separate searches and
-# merged: measured against the live API they yielded 25 unique dated items
-# for one city where the first alone yielded 8. They also give the feed
-# actual topical spread (reporting, incidents, civic/community activity)
-# instead of three pages of the same beat.
+# The feed is about the place's own city and, if that is too thin, the wider region around it (Xinyi District,
+# then Taipei City). It never widens to the whole country: that pulled in stories that were about Taiwan and
+# not about Taipei, and each extra scope is more billed searches. Only a place with no city or region at all
+# (a country itself, or a bare name) is searched as itself.
 #
-# Each facet is one real, billed Tavily search per feed load — this constant
-# is the main cost knob for this surface. See `backend/README.md`.
-_LIVE_FEED_FACETS = (
-    "local news",
-    "police incident report",
-    "community events development",
-)
+# Widening happens when the exact area yields fewer than this many items in total (news and community
+# together: community posts from one district are sparse by nature, so they alone must not trigger it).
+_FEED_MIN_ITEMS = 6
+# When widening, a kind that already has this many items is not searched again at the wider scope.
+_FEED_MIN_PER_KIND = 3
+
+# A feed load costs real Tavily credits (the free plan is 1,000 a month, shared with every research
+# question), so it is kept as cheap as it can be while still being useful:
+#   * at most 2 scopes x 2 kinds = 4 basic searches, and usually 2 (one news, one community);
+#   * the whole feed is cached per place, and each scope's search per city, so a second place in the same
+#     city, a re-opened tab or a React dev-mode double load costs nothing;
+#   * a scope's search is cached for an hour, the same as the feed.
+_FEED_CACHE_TTL_SECONDS = 60 * 60
+_FEED_CACHE: dict[tuple, tuple[float, list[Evidence]]] = {}
+_FEED_CACHE_LOCK = threading.Lock()
+_SCOPE_CACHE: dict[tuple, tuple[float, list[Evidence]]] = {}
+_FEED_INFLIGHT: dict[tuple, threading.Lock] = {}
+
+# One search per kind per scope. Tavily's news topic returns only ~7-9 results, so a second "facet" query
+# used to be issued to widen it; that doubled the news cost for a modest gain, and one query that names both
+# news and events gets most of it. The words differ by scope: a whole country has no "local news".
+_NEWS_QUERY_LOCAL = "local news and events"
+_NEWS_QUERY_GENERAL = "news travel culture events"
+# Forums, Reddit, Quora and regional communities. Undated, and kept: see community_sources.py.
+_COMMUNITY_FACET = "living and visiting: what is it like"
 
 # Job listings match a regional news query (a company's careers page names
 # the city its office is in) and carry a real posted date, so neither the
@@ -161,6 +190,9 @@ _LIVE_FEED_FACETS = (
 # around here". Matched against the URL's host/path, not page text, so a
 # news story *about* local hiring still gets through.
 _NON_ACTIVITY_URL_PATTERNS = ("jobs.", "careers.", "/jobs/", "/job/", "/careers/")
+
+# Posts and pages whose date the search API omits but the source states somewhere (see post_dates.py).
+_DATED_SOURCE_TYPES = (SourceType.COMMUNITY_FORUM, SourceType.REVIEW_AGGREGATOR, SourceType.BLOG)
 
 _MIN_USABLE_SNIPPET_LENGTH = 40
 _MAX_DISPLAY_LENGTH = 1200
@@ -375,11 +407,12 @@ def _is_relevant_to_live_feed(title: str, body: str, location: Location, source:
 
     haystack = f"{title} {body}".lower()
     source_text = source.lower()
+    city_forms = _name_forms(city)
 
-    if city in source_text:
+    if any(form in source_text for form in city_forms):
         return True
 
-    names_city = _mentions_whole_word(haystack, city) or haystack.count(city) >= 2
+    names_city = any(_mentions_whole_word(haystack, form) or haystack.count(form) >= 2 for form in city_forms)
     if not names_city:
         return False
 
@@ -387,10 +420,24 @@ def _is_relevant_to_live_feed(title: str, body: str, location: Location, source:
     if not region:
         # Nothing broader to disambiguate against; fall back to requiring the
         # city in the headline or repeated in the body.
-        return city in title.lower() or haystack.count(city) >= 2
+        return any(form in title.lower() or haystack.count(form) >= 2 for form in city_forms)
 
-    return _mentions_whole_word(f"{haystack} {source_text}", region)
+    return any(_mentions_whole_word(f"{haystack} {source_text}", form) for form in _name_forms(region))
 
+
+# "Taipei City" is written "Taipei" by the people who post there (r/Taipei, "Areas to live in Taipei"), and
+# "Xinyi District" is "Xinyi". Requiring the administrative word too discarded nearly every Reddit thread,
+# so a name is also accepted without its trailing "City", "District", and so on. The region check that
+# follows still has to be met, which is what keeps a Cambridge, New York report out of a Cambridge, MA feed.
+_GENERIC_SUFFIXES = {"city", "district", "county", "province", "prefecture", "municipality", "borough", "ward"}
+
+
+def _name_forms(name: str) -> list[str]:
+    parts = name.lower().split()
+    forms = [" ".join(parts)]
+    if len(parts) > 1 and parts[-1] in _GENERIC_SUFFIXES:
+        forms.append(" ".join(parts[:-1]))
+    return forms
 
 
 # Recovers a real date from page text for sources whose search API result
@@ -478,6 +525,8 @@ def _classify_source_type(url: str) -> SourceType:
         return SourceType.COMMUNITY_FORUM
     if any(d in url.lower() for d in _REVIEW_DOMAINS):
         return SourceType.REVIEW_AGGREGATOR
+    if is_community_domain(domain):  # after the review check: Tabelog and Yelp are on the list but are review sites
+        return SourceType.COMMUNITY_FORUM
     if any(d in domain for d in _BLOG_DOMAINS):
         return SourceType.BLOG
     return SourceType.OTHER
@@ -523,7 +572,7 @@ def _extract_image_url(raw_image: object) -> str | None:
 
 
 def _build_candidates(
-    location: Location, topic_id: str, results: list[dict], images: list, cache: dict[str, str]
+    location: Location, topic_id: str, results: list[dict], images: list, cache: dict[str, str], describe: bool = False
 ) -> list[Evidence]:
     """Turn raw Tavily results into Evidence — shared by the per-topic
     research search and the topic-agnostic live feed, so cleaning/length
@@ -554,6 +603,9 @@ def _build_candidates(
                 snippet
             )
 
+        # For display in a feed card: whole sentences, not the page's markup and chrome (see descriptions.py).
+        description = readable_description(item.get("content") or item.get("raw_content") or "", title) if describe else ""
+
         cache[url] = raw_content or snippet
         candidates.append(
             Evidence(
@@ -567,7 +619,7 @@ def _build_candidates(
                 location_scope=f"{location.city}, {location.region}",
                 text=snippet,
                 topic=topic_id,
-                metadata={"provider": "tavily"},
+                metadata={"provider": "tavily", **({"description": description} if describe else {})},
                 image_url=_extract_image_url(images[index]) if index < len(images) else None,
             )
         )
@@ -581,10 +633,19 @@ class TavilyWebSearchTool(WebSearchTool):
         max_results: int = 4,
         client: object | None = None,
         translator: Translator | None = None,
+        include_domains_for: Callable[[Location], list[str]] | None = None,
+        raw_content_cache: dict[str, str] | None = None,
+        date_recovery: PostDateRecovery | None = None,
     ) -> None:
-        self.raw_content_cache: dict[str, str] = {}
+        # Shared with the page-retrieval tool (and with a community-search instance), which read full text from it.
+        self.raw_content_cache: dict[str, str] = raw_content_cache if raw_content_cache is not None else {}
         self._max_results = max_results
         self._translator = translator
+        # Reads the real date of forum and blog posts whose search result has none (see post_dates.py).
+        self._date_recovery = date_recovery
+        # When set, every search is restricted to the domains it returns for the place: this is how the
+        # community search (forums, Reddit, regional communities) reuses all of this class's filtering.
+        self._include_domains_for = include_domains_for
 
         if client is not None:
             self._client = client
@@ -630,11 +691,13 @@ class TavilyWebSearchTool(WebSearchTool):
         failures: list[str] = []
         for text in queries:
             try:
+                extra = {"include_domains": self._include_domains_for(location)} if self._include_domains_for else {}
                 response = self._client.search(
                     query=text,
                     max_results=self._max_results,
                     include_raw_content=True,
                     include_images=True,
+                    **extra,
                 )
             except Exception as exc:  # noqa: BLE001 - the Tavily SDK's own exception types aren't guaranteed
                 failures.append(f"Tavily search failed for query '{text}': {exc}")
@@ -652,7 +715,7 @@ class TavilyWebSearchTool(WebSearchTool):
         if failures and len(failures) == len(queries):
             raise ToolExecutionError(failures[0])
 
-        candidates = _build_candidates(location, topic.topic_id, results, images, self.raw_content_cache)
+        candidates = _build_candidates(location, topic.topic_id, results, images, self.raw_content_cache, describe=True)
         if self._translator is not None:
             # Before the relevance filters below: a Japanese page about the
             # place doesn't spell its name the way the English query does,
@@ -663,6 +726,11 @@ class TavilyWebSearchTool(WebSearchTool):
                 max_translations=_MAX_TRANSLATIONS_PER_SEARCH,
                 should_translate=self._worth_translating(location),
             )
+        for c in candidates:
+            # A readable description is kept beside the text only where it is in the source's own language (a
+            # translated item's description would still be the original), and only if a sentence qualified.
+            if META_TRANSLATED_BY in c.metadata or not c.metadata.get("description"):
+                c.metadata.pop("description", None)
         if location.is_business:
             # One specific business: a page either mentions it or it isn't
             # evidence about it. No soft fallback here — unlike an area, where
@@ -707,7 +775,7 @@ class TavilyWebSearchTool(WebSearchTool):
         # everything else — so unlike the soft filter above, a forum/review
         # result that fails the stricter place check is dropped outright
         # rather than shown flagged. See `_is_relevant_to_community_voice`.
-        return [
+        kept = [
             c
             for c in result
             if c.source_type not in (SourceType.COMMUNITY_FORUM, SourceType.REVIEW_AGGREGATOR)
@@ -718,6 +786,10 @@ class TavilyWebSearchTool(WebSearchTool):
                 f"{c.source_url} {c.publisher or ''}",
             )
         ]
+        # Only what survived every filter is worth a page request for its date.
+        if self._date_recovery is not None:
+            self._date_recovery.enrich([c for c in kept if c.source_type in _DATED_SOURCE_TYPES])
+        return kept
 
 
 class TavilyLiveFeedTool:
@@ -752,10 +824,12 @@ class TavilyLiveFeedTool:
         max_results: int = 20,
         client: object | None = None,
         translator: Translator | None = None,
+        date_recovery: PostDateRecovery | None = None,
     ) -> None:
         self.raw_content_cache: dict[str, str] = {}
         self._max_results = max_results
         self._translator = translator
+        self._date_recovery = date_recovery
 
         if client is not None:
             self._client = client
@@ -772,80 +846,153 @@ class TavilyLiveFeedTool:
             ) from exc
         self._client = TavilyClient(api_key=api_key)
 
-    def fetch(self, location: Location) -> list[Evidence]:
-        region_label = _region_label(location)
+    def fetch(self, location: Location, *, refresh: bool = False) -> list[Evidence]:
+        """Recent news and community conversation about a place's city, widening once to its region when the
+        city has little. Items carry `feed_kind` ("news" or "community") and `feed_scope`.
 
-        candidates: list[Evidence] = []
+        Served from a one-hour cache unless `refresh` is set (the user pressed the button). Concurrent
+        identical requests share one search: the second waits for the first and reads its result."""
+        cache_key = _feed_cache_key(location)
+        with _FEED_CACHE_LOCK:
+            gate = _FEED_INFLIGHT.setdefault(cache_key, threading.Lock())
+        with gate:
+            if not refresh:
+                with _FEED_CACHE_LOCK:
+                    cached = _FEED_CACHE.get(cache_key)
+                if cached and time.monotonic() - cached[0] < _FEED_CACHE_TTL_SECONDS:
+                    return cached[1]
+            feed = self._build_feed(location, refresh=refresh)
+            with _FEED_CACHE_LOCK:
+                _FEED_CACHE[cache_key] = (time.monotonic(), feed)
+            return feed
+
+    def _build_feed(self, location: Location, *, refresh: bool) -> list[Evidence]:
+        news: list[Evidence] = []
+        community: list[Evidence] = []
+        seen_urls: set[str] = set()
+        queries_run = 0
         failures: list[str] = []
-        for facet in _LIVE_FEED_FACETS:
-            query = f"{region_label} {facet}"
-            try:
-                response = self._client.search(
-                    query=query,
-                    max_results=self._max_results,
-                    topic="news",
-                    days=LIVE_FEED_WINDOW_DAYS,
-                    include_raw_content=True,
-                    include_images=True,
-                )
-            except Exception as exc:  # noqa: BLE001 - the Tavily SDK's own exception types aren't guaranteed
-                # One facet failing shouldn't blank the whole feed — collect
-                # it and only surface an error if every facet failed.
-                failures.append(f"'{query}': {exc}")
-                continue
+        for index, (scope, scoped) in enumerate(_feed_scopes(location)):
+            if len(news) + len(community) >= _FEED_MIN_ITEMS:
+                break
+            label = _region_label(scoped)
+            for kind, found in (("news", news), ("community", community)):
+                if index > 0 and len(found) >= _FEED_MIN_PER_KIND:
+                    continue
+                candidates, ran, failed = self._search_scope(scoped, scope, kind, refresh=refresh)
+                queries_run += ran
+                failures.extend(failed)
+                for item in candidates:
+                    if item.source_url in seen_urls:
+                        continue
+                    seen_urls.add(item.source_url)
+                    item.metadata["feed_kind"], item.metadata["feed_scope"] = kind, scope
+                    item.location_scope = label
+                    found.append(item)
 
-            results = response.get("results", []) if isinstance(response, dict) else []
-            images = response.get("images", []) if isinstance(response, dict) else []
-            candidates.extend(_build_candidates(location, "live_feed", results, images, self.raw_content_cache))
-
-        if failures and len(failures) == len(_LIVE_FEED_FACETS):
+        if queries_run and len(failures) == queries_run:
             raise ToolExecutionError("Tavily live-feed search failed for every query — " + "; ".join(failures))
 
-        # A feed item without a real publication timestamp is dropped, not
-        # backfilled with the time we happened to fetch it. Two reasons, and
-        # the second is why this filter does double duty:
-        #   1. The feed's whole claim is recency. Showing "just now" for
-        #      something whose actual post time is unknown is a fabricated
-        #      timestamp, which this project doesn't do.
-        #   2. Undated results are overwhelmingly evergreen directory and
-        #      landing pages ("Community Events in <city>", a paper's
-        #      /tag/local-news index) rather than actual posts — measured
-        #      against the live API, Tavily's general topic returned a null
-        #      published_date for *every* result, while its news topic
-        #      returns real RFC-2822 timestamps on real articles. Requiring
-        #      a date is therefore also the quality filter.
-        dated = [
-            c
-            for c in candidates
-            if c.published_at is not None and not _is_non_activity_url(c.source_url)
-        ]
-
-        dated.sort(key=lambda e: e.published_at, reverse=True)
+        # Newest first. Only items with a real publication time can be dated, and they are ordered by it.
+        news.sort(key=lambda e: e.published_at, reverse=True)
+        community.sort(key=_newest_first_undated_last)
         if self._translator is not None:
-            # Newest first, so if there are more foreign items than the
-            # translation cap, it's the oldest that stay untranslated.
-            translate_evidence(dated, self._translator, max_translations=_MAX_TRANSLATIONS_PER_SEARCH)
+            translate_evidence(news + community, self._translator, max_translations=_MAX_TRANSLATIONS_PER_SEARCH)
 
-        # Unlike per-topic research search, there's no verified pipeline
-        # downstream to catch an overly loose match, so the location filter
-        # here is not soft: a result with no regional signal is dropped
-        # outright rather than shown with a caveat.
-        relevant = [
-            c
-            for c in dated
-            if _is_relevant_to_live_feed(c.source_title, c.text, location, f"{c.source_url} {c.publisher or ''}")
-        ]
+        return news + community
 
-        seen_urls: set[str] = set()
-        deduplicated: list[Evidence] = []
-        for item in relevant:
-            if item.source_url in seen_urls:
+    def _search_scope(
+        self, scoped: Location, scope: str, kind: str, *, refresh: bool = False
+    ) -> tuple[list[Evidence], int, list[str]]:
+        """One scope, one kind of content: one billed search, then the filters that keep it about this place.
+
+        The result is cached per city (not per place), so the next place in the same city reuses it. Returns
+        the items (fresh copies, safe to annotate), how many searches were actually sent (0 on a cache hit)
+        and the failures."""
+        label = _region_label(scoped)
+        cache_key = (kind, scope, label.lower(), (scoped.country_code or "").lower())
+        if not refresh:
+            with _FEED_CACHE_LOCK:
+                cached = _SCOPE_CACHE.get(cache_key)
+            if cached and time.monotonic() - cached[0] < _FEED_CACHE_TTL_SECONDS:
+                return [item.model_copy(deep=True) for item in cached[1]], 0, []
+
+        if kind == "news":
+            query = f"{label} {_NEWS_QUERY_GENERAL if scope == 'country' else _NEWS_QUERY_LOCAL}"
+            extra: dict = {"topic": "news", "days": LIVE_FEED_WINDOW_DAYS}
+        else:
+            query = f"{label} {_COMMUNITY_FACET}"
+            extra = {"include_domains": feed_domains(scoped.country_code)}
+
+        try:
+            # Basic depth is one credit; advanced is two, and nothing here needs it.
+            response = self._client.search(
+                query=query,
+                max_results=self._max_results,
+                search_depth="basic",
+                include_raw_content=True,
+                include_images=True,
+                **extra,
+            )
+        except Exception as exc:  # noqa: BLE001 - the Tavily SDK's own exception types aren't guaranteed
+            # A failed search is reported, not cached: the next load should try again.
+            return [], 1, [f"'{query}': {exc}"]
+        results = response.get("results", []) if isinstance(response, dict) else []
+        images = response.get("images", []) if isinstance(response, dict) else []
+        found = _build_candidates(scoped, "live_feed", results, images, self.raw_content_cache, describe=True)
+
+        kept = []
+        for item in found:
+            if _is_non_activity_url(item.source_url):
                 continue
-            seen_urls.add(item.source_url)
-            deduplicated.append(item)
+            # News claims to be recent, so a result with no real publication time is dropped rather than
+            # stamped with the moment it was fetched. Community posts are usually undated: they are kept and
+            # shown as "date unknown". That is honest, unlike inventing a time.
+            if kind == "news" and item.published_at is None:
+                continue
+            # No downstream verification here, so the location filter is not soft: a result with no
+            # regional signal is dropped outright rather than shown with a caveat.
+            if not _is_relevant_to_live_feed(item.source_title, item.text, scoped, f"{item.source_url} {item.publisher or ''}"):
+                continue
+            kept.append(item)
+        for item in kept:
+            # The filters above judged the full text; what the card shows is the readable description, or
+            # nothing (title and source only) where no sentence qualified.
+            item.text = item.metadata.pop("description", "")
+        if kind == "community":
+            # Every post has a date; the search API just does not say. Read it from the post itself where it
+            # can be read (post_dates.py), and leave the rest undated rather than guess.
+            if self._date_recovery is not None:
+                self._date_recovery.enrich(kept)
+            kept.sort(key=_newest_first_undated_last)
+        with _FEED_CACHE_LOCK:
+            _SCOPE_CACHE[cache_key] = (time.monotonic(), [item.model_copy(deep=True) for item in kept])
+        return kept, 1, []
 
-        deduplicated.sort(key=lambda e: e.published_at, reverse=True)
-        return deduplicated
+
+def _newest_first_undated_last(item: Evidence) -> tuple[bool, float]:
+    return (item.published_at is None, -(item.published_at.timestamp() if item.published_at else 0.0))
+
+
+def _feed_scopes(location: Location) -> list[tuple[str, Location]]:
+    """The exact area first, then the region around it: "area", "region". Never the whole country, unless the
+    country is all there is (a country-level place, or a bare name with no geography).
+
+    The region scope drops the city, so the same query and relevance filter apply to the wider area. It is
+    skipped when it would only repeat the area (Tokyo in Tokyo)."""
+    scopes: list[tuple[str, Location]] = []
+    if location.city:
+        scopes.append(("area", location))
+    if location.region and (location.region or "").lower() != (location.city or "").lower():
+        scopes.append(("region", location.model_copy(update={"city": None})))
+    if not scopes and location.country:
+        scopes.append(("country", location.model_copy(update={"city": None, "region": None, "name": location.country})))
+    return scopes or [("area", location)]
+
+
+def _feed_cache_key(location: Location) -> tuple:
+    named = "" if (location.city or location.region or location.country) else location.name.lower()
+    return (named, (location.city or "").lower(), (location.region or "").lower(), (location.country or "").lower())
 
 
 class TavilyPageRetrievalTool(PageRetrievalTool):

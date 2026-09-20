@@ -33,6 +33,8 @@ class FakeTavilyClient:
         self._results_sequence = results_sequence
         self.queries: list[str] = []
         self.topics: list[str | None] = []
+        self.domains: list[list[str] | None] = []
+        self.depths: list[str | None] = []
 
     def search(
         self,
@@ -43,9 +45,13 @@ class FakeTavilyClient:
         time_range: str | None = None,
         topic: str | None = None,
         days: int | None = None,
+        include_domains: list[str] | None = None,
+        search_depth: str | None = None,
     ) -> dict:
         self.queries.append(query)
+        self.depths.append(search_depth)
         self.topics.append(topic)
+        self.domains.append(include_domains)
         if self._raise_error:
             raise RuntimeError("simulated network failure")
         if self._results_sequence is not None:
@@ -392,30 +398,42 @@ def test_live_feed_requests_recency_and_labels_topic_live_feed(harvard_square):
     assert client.topics[0] == "news"
 
 
-def test_live_feed_drops_results_with_no_real_publication_date(harvard_square):
-    """A feed whose whole claim is recency must not backfill an unknown post
-    time with the time it happened to be fetched. Undated results are also,
-    in practice, the evergreen city landing pages rather than real posts."""
-    client = FakeTavilyClient(
-        results=[
-            {
-                "url": "https://example.org/evergreen-landing-page",
-                "title": "Community Events in Cambridge, MA - Local Gatherings & Activities",
-                "content": "Browse upcoming community events and activities happening in Cambridge all year.",
-            },
-            {
-                "url": "https://example.org/real-article",
-                "title": "Cambridge council approves new bike lane",
-                "content": "The Cambridge, MA city council voted on Tuesday to approve a protected bike lane.",
-                "published_date": "Wed, 16 Sep 2026 15:14:23 GMT",
-            },
-        ]
+class _NewsAndCommunityClient(FakeTavilyClient):
+    """News queries (topic="news") get `news`; the domain-restricted community query gets `community`."""
+
+    def __init__(self, news=None, community=None) -> None:
+        super().__init__()
+        self._news, self._community = news or [], community or []
+
+    def search(self, query, **kwargs):
+        super().search(query, **kwargs)
+        results = self._community if kwargs.get("include_domains") else self._news
+        return {"results": results, "images": []}
+
+
+def test_undated_news_is_dropped_but_an_undated_forum_post_is_kept_and_stays_undated(harvard_square):
+    """News claims to be recent, so it must not backfill an unknown time with the moment it was fetched. Forum
+    posts are usually undated, and dropping them discarded all community content: they are kept, as undated."""
+    client = _NewsAndCommunityClient(
+        news=[
+            {"url": "https://example.org/evergreen-landing-page", "title": "Community Events in Cambridge, MA",
+             "content": "Browse upcoming community events and activities happening in Cambridge, MA all year."},
+            {"url": "https://example.org/real-article", "title": "Cambridge council approves new bike lane",
+             "content": "The Cambridge, MA city council voted on Tuesday to approve a protected bike lane.",
+             "published_date": "Wed, 16 Sep 2026 15:14:23 GMT"},
+        ],
+        community=[
+            {"url": "https://www.reddit.com/r/cambridgema/comments/1", "title": "Best cafes in Cambridge, MA?",
+             "content": "Looking for quiet cafes to work from in Cambridge, MA, any recommendations from locals?"},
+        ],
     )
-    tool = TavilyLiveFeedTool(client=client)
 
-    feed = tool.fetch(harvard_square)
+    feed = TavilyLiveFeedTool(client=client).fetch(harvard_square)
 
-    assert [e.source_url for e in feed] == ["https://example.org/real-article"]
+    by_kind = {kind: [e for e in feed if e.metadata["feed_kind"] == kind] for kind in ("news", "community")}
+    assert [e.source_url for e in by_kind["news"]] == ["https://example.org/real-article"]
+    assert [e.source_url for e in by_kind["community"]] == ["https://www.reddit.com/r/cambridgema/comments/1"]
+    assert by_kind["community"][0].published_at is None, "no time is invented for a forum post"
 
 
 def test_live_feed_keeps_local_reporting_whose_headline_omits_the_city(harvard_square):
@@ -441,17 +459,15 @@ def test_live_feed_keeps_local_reporting_whose_headline_omits_the_city(harvard_s
 
 
 def test_live_feed_always_queries_the_region_not_the_specific_poi(starbucks_cambridge):
-    """The feed reports on the broader region, not the exact selected place
-    -- the query itself should never key off a POI's own (often generic,
-    e.g. a chain business) name."""
+    """The feed reports on the broader region, not the exact selected place -- no query should ever key off a
+    POI's own (often generic, e.g. a chain business) name."""
     client = FakeTavilyClient(results=[])
 
     TavilyLiveFeedTool(client=client).fetch(starbucks_cambridge)
 
     assert client.queries, "expected at least one regional query"
-    for query in client.queries:
-        assert "Starbucks" not in query
-        assert "Cambridge" in query
+    assert "Cambridge" in client.queries[0]
+    assert not any("Starbucks" in query for query in client.queries)
 
 
 def test_live_feed_region_is_derived_dynamically_not_hardcoded():
@@ -660,7 +676,7 @@ def test_live_feed_survives_one_facet_query_failing(harvard_square):
 
     class FlakyClient(FakeTavilyClient):
         def search(self, query: str, **kwargs):
-            if "police" in query:
+            if "events" in query:
                 raise RuntimeError("simulated failure for one facet")
             return super().search(query, **kwargs)
 

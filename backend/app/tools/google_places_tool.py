@@ -202,6 +202,14 @@ _NOT_A_VENUE_TYPES = frozenset(
 _ADDRESS_MARKERS = frozenset({"street_address", "premise", "subpremise", "plus_code"})
 
 
+# Google "places" that are areas or ways rather than somewhere a person could have reviews of: never adopted as
+# the subject just because a question happens to contain their name ("is Victoria Street busy?").
+_AREA_OR_WAY_TYPES = frozenset(
+    {"route", "intersection", "locality", "political", "sublocality", "neighborhood", "postal_code", "postal_town", "country"}
+    | {f"administrative_area_level_{n}" for n in range(1, 6)}
+)
+
+
 def is_address_only(types: set[str]) -> bool:
     return bool(types & _ADDRESS_MARKERS) and not is_venue(types)
 
@@ -231,6 +239,9 @@ def _prefer_locality(candidates: list[PlaceCandidate], query: str) -> list[Place
         return candidates
     return sorted(candidates, key=lambda c: hint not in _fold(c.display_name))
 _NEARBY_RADIUS_M = 40.0
+# How far from the pin a venue named in the question may be. A station approach and the arena beside it are
+# 100-200 m apart, and the name in the question is what stops this from picking a random neighbour.
+_NAMED_VENUE_RADIUS_M = 300.0
 _LOCALITY_BIAS_RADIUS_M = 20_000.0
 
 
@@ -325,7 +336,15 @@ class GooglePlacesTool:
         known = {(c.name, round(c.latitude, 3), round(c.longitude, 3)) for c in nearby}
         return nearby + [c for c in candidates if (c.name, round(c.latitude, 3), round(c.longitude, 3)) not in known]
 
-    def venues_at(self, latitude: float, longitude: float, radius_m: float = _NEARBY_RADIUS_M) -> list[PlaceCandidate]:
+    def venues_at(
+        self,
+        latitude: float,
+        longitude: float,
+        radius_m: float = _NEARBY_RADIUS_M,
+        limit: int = 5,
+        rank: str = "DISTANCE",
+        businesses_only: bool = True,
+    ) -> list[PlaceCandidate]:
         """The businesses standing at a point, nearest first.
 
         A street address or a pasted plus code names a spot, not a business, yet a cafe or shop is
@@ -335,8 +354,8 @@ class GooglePlacesTool:
         nearby = self._post(
             _NEARBY_URL,
             {
-                "maxResultCount": 5,
-                "rankPreference": "DISTANCE",
+                "maxResultCount": max(1, min(limit, 20)),
+                "rankPreference": rank,
                 "languageCode": "en",
                 "locationRestriction": {
                     "circle": {"center": {"latitude": latitude, "longitude": longitude}, "radius": radius_m}
@@ -344,7 +363,33 @@ class GooglePlacesTool:
             },
             _SEARCH_FIELD_MASK,
         )
-        return [c for c in (_candidate(p) for p in nearby) if c is not None and c.is_business]
+        if not businesses_only:
+            nearby = [
+                p
+                for p in nearby
+                if not (set(p.get("types") or []) & (_AREA_OR_WAY_TYPES | _ADDRESS_MARKERS)) or is_venue(set(p.get("types") or []))
+            ]
+        candidates = [c for c in (_candidate(p) for p in nearby) if c is not None]
+        return [c for c in candidates if c.is_business] if businesses_only else candidates
+
+    def venue_named_in(
+        self, text: str, latitude: float, longitude: float, radius_m: float = _NAMED_VENUE_RADIUS_M
+    ) -> PlaceCandidate | None:
+        """The place within `radius_m` of a point whose name `text` mentions, or None.
+
+        A pin is often a street corner or a station approach, and the question names the place that
+        stands there ("how are the reviews of this AO Arena?"). Its name has to appear in the question
+        (every distinguishing word of it, the same strict test used for web pages), so a bare "is it
+        good?" never attaches an arbitrary neighbour's ratings to the pin.
+
+        Ranked by popularity, not distance, and not limited to shops: measured at Victoria Station in
+        Manchester, the 20 *nearest* places were kiosks, barbers and bus stops and the arena beside it
+        was not among them, while by popularity it was second. Landmarks (an arena, a cathedral) count.
+        """
+        for venue in self.venues_at(latitude, longitude, radius_m, limit=20, rank="POPULARITY", businesses_only=False):
+            if _mentions_business(text, venue.name):
+                return venue
+        return None
 
     def search_places(self, query: str, limit: int = 5) -> list[PlaceCandidate]:
         """Find places by name, address or plus code the way Google Maps does.

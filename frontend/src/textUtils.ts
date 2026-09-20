@@ -16,6 +16,12 @@ export function cleanDisplayText(text: string): string {
     .trim();
 }
 
+/** What to show for a piece of evidence: the backend's readable description (whole sentences, no page chrome)
+ * when it made one, else the cleaned text. Live feed items carry their description as their text. */
+export function evidenceText(item: { text: string; metadata: Record<string, string> }): string {
+  return item.metadata.description || cleanDisplayText(item.text);
+}
+
 export function relativeTimeFrom(iso: string): string {
   const seconds = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
   if (seconds < 60) return "just now";
