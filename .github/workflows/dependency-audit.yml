@@ -58,11 +58,21 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # Audits what is actually installed, not just what requirements.txt names.
+      # Audits what is actually installed, not just what requirements.txt names. That includes pip
+      # itself, so upgrade it first: an older runner image ships a pip with published advisories.
+      #
+      # One advisory is ignored on purpose, and only this one:
+      #   PYSEC-2026-3075 (stanza, unsafe pickle loading of model files; fixed in 1.12.2).
+      # The latest argostranslate (1.11.0, the free offline translator) pins stanza==1.10.1, so the
+      # fixed version cannot be installed alongside it. Exploiting it needs an attacker to place a
+      # malicious model file on the machine (a poisoned model repository or shared cache); stanza's
+      # models here come from Stanford's own Hugging Face repository via Argos. Remove this
+      # exception when argostranslate allows stanza >= 1.12.2.
       - name: Audit
         run: |
+          python -m pip install --upgrade pip
           pip install pip-audit
-          pip-audit
+          pip-audit --ignore-vuln PYSEC-2026-3075
 
   npm-audit:
     name: npm audit (frontend)

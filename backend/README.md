@@ -85,21 +85,141 @@ results remain deterministic.
 expected duration range, which the UI shows beside a live elapsed timer while
 a question runs.
 
-## Live feed: regional, not location-specific
+## Live feed: what's being said about the place and its region
 
-`GET /api/live-feed` (`TavilyLiveFeedTool`) is a separate, unverified surface: "what's happening
-recently in the broader area", independent of both the Q&A pipeline and the specific selected
-place. It's deliberately not "what's being said about this exact business" — a single POI (one
-Starbucks branch, one specific cafe) rarely has anything published about it by name in the last
-week, so both the search query and the relevance filter are anchored on the area (the selected
-place's city, or region if no city is known — derived dynamically, never hardcoded) rather than
-the place's own name. The relevance check also requires that anchor to appear in a result's title,
-or be repeated in its body — a single passing mention (e.g. a national sports thread that
-name-checks a city once) isn't enough to count as regional activity. Results are deduplicated by
-URL and sorted newest-first; the frontend paginates the returned list (5 items/page, up to 3 pages
-shown) without any extra requests per page. Every fetch (initial load, manual refresh, or the
-frontend's periodic auto-refresh) is one real, billed Tavily search — see the frontend's refresh
-interval in `frontend/README.md` before making it more aggressive.
+`GET /api/live-feed` (`TavilyLiveFeedTool`) is a separate, unverified surface, independent of the Q&A
+pipeline: "what is going on around here", not "what is said about this exact business" (one cafe rarely
+has anything published about it by name). It answers with two kinds of item, tagged in
+`metadata["feed_kind"]`:
+
+- **news**: Tavily's news topic over the last 30 days (`LIVE_FEED_WINDOW_DAYS`), in several facets.
+  A news item with no real publication time is dropped, never stamped with the time it was fetched.
+- **community**: conversation from Reddit and the country's own forums (`feed_domains` in
+  `app/tools/community_sources.py`; TripAdvisor, YouTube and the social networks are left out because they
+  crowd the results with listings and videos). Each post's real date is read from the post itself
+  (see "Post dates" below) and the list is newest first, undated last. A post whose date can't be read is kept
+  and shown as "date unknown".
+
+The search starts at the place's city, and if that yields fewer than `_FEED_MIN_ITEMS` (6) items in total
+it widens **once**, to the region around it (Xinyi District, then Taipei City). It never widens to the whole
+country, because that surfaced stories about Taiwan that were not about Taipei; only a place with no city or
+region (a country itself, or a bare name) is searched as itself. Each item records the `feed_scope` it came
+from (`area` or `region`) and the UI labels widened items ("Wider region, Taipei City"). The place's own
+country code is resolved in the route with the same `LocaleResolver` the research agent uses. The relevance
+check is unchanged: the anchor (city, else region, else country) must appear in the URL or publisher, or be
+named or repeated in the text, and a non-local outlet must also name the surrounding region (so a Cambridge,
+MA query cannot surface a Cambridge, New York report). Results are deduplicated by URL.
+
+### What a feed load costs
+
+Tavily's free plan is 1,000 credits a month, shared with every research question, and a basic search is one
+credit (the tool sends `search_depth="basic"` explicitly, since advanced would be two). So the feed is built
+to spend as few as it can:
+
+| Case | Searches |
+|---|---|
+| Best case: the city has enough on its own | 2 (one news, one community) |
+| Widened to the region | at most 4 |
+| Repeat load, or a second tab, within an hour | 0 (served from the cache) |
+| Another place in the same city, within an hour | only its own 2; the region's search is shared |
+| Two simultaneous loads of one place (React's dev mode does this) | one set: the second waits for the first |
+
+The old design ran two news queries per scope over three scopes and widened whenever *either* kind was short,
+which meant sparse community posts alone pushed it to the country: up to 9 searches per load. Now widening is
+decided on the total, a kind that already has 3 items is not searched again at the wider scope, and news is
+one query ("local news and events") instead of two. The trade is fewer items per load: one live run for Xinyi District (Taipei 101) returned 6 items from 4
+searches (news and community, area and region), where the old design returned 39 from up to 9, most of them
+country-wide stories about Taiwan rather than Taipei. A district with little now shows little, labeled, rather
+than a country's worth of loosely related stories. `GET /api/live-feed?refresh=true` skips the cache; the
+refresh button uses it and nothing else may (the frontend auto-refreshes hourly, which matches the cache).
+Cached results are copies, so one place relabeling an item's scope cannot change another's. A failed search is
+never cached.
+
+## Google Maps ratings when the question names the place
+
+A pin is often a street corner or a station approach ("Hunts Bank & Victoria Station Approach") with a well-known
+business beside it, and the question names that business ("how are the reviews of this AO Arena?"). Google Maps
+data (rating, review count, up to five reviews, Google's own summary) was fetched only when the pin itself was a
+business or a street address, so this question got web pages about the arena and no Google rating at all.
+Now `GooglePlacesTool.venue_named_in()` asks Google for the 20 most popular places within 300 m of the pin and
+takes the first whose whole distinguishing name appears in the question (the same strict test used for web pages).
+It ranks by popularity, not distance, and is not limited to shops: at Victoria Station the 20 *nearest* places were
+kiosks, barbers and bus stops and the arena was not among them, while by popularity it was second. Landmarks (an
+arena, a cathedral) count; streets, areas and bare addresses do not.
+That business becomes the subject: its listing is fetched as evidence, the UI switches to it and shows the
+"On Google Maps" card, and the response says so in its limitations. It costs one Google Nearby request, made
+only when the question contains a capitalized name that is not merely the start of a sentence, and a bare "is it
+good?" never attaches a neighbour's ratings to the pin. When a listing is found, the first key finding is always
+"Google Maps rates X 4.6 out of 5 from N reviews", written from the listing rather than left to the model.
+
+## "Around this pin" and the Overpass servers
+
+The card comes from OpenStreetMap through the free Overpass API, whose public servers shed load. For a dense centre
+(Manchester) measured behavior was: the main server 3 s one minute and a 504 after 12 s the next; one mirror
+504 after 40 s; another 24 s. The old code gave every attempt 15 s, so that turned into "map data is unavailable"
+although the data was there. Now: five servers (the main one's two official alternates, `lz4.` and `z.`, which answer
+independently of it, and two unrelated mirrors), each with its own timeout (12 s for the official ones, 20 s and
+30 s for the mirrors), a last retry of the first after a pause, and the last good answer for that spot (up to a day
+old) when every one of them fails. The result is cached for an hour. The query no longer ends in `out center 400`:
+in a dense centre the first 400 elements are not the nearest 400, and Manchester has 400+ food and drink places
+within 600 m.
+
+## Readable descriptions
+
+A search snippet is markup and page chrome joined together (`## Related headline`, "8 hours ago", bylines, `[](...)`
+link leftovers, "company logo", a newsletter pitch). `app/tools/descriptions.py` picks out whole sentences from it:
+at least 7 words (14 CJK characters), ending in real punctuation and not cut off by the search engine, not a
+headline or a row of navigation labels, not a repeat of the title, not boilerplate. A timestamp is treated as a
+break between two unrelated items, not deleted, so neighbouring stories are not glued into one sentence. It never
+rewrites a sentence and returns "" when nothing qualifies. The live feed shows this description as an item's text.
+For research evidence it is kept in `metadata["description"]` (only where the source's own language was kept, since
+a translated item's description would still be the original), and the UI prefers it over the raw snippet.
+
+## Community and regional sources in the Q&A pipeline
+
+Besides the per-topic web searches, `LocationResearchAgent` runs up to two more, each through its own
+`TavilyWebSearchTool` built with `include_domains_for`, and each passing through the same translation and
+place-relevance filters as any web page:
+
+1. **Community search** (English): Reddit, Quora, TripAdvisor, Lonely Planet, YouTube and the social
+   networks (`community_domains`). For a place with no native name, the country's forums ride along here.
+2. **Regional forum search** (in the local language), only for a place with a native-script name in a country
+   with listed forums: PTT, Dcard, Pixnet, Naver, Pantip and so on, by the plan's first local-language query
+   ("台北101 觀景台 心得") or, failing that, the bare native name. This one exists because of a measurement:
+   with the forums mixed into one English query, Tavily's top results came from whichever listed site ranked
+   best (Pixnet blogs, TripAdvisor), and PTT and Dcard appeared to be missing from the index. They are not:
+   searched alone, in Chinese, they return real threads (8 of 8 relevant for Taipei 101). A cost of one more
+   search per question in those countries.
+
+Limits, measured: `include_domains` is a strong preference, not a filter (a Reddit-only search still returned
+a few unrelated pages, which the relevance checks drop), and Facebook, Instagram, TikTok and X are mostly
+behind a login, so expect few results from them. Evidence is ordered English first (including
+machine-translated text), then local-language sources, which stay available and labeled.
+
+## Post dates: every post has one, so read it
+
+Tavily returns no publication date for forum and social posts (null for every Reddit, PTT and Dcard result),
+and a Reddit thread's scraped text has none either. `app/tools/post_dates.py` reads the date from the post
+itself, cheapest source first, and records where in `metadata["date_source"]`:
+
+| Source | How | Cost |
+|---|---|---|
+| `url` | PTT names an article after its creation time (`M.1762748907.A.922.html`); dated blog paths (`/2026/09/17/`) | none |
+| `reddit_archive` | Arctic Shift, a free public archive of Reddit, gives `created_utc` for a whole batch of thread ids in one request. Its date for one thread matched Reddit's own feed to the second | one request per search |
+| `reddit_feed` | Reddit's own Atom feed for the thread. Throttled to about one request a minute without an account (200, then 429 for ~40 s), so it only backs up the archive for at most 2 posts | rare |
+| `page_metadata` | JSON-LD `datePublished` or `article:published_time` on the page (Pixnet, most blogs). Never `dateModified`, never a bare `<time>` tag (on a forum that is as likely a reply's) | one request per page, at most 8 |
+
+These requests spend no search credits. They are only made for posts that survived the relevance filters and
+still lack a date, run in parallel, time out at 6 seconds, refuse anything that resolves to a private or local
+address, and are skipped for hosts known to refuse a plain request (Dcard's Cloudflare returns 403; the
+login-walled networks). `DISABLE_POST_DATE_FETCH=1` keeps only URL dates. A post whose date cannot be read stays
+"date unknown": the alternative is inventing one. Arctic Shift is a third-party service run by volunteers, so an
+outage just leaves Reddit posts undated. Reddit's official OAuth API (free, needs a registered app) would be the
+sturdier source and is not wired in.
+
+In a live run for Xinyi District, all 8 Reddit threads in the feed were dated (2015 to 2026), and all 8 PTT and
+Pixnet threads from the regional search were dated (PTT from the URL, Pixnet from page metadata). Dcard threads
+come back undated. Live-feed community posts are listed newest first, undated last.
 
 ## Setup
 
@@ -157,6 +277,14 @@ OLLAMA_ENABLED=1
 Override the model with `OLLAMA_MODEL` (it must be pulled) and the server with `OLLAMA_BASE_URL`
 (default `http://localhost:11434`). If a call fails or times out (`OLLAMA_TIMEOUT_SECONDS`, default
 600), that component falls back to its deterministic counterpart and says so in `limitations`.
+
+**`DISABLE_POST_DATE_FETCH`** — set to `1` to stop reading forum posts' publication dates from the web. Dates
+carried in the URL (PTT, dated blog paths) are still used; Reddit and page-metadata dates need a small request
+each (never a search credit). See "Post dates" above.
+
+**`GOOGLE_PLACES_API_KEY`** — Google Maps rating, review count, hours and reviews for a business, either the
+one you picked or one the question names near the pin (see "Google Maps ratings when the question names the
+place"). Off when unset, and the response says so.
 
 ### Choosing the local model
 
@@ -238,7 +366,11 @@ has real keys and `sentence-transformers` is installed** — an autouse fixture 
 per-test temp file. LLM-backed components are tested against a scripted fake `LLMService`
 (`tests/llm_doubles.py`); Tavily against a fake client (`tests/test_tavily_tools.py`); semantic
 retrieval against a fake embedding function (`tests/test_semantic_retriever.py`). The suite is
-always free, offline, fast, and deterministic regardless of local machine configuration.
+always free, offline, fast, and deterministic regardless of local machine configuration. Over 400 tests; the newer
+modules have their own files: `test_post_dates.py`, `test_descriptions.py`, `test_community_sources.py`,
+`test_live_feed_scopes.py` (which also counts the searches a feed load sends, because each is a billed credit),
+`test_named_venue.py`, and the Overpass fallbacks in `test_overpass_tool.py`. The date and description tests
+use inputs modelled on snippets and URLs observed during development; none makes a request.
 
 ## Evaluation
 
@@ -261,7 +393,9 @@ app/
   tools/        LocationResolver / WebSearch / PageRetrieval interfaces + Tavily, Google Places,
                 Nominatim, Overpass, Wikimedia, translation and locale implementations, plus
                 FallbackLocationResolver (composite.py) and "unconfigured" stand-ins that return
-                nothing and say why (unconfigured.py)
+                nothing and say why (unconfigured.py); community_sources.py (curated forum and
+                Reddit domains by country), post_dates.py (real dates for forum posts) and
+                descriptions.py (whole sentences out of a search snippet)
   planning/     topic taxonomy + KeywordResearchPlanner + LLMResearchPlanner
   retrieval/    EvidenceRetriever interface + keyword, semantic, and hybrid implementations
   evidence/     EvidenceRepository (in-memory, SQLite) + evidence enrichment (quality/recency)
@@ -273,7 +407,8 @@ app/
   agents/       LocationResearchAgent — orchestrates the bounded lifecycle, plus the default-agent
                 factory (auto-selects components per API key)
   api/          FastAPI routes, incl. /api/places/search (live POI autocomplete) and
-                /api/live-feed (independent, region-scoped recent activity)
+                /api/live-feed (independent news and community activity for the place's city,
+                cached for an hour; ?refresh=true skips the cache)
 evaluation/     the benchmark from docs/evaluation.md, actually runnable (`run_benchmark.py`)
 tests/          pytest suite (with invented fixtures in tests/fixtures, never served by the app): planner, retrieval (keyword/semantic/hybrid), evidence repository
                 (in-memory/SQLite), verification (incl. contradiction), agent end-to-end, API,
@@ -290,7 +425,8 @@ can't be hallucinated. Two honest limits, both shown in the UI: it is only as co
 OpenStreetMap's volunteer mapping, and OSM has no ratings, reviews, or live opening hours — those
 still come from web sources and are only as reliable as they are. Google's Places API would
 supply them but needs a billing account, and scraping Google Maps breaks its terms, so it isn't
-used. Returns 503 when `DISABLE_LIVE_GEOCODING=1`, 502 if Overpass is down.
+used. Returns 503 when `DISABLE_LIVE_GEOCODING=1`, 502 if every Overpass server fails and there is no earlier
+answer for the spot (see "Around this pin and the Overpass servers" above).
 
 Location search only treats a *trailing* US state ("Boston, MA 02122", "Cambridge MA") as a
 signal to restrict results to the US. Scanning every word was a bug: "hotel in Tokyo" read "in" as

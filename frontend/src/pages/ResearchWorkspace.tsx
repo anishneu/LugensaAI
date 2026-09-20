@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useLocation as useRouterLocation } from "react-router-dom";
 import { ResearchApiError, runResearch, searchPlaces } from "../api";
 import { ChatSidebar } from "../components/ChatSidebar";
@@ -7,26 +7,36 @@ import { PlaceProfileCard } from "../components/PlaceProfileCard";
 import { LiveFeedSidebar } from "../components/LiveFeedSidebar";
 import { ResponsePanel } from "../components/ResponsePanel";
 import { SearchHero } from "../components/SearchHero";
-import { WorkspaceHeader } from "../components/WorkspaceHeader";
+import { TopNav } from "../components/TopNav";
 import { loadSessions, saveSessions } from "../storage";
 import type { ActiveLocation, QuerySession } from "../types";
-import "./ResearchWorkspace.css";
+
+// MapLibre is large, so the map loads in its own chunk after the page is usable.
+const MapPanel = lazy(() => import("../components/MapPanel"));
 
 function normalizeKey(rawQuery: string): string {
   return rawQuery.trim().toLowerCase();
 }
 
 export function ResearchWorkspace() {
-  // The landing page's "try it on" chips navigate here with a location
-  // string pre-seeded via router state — this only pre-fills the search
-  // box, it never auto-submits, so the user always picks the real result.
+  // The landing page hands over what was chosen there through router state: an exact place picked from its search
+  // box (opened straight away), or typed text (looked up once, like Enter in the search box here), and possibly a
+  // question that is put in the question box but never run for you.
   const routerLocation = useRouterLocation();
-  const seedQuery = (routerLocation.state as { seedQuery?: string } | null)?.seedQuery ?? "";
+  const handoff = (routerLocation.state as { location?: ActiveLocation; submitQuery?: string; question?: string | null } | null) ?? {};
 
-  const [query, setQuery] = useState(seedQuery);
-  const [location, setLocation] = useState<ActiveLocation | null>(null);
+  const [query, setQuery] = useState("");
+  const [location, setLocation] = useState<ActiveLocation | null>(handoff.location ?? null);
   const [sessions, setSessions] = useState<QuerySession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+
+  // Text typed on the landing page is resolved once on arrival (a ref, because StrictMode runs effects twice).
+  const handedOver = useRef(false);
+  useEffect(() => {
+    if (handedOver.current || !handoff.submitQuery) return;
+    handedOver.current = true;
+    handleSubmitRawQuery(handoff.submitQuery);
+  }, []);
 
   useEffect(() => {
     if (!location) return;
@@ -142,37 +152,43 @@ export function ResearchWorkspace() {
     }
   }
 
-  if (!location) {
-    return (
-      <SearchHero
-        query={query}
-        onQueryChange={setQuery}
-        onSelect={selectLocation}
-        onSubmit={handleSubmitRawQuery}
-      />
-    );
-  }
-
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
 
+  if (!location) {
+    return <SearchHero query={query} onQueryChange={setQuery} onSelect={selectLocation} onSubmit={handleSubmitRawQuery} />;
+  }
+
   return (
-    <div className="workspace">
-      <WorkspaceHeader location={location} onChangeLocation={() => setLocation(null)} />
-      <div className="workspace-body">
-        <ChatSidebar
-          sessions={sessions}
-          activeSessionId={activeSessionId}
-          onAsk={handleAsk}
-          onSelectSession={setActiveSessionId}
-          busy={busy}
-        />
-        <main className="workspace-center">
-          <PlaceProfileCard location={location} />
-          <NearbyCard location={location} />
-          <ResponsePanel session={activeSession} />
-        </main>
-        <LiveFeedSidebar location={location} />
-      </div>
+    <div className="flex min-h-screen flex-col bg-[var(--bg)] lg:h-screen">
+          <TopNav location={location} onChangeLocation={() => setLocation(null)} />
+          <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[264px_minmax(0,1fr)_288px] xl:grid-cols-[340px_minmax(0,1fr)_340px]">
+            {/* Left: the pin on a zoomed-in map, and where you ask. */}
+            <aside className="flex min-h-0 flex-col border-b border-[var(--border)] bg-[var(--bg-alt)] lg:overflow-y-auto lg:border-r lg:border-b-0">
+              <Suspense fallback={<div className="h-64 w-full animate-pulse bg-[var(--bg)]" />}>
+                <MapPanel location={location} />
+              </Suspense>
+              <ChatSidebar
+                initialDraft={handoff.question ?? ""}
+                sessions={sessions}
+                activeSessionId={activeSessionId}
+                onAsk={handleAsk}
+                onSelectSession={setActiveSessionId}
+                busy={busy}
+              />
+            </aside>
+
+            {/* Centre: the answer. */}
+            <main className="min-h-0 min-w-0 pb-8 lg:overflow-y-auto">
+              <PlaceProfileCard location={location} />
+              <NearbyCard location={location} />
+              <ResponsePanel session={activeSession} />
+            </main>
+
+            {/* Right: what's being said about the place lately. */}
+            <aside className="min-h-0 border-t border-[var(--border)] lg:overflow-y-auto lg:border-t-0 lg:border-l">
+              <LiveFeedSidebar location={location} />
+            </aside>
+          </div>
     </div>
   );
 }

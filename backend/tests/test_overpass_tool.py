@@ -74,7 +74,7 @@ def test_tries_every_mirror_and_then_the_primary_once_more(monkeypatch):
     with pytest.raises(ToolExecutionError):
         OverpassNearbyTool(transport=httpx.MockTransport(handler)).nearby(_LAT + 1, _LON + 1)
 
-    assert hosts[0] == hosts[-1] == "overpass-api.de" and len(set(hosts)) == 3 and len(hosts) == 4
+    assert hosts[0] == hosts[-1] == "lz4.overpass-api.de" and len(set(hosts)) == 5 and len(hosts) == 6
 
 
 def test_distance_is_zero_for_the_same_point():
@@ -86,13 +86,13 @@ def test_falls_back_to_the_mirror_when_the_main_server_is_busy():
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen_hosts.append(request.url.host)
-        if request.url.host == "overpass-api.de":
+        if request.url.host == "lz4.overpass-api.de":
             return httpx.Response(504)
         return httpx.Response(200, json={"elements": [{"type": "node", "lat": _LAT, "lon": _LON, "tags": {"amenity": "bar", "name": "Mirror Bar"}}]})
 
     result = OverpassNearbyTool(transport=httpx.MockTransport(handler)).nearby(_LAT, _LON)
 
-    assert seen_hosts == ["overpass-api.de", "overpass.kumi.systems"]
+    assert seen_hosts == ["lz4.overpass-api.de", "overpass-api.de"]
     assert result.groups[0].nearest[0].name == "Mirror Bar"
 
 
@@ -108,3 +108,81 @@ def test_repeat_lookups_for_the_same_pin_hit_the_cache():
     tool.nearby(_LAT, _LON)
 
     assert len(calls) == 1
+
+
+def test_keeps_what_the_map_knows_about_each_place_beyond_its_name():
+    payload = {
+        "elements": [
+            {
+                "type": "node", "lat": _LAT + 0.001, "lon": _LON,
+                "tags": {
+                    "amenity": "cafe", "name": "Cafe X", "opening_hours": "Mo-Fr 08:00-18:00", "contact:website": "https://cafe.example",
+                    "phone": "+81 3 0000 0000", "cuisine": "coffee_shop;dessert", "addr:street": "Main St", "addr:housenumber": "12",
+                    "wheelchair": "yes",
+                },
+            }
+        ]
+    }
+
+    item = _tool(payload).nearby(_LAT, _LON).groups[0].nearest[0]
+
+    assert item.opening_hours == "Mo-Fr 08:00-18:00" and item.website == "https://cafe.example"
+    assert item.phone == "+81 3 0000 0000" and item.cuisine == "coffee shop, dessert"
+    assert item.address == "Main St 12" and item.wheelchair == "yes"
+    assert (item.latitude, item.longitude) == (_LAT + 0.001, _LON), "coordinates let the UI open the place on a map"
+
+
+def test_a_place_with_no_extra_tags_has_none_for_them_never_an_invented_value():
+    payload = {"elements": [{"type": "node", "lat": _LAT, "lon": _LON, "tags": {"amenity": "cafe", "name": "Bare Cafe"}}]}
+
+    item = _tool(payload).nearby(_LAT, _LON).groups[0].nearest[0]
+
+    assert (item.opening_hours, item.website, item.phone, item.cuisine, item.address, item.wheelchair) == (None,) * 6
+
+
+def test_up_to_fifteen_places_per_group_are_returned_while_total_counts_them_all():
+    elements = [
+        {"type": "node", "lat": _LAT + i * 0.0002, "lon": _LON, "tags": {"amenity": "cafe", "name": f"Cafe {i}"}} for i in range(20)
+    ]
+
+    group = _tool({"elements": elements}).nearby(_LAT, _LON).groups[0]
+
+    assert group.total == 20 and len(group.nearest) == 15
+    assert [item.name for item in group.nearest] == [f"Cafe {i}" for i in range(15)]
+
+
+def test_each_server_gets_its_own_timeout_so_a_slow_mirror_is_not_cut_off_at_the_fast_ones_limit():
+    from app.tools.overpass_tool import _OVERPASS_ATTEMPTS
+
+    timeouts = [t for _, t in _OVERPASS_ATTEMPTS]
+    assert timeouts == sorted(timeouts) and timeouts[-1] >= 30, "measured: one mirror needed 24 s for a dense centre"
+
+
+def test_the_query_does_not_cap_the_number_of_elements():
+    from app.tools.overpass_tool import _query
+
+    assert "out center;" in _query(_LAT, _LON, 600) and "out center 400" not in _query(_LAT, _LON, 600)
+
+
+def test_when_every_server_fails_an_earlier_answer_for_the_same_spot_is_used(monkeypatch):
+    monkeypatch.setattr("app.tools.overpass_tool.time.sleep", lambda s: None)
+    answer = {"elements": [{"type": "node", "lat": _LAT, "lon": _LON, "tags": {"amenity": "bar", "name": "Old Bar"}}]}
+    state = {"up": True}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=answer) if state["up"] else httpx.Response(504)
+
+    tool = OverpassNearbyTool(transport=httpx.MockTransport(handler))
+    first = tool.nearby(_LAT, _LON)
+
+    import app.tools.overpass_tool as module
+
+    key = next(iter(module._CACHE))
+    module._CACHE[key] = (module._CACHE[key][0] - module._CACHE_TTL_SECONDS - 1, first)  # expired, but not stale
+    state["up"] = False
+
+    assert tool.nearby(_LAT, _LON).groups[0].nearest[0].name == "Old Bar"
+
+    module._CACHE[key] = (module._CACHE[key][0] - module._STALE_OK_SECONDS, first)  # too old to trust
+    with pytest.raises(ToolExecutionError):
+        tool.nearby(_LAT, _LON)

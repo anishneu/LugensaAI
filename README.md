@@ -68,10 +68,16 @@ to made-up sample data.
   page only counts as evidence if it names the business's distinguishing words *and* the right
   city (so "SR Coffee" in Tokyo can't be answered with reviews of "SR Coffee" in Virginia). No
   soft fallback: another business's reviews are worse than an honest "nothing found".
+- **Google Maps data when the question names the place** — a pin on a street corner with the venue next to it
+  still gets that venue's Google rating, review count and reviews if the question names it ("how are the reviews
+  of this AO Arena?"); its rating opens the key findings, and the reviews appear beside those from TripAdvisor,
+  Reddit and regional forums.
 - **Google Maps data for that business (optional)** — with `GOOGLE_PLACES_API_KEY`, its rating,
   review count, hours and Google's own review summary become cited evidence and get a card in the
   UI, clearly labeled as Google's. **"Around this pin"** (food, transit, groceries, health, police,
-  banks with computed walking distances) comes from OpenStreetMap map data, not from an LLM.
+  banks with computed walking distances) comes from OpenStreetMap map data, not from an LLM. The public
+  Overpass servers are often slow for a dense city centre, so it tries five of them with their own timeouts,
+  falls back to an earlier answer for that spot, and offers "Try again" rather than a dead end.
 - **Hybrid retrieval** — keyword scoring by default, blended with local-embedding semantic
   scoring (`sentence-transformers`, no API key) when installed.
 - **Real community voices** — a dedicated view of actual forum/review commentary (Reddit,
@@ -83,13 +89,34 @@ to made-up sample data.
   provides one — including one recovered from the page's own text (e.g. a review site's "Reviewed
   <date>" line) when the search API's own date field is empty — and every other item is labeled
   by when it was *retrieved*, explicitly, rather than shown with a fake "posted" time.
-- **An independent, regional live feed** — separate from the Q&A pipeline and from the Community
-  tab: it reports on what's recently happening in the broader area (the city/region the selected
-  place is in), not the exact selected place, since a single business rarely has anything written
-  about it by name in the last week. Every item carries its *own* publication time, shown exactly;
-  results without a real publication date are dropped rather than stamped with the time they were
-  fetched. Paginated, deduplicated, and a real refresh — every load is a real, fresh search, never
-  reshuffled or randomly generated.
+- **Forums, communities and regional sites, not only Google** — besides web search, each run searches the
+  places where people actually talk about a place: Reddit, Quora, TripAdvisor and others everywhere, plus the
+  country's own forums and review sites (PTT, Dcard and Pixnet in Taiwan, Naver in Korea, Tabelog in Japan,
+  Pantip in Thailand, about 30 countries in all; `backend/app/tools/community_sources.py`). Those forums are
+  searched separately, in the place's own language, because an English query never reaches them: with the
+  native name and a topic ("台北101 觀景台 心得") a live run returned 8 relevant PTT and Pixnet threads.
+  Evidence is shown English first (native English, or machine-translated), with the local-language original
+  secondary and labeled.
+- **Every post carries its real date where the source states one** — the search API gives none for forums,
+  so it is read from the post: PTT's creation time is in the URL, Reddit's comes from a public archive of
+  Reddit's own timestamps (one request for all threads), and blogs' from their page metadata
+  (`backend/app/tools/post_dates.py`). A live run dated all 8 regional threads and all 8 Reddit threads.
+  Where a source refuses a plain request (Dcard, Facebook, Instagram, TikTok, X: login walls and bot checks)
+  the post is shown as "date unknown", never given a made-up one.
+- **An independent live feed about the place's city** — separate from the Q&A pipeline and from the
+  Community tab. News from the last 30 days plus community conversation about the place's own city; when
+  the exact area has little it widens once to the region around it and labels those items as such, and never
+  to the whole country. Every news item carries its *own* publication time (news with no real date is
+  dropped); community posts without one say "date unknown". Built to be cheap on the free Tavily plan: 2 to 4
+  searches on a cold load, 0 when cached for an hour, and the search for a city is shared by every place in it
+  (`backend/README.md`, "What a feed load costs"). Never generated or reshuffled.
+- **Readable descriptions, not page chrome** — a search snippet is markup, timestamps, bylines and menus joined
+  together. The live feed and the evidence cards show whole sentences picked out of it (`backend/app/tools/descriptions.py`),
+  never rewritten, and just the headline and source when no sentence qualifies.
+- **An interface built to be read** — a landing page with the working search box over a real street map; then
+  a top bar, a zoomed-in map and question box on the left, the answer in the middle, the live feed on the right,
+  built with Tailwind and Headless UI over MapLibre and free OpenFreeMap tiles (no API key). No animation or 3D
+  library: they were tried and removed. See [`frontend/README.md`](frontend/README.md).
 - **Evidence-grounded answers, not reflexive "insufficient evidence"** — the Overview reasons over
   the full retrieved evidence (not only whatever survived atomic claim extraction), producing a
   direct answer, key findings, and question-organized details, while still never stating a fact
@@ -140,8 +167,9 @@ Nothing below is required — the app is fully functional with none of it set. C
 |---|---|---|
 | `TAVILY_API_KEY` | Live web search + real community/forum evidence | Free tier available at [tavily.com](https://tavily.com) |
 | `OLLAMA_ENABLED` | LLM-backed planning, claim extraction, and synthesis, via a local model | Free, but needs [Ollama](https://ollama.com) installed and a model pulled — see `backend/README.md` for which model, and why "thinking" mode must be off on CPU |
-| `GOOGLE_PLACES_API_KEY` | Google Maps rating, hours and dated reviews for one specific business, used as cited evidence | Optional and off by default: needs a Google Cloud project with billing enabled. See `backend/README.md` |
+| `GOOGLE_PLACES_API_KEY` | Google Maps rating, hours and dated reviews for one specific business (or a venue the question names), used as cited evidence | Optional and off by default: needs a Google Cloud project with billing enabled. See `backend/README.md` |
 | `DISABLE_TRANSLATION` | Turns off translation of foreign-language evidence to English | Translation is on when `argostranslate` and `langdetect` are installed (free, local; language packs download on first use) |
+| `DISABLE_POST_DATE_FETCH` | Stops reading forum posts' dates from the web | Set to `1` to use only the dates carried in URLs (PTT, dated blog paths); Reddit and page-metadata dates need a small request each (no search credits) |
 | `DISABLE_SEMANTIC_RETRIEVAL` | Forces keyword-only retrieval | Set to `1` to skip loading the local embedding model — the single biggest startup cost |
 
 Setting `TAVILY_API_KEY` alone collects real evidence but produces no claims — reading claims out
@@ -152,7 +180,7 @@ actually produce claims. See [`docs/research-workflow.md`](docs/research-workflo
 
 ```
 backend/     LocationResearchAgent, FastAPI app, tests, evaluation harness
-frontend/    React + TypeScript UI (landing page, map search, chat-driven research workspace)
+frontend/    React + TypeScript UI (landing page, map-backdrop search, three-column research workspace with a MapLibre map)
 docs/        architecture.md, research-workflow.md, evaluation.md
 ```
 
@@ -162,10 +190,12 @@ See [`backend/README.md`](backend/README.md) for the backend's internal layout.
 
 ```bash
 cd backend
-pytest
+pytest          # over 400 tests
+cd ../frontend
+npm run lint && npx tsc -b && npm run build
 ```
 
-The suite is free, offline, and deterministic by construction (its invented sample sources live
+The backend suite is free, offline, and deterministic by construction (its invented sample sources live
 only in `backend/tests/fixtures` and are never served by the app; a test enforces that) — an autouse fixture forces real
 API keys and semantic retrieval off during tests regardless of local `.env` configuration, so
 `pytest` never makes a real network call or spends API credits.
@@ -188,6 +218,12 @@ so CI is free, offline and deterministic just like a local `pytest`.
 These have been validated with `actionlint` and their commands run locally, but a workflow only
 proves itself on GitHub — the first run of each is the real test.
 
+One accepted exception: `pip-audit` runs with `--ignore-vuln PYSEC-2026-3075` (a `stanza` advisory). `stanza`
+is pinned below the fixed version by `argostranslate`, which does the free local translation, so it can't be
+upgraded without dropping that feature. The reason is written next to the flag in
+[`dependency-audit.yml`](.github/workflows/dependency-audit.yml); remove it once Argos allows
+`stanza >= 1.12.2`. CodeQL and the PR dependency review need GitHub itself and could not be reproduced locally.
+
 ## Evaluation
 
 ```bash
@@ -205,8 +241,10 @@ occasionally less source diversity). Requires `TAVILY_API_KEY`.
 The 8 originally planned milestones are implemented (adaptive planning, hybrid retrieval, persistent
 evidence storage, claim verification with contradiction detection, live web search, optional LLM
 reasoning, a React frontend, and a real evaluation run), followed by live place search, an
-independent regional live feed, real per-item timestamps, translation of foreign-language sources,
-business-specific research, OpenStreetMap "around this pin" data, and optional Google Maps data. See
+independent live feed (news plus community for the city, widening once to its region), real
+per-item timestamps, forum and regional-community sources with their real dates, translation of foreign-language sources,
+business-specific research, OpenStreetMap "around this pin" data, and optional Google Maps data (including a venue
+named in the question), readable feed descriptions and a rebuilt interface. See
 the Milestone status table in [`docs/architecture.md`](docs/architecture.md) for what's opt-in vs.
 free-by-default.
 
@@ -227,7 +265,8 @@ benchmarked).
 
 - [`backend/README.md`](backend/README.md) — run the agent and its API, environment variables,
   what each backend module does
-- [`frontend/README.md`](frontend/README.md) — run the demo UI
+- [`frontend/README.md`](frontend/README.md) — run the UI: its stack, the landing page and the workspace, and the
+  map pitfalls found along the way
 - [`docs/architecture.md`](docs/architecture.md) — design, interfaces, and what's opt-in vs. free
 - [`docs/research-workflow.md`](docs/research-workflow.md) — the research lifecycle in detail
 - [`docs/evaluation.md`](docs/evaluation.md) — the evaluation plan and its actual results

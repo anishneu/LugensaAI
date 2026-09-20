@@ -1,6 +1,5 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { AnimatePresence, motion } from "framer-motion";
 import type { QuerySession } from "../types";
 import { relativeTimeFrom } from "../textUtils";
 
@@ -16,6 +15,8 @@ interface ChatSidebarProps {
   onAsk: (question: string) => void;
   onSelectSession: (id: string) => void;
   busy: boolean;
+  /** A question chosen elsewhere (the landing page), waiting in the box. It is never run for you. */
+  initialDraft?: string;
 }
 
 const STATUS_ICON: Record<QuerySession["status"], string> = {
@@ -30,8 +31,8 @@ const STATUS_BAR: Record<QuerySession["status"], string> = {
   error: "bg-[var(--contradicted)]",
 };
 
-export function ChatSidebar({ sessions, activeSessionId, onAsk, onSelectSession, busy }: ChatSidebarProps) {
-  const [draft, setDraft] = useState("");
+export function ChatSidebar({ sessions, activeSessionId, onAsk, onSelectSession, busy, initialDraft = "" }: ChatSidebarProps) {
+  const [draft, setDraft] = useState(initialDraft);
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -42,7 +43,7 @@ export function ChatSidebar({ sessions, activeSessionId, onAsk, onSelectSession,
   }
 
   return (
-    <aside className="flex max-h-80 min-h-0 min-w-0 flex-col gap-5 overflow-y-auto border-b border-[var(--border)] bg-[var(--bg-alt)] p-5 lg:max-h-none lg:border-r lg:border-b-0">
+    <div className="flex min-h-0 min-w-0 flex-col gap-5 p-5">
       <div className="flex flex-col gap-1">
         <h2 className="m-0 flex items-center gap-1.5 text-[15px] font-bold text-[var(--text-h)]">💬 Ask the agent</h2>
         <p className="m-0 text-xs leading-relaxed text-[var(--text-muted)]">
@@ -63,14 +64,13 @@ export function ChatSidebar({ sessions, activeSessionId, onAsk, onSelectSession,
             }
           }}
         />
-        <motion.button
+        <button
           type="submit"
           disabled={busy || !draft.trim()}
-          whileTap={{ scale: 0.96 }}
           className="self-end rounded-full bg-[var(--accent)] px-4.5 py-2 text-[13px] font-semibold text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-45"
         >
           {busy ? "Researching…" : "Ask →"}
-        </motion.button>
+        </button>
       </form>
 
       {sessions.length === 0 && (
@@ -91,20 +91,15 @@ export function ChatSidebar({ sessions, activeSessionId, onAsk, onSelectSession,
       )}
 
       <div className="flex flex-col gap-1.5 overflow-y-auto">
-        <AnimatePresence initial={false}>
-          {sessions
+        {sessions
             .slice()
             .reverse()
             .map((session) => {
               const isActive = session.id === activeSessionId;
               return (
-                <motion.button
+                <button
                   key={session.id}
                   type="button"
-                  layout
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
                   onClick={() => onSelectSession(session.id)}
                   className={`flex w-full items-start gap-2.5 rounded-xl border p-2.5 text-left transition-colors ${
                     isActive
@@ -122,11 +117,10 @@ export function ChatSidebar({ sessions, activeSessionId, onAsk, onSelectSession,
                     </span>
                     <span className="text-[10.5px] text-[var(--text-muted)]">{relativeTimeFrom(session.askedAt)}</span>
                   </span>
-                </motion.button>
+                </button>
               );
             })}
-        </AnimatePresence>
       </div>
-    </aside>
+    </div>
   );
 }

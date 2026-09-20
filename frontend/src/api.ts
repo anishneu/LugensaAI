@@ -105,7 +105,8 @@ export interface LiveFeedParams {
 /** What's currently being said about this place — independent of any
  * research question asked in the chat. A real, billed Tavily search each
  * call; the caller is responsible for not polling this aggressively. */
-export async function fetchLiveFeed(params: LiveFeedParams, signal?: AbortSignal): Promise<Evidence[]> {
+/** `refresh` skips the server's one-hour cache and so costs real search credits: only for the refresh button. */
+export async function fetchLiveFeed(params: LiveFeedParams, signal?: AbortSignal, refresh = false): Promise<Evidence[]> {
   const query = new URLSearchParams();
   query.set("location", params.location);
   if (params.latitude != null) query.set("latitude", String(params.latitude));
@@ -113,6 +114,7 @@ export async function fetchLiveFeed(params: LiveFeedParams, signal?: AbortSignal
   if (params.city) query.set("city", params.city);
   if (params.region) query.set("region", params.region);
   if (params.country) query.set("country", params.country);
+  if (refresh) query.set("refresh", "true");
 
   const response = await fetch(`${API_BASE_URL}/api/live-feed?${query.toString()}`, { signal });
   if (!response.ok) {

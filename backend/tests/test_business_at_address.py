@@ -35,6 +35,10 @@ class _FakeGoogle:
             raise ToolExecutionError("google is down")
         return self._venues
 
+    def venue_named_in(self, text, lat, lon, radius_m=300.0):
+        self.named_calls = getattr(self, "named_calls", 0) + 1
+        return next((v for v in self._venues if v.name.lower() in text.lower()), None)
+
     def lookup(self, name, lat, lon, area=""):
         self.lookups.append(name)
         return None

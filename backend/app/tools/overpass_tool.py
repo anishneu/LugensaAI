@@ -22,18 +22,25 @@ import httpx
 from app.models.nearby import NearbyGroup, NearbyItem, NearbyPlaces
 from app.tools.base import ToolExecutionError
 
-# The main public server sheds load with 429/504 fairly often, and measured against 15 places it
-# failed on 6 (each after a long wait) when hit back to back, yet answered in ~6 s a minute later.
-# So: independent mirrors, a short per-attempt timeout, and one retry of the primary after a pause.
-# Two other mirrors that were once popular (overpass.openstreetmap.fr, maps.mail.ru) now refuse
-# or time out for this query and were dropped after testing.
-_OVERPASS_URLS = (
-    "https://overpass-api.de/api/interpreter",
-    "https://overpass.kumi.systems/api/interpreter",
-    "https://overpass.private.coffee/api/interpreter",
+# The public servers shed load with 429/504 often, and a dense city centre makes the query heavy: for
+# Manchester the main server answered in 3 s one minute and returned 504 after 12 s the next, one mirror
+# needed 24 s, and an earlier 15 s timeout for every attempt turned that into "no map data" although the data
+# was there. So: several servers (the main one's two official alternates answer independently of it, plus two
+# unrelated mirrors), a timeout per attempt that grows for the slower mirrors, one last retry of the first
+# server after a pause, and the last good answer for that spot when every one of them fails.
+# Two mirrors that were once popular (overpass.openstreetmap.fr, maps.mail.ru) now refuse or time out for
+# this query, and overpass.osm.jp and overpass.openstreetmap.ie were unreachable when tried: all dropped.
+_OVERPASS_ATTEMPTS: tuple[tuple[str, float], ...] = (
+    ("https://lz4.overpass-api.de/api/interpreter", 12.0),
+    ("https://overpass-api.de/api/interpreter", 12.0),
+    ("https://z.overpass-api.de/api/interpreter", 12.0),
+    ("https://overpass.kumi.systems/api/interpreter", 20.0),
+    ("https://overpass.private.coffee/api/interpreter", 30.0),
 )
-_RETRY_PRIMARY_AFTER_SECONDS = 2.0
-_CACHE_TTL_SECONDS = 10 * 60
+_RETRY_FIRST_AFTER_SECONDS = 2.0
+_CACHE_TTL_SECONDS = 60 * 60
+# Map data changes slowly. When every server fails, an answer up to a day old beats an empty card.
+_STALE_OK_SECONDS = 24 * 60 * 60
 _CACHE: dict[tuple[float, float, int], tuple[float, NearbyPlaces]] = {}
 _CACHE_LOCK = threading.Lock()
 _USER_AGENT = "LugensaAI/1.0 (location research demo)"
@@ -48,7 +55,8 @@ _GROUPS: list[tuple[str, str, dict[str, str]]] = [
     ("Safety", "amenity", {"police": "police station"}),
     ("Money", "amenity", {"bank": "bank", "atm": "ATM"}),
 ]
-_MAX_LISTED_PER_GROUP = 3
+# Enough for a full list in the UI's detail view; the card itself shows only the first few.
+_MAX_LISTED_PER_GROUP = 15
 
 
 def _query(lat: float, lon: float, radius_m: int) -> str:
@@ -56,7 +64,9 @@ def _query(lat: float, lon: float, radius_m: int) -> str:
     for _, key, values in _GROUPS:
         pattern = "|".join(values)
         clauses.append(f'  nwr(around:{radius_m},{lat},{lon})["{key}"~"^({pattern})$"];')
-    return "[out:json][timeout:25];\n(\n" + "\n".join(clauses) + "\n);\nout center 400;"
+    # No `out center N` cap: in a dense centre the first N elements are not the nearest N, and the closest
+    # places are what the card is for. Distances are computed and the list trimmed afterwards.
+    return "[out:json][timeout:25];\n(\n" + "\n".join(clauses) + "\n);\nout center;"
 
 
 def _distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> int:
@@ -66,6 +76,13 @@ def _distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> int:
     d_lambda = math.radians(lon2 - lon1)
     a = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
     return round(2 * radius * math.asin(math.sqrt(a)))
+
+
+def _address_of(tags: dict) -> str | None:
+    street, number = tags.get("addr:street"), tags.get("addr:housenumber")
+    if not street:
+        return None
+    return f"{street} {number}".strip() if number else street
 
 
 def _classify(tags: dict) -> tuple[str, str] | None:
@@ -79,28 +96,36 @@ def _classify(tags: dict) -> tuple[str, str] | None:
 class OverpassNearbyTool:
     """`transport` is exposed purely so tests can inject `httpx.MockTransport`."""
 
-    def __init__(self, transport: httpx.BaseTransport | None = None, timeout: float = 15.0) -> None:
-        self._client = httpx.Client(transport=transport, timeout=timeout, headers={"User-Agent": _USER_AGENT})
+    def __init__(self, transport: httpx.BaseTransport | None = None, timeout: float | None = None) -> None:
+        # `timeout` overrides every attempt's own (tests use it); normally each server has its own.
+        self._timeout = timeout
+        self._client = httpx.Client(transport=transport, headers={"User-Agent": _USER_AGENT})
 
     def nearby(self, latitude: float, longitude: float, radius_m: int = 600) -> NearbyPlaces:
         cache_key = (round(latitude, 4), round(longitude, 4), radius_m)
         with _CACHE_LOCK:
             cached = _CACHE.get(cache_key)
-            if cached and time.monotonic() - cached[0] < _CACHE_TTL_SECONDS:
-                return cached[1]
+        if cached and time.monotonic() - cached[0] < _CACHE_TTL_SECONDS:
+            return cached[1]
 
-        result = self._nearby_uncached(latitude, longitude, radius_m)
+        try:
+            result = self._nearby_uncached(latitude, longitude, radius_m)
+        except ToolExecutionError:
+            if cached and time.monotonic() - cached[0] < _STALE_OK_SECONDS:
+                return cached[1]
+            raise
         with _CACHE_LOCK:
             _CACHE[cache_key] = (time.monotonic(), result)
         return result
 
     def _fetch_elements(self, query: str) -> list[dict]:
         last_error: Exception | None = None
-        for attempt, url in enumerate((*_OVERPASS_URLS, _OVERPASS_URLS[0])):
-            if attempt == len(_OVERPASS_URLS):
-                time.sleep(_RETRY_PRIMARY_AFTER_SECONDS)  # last resort: the primary again, once it has cooled
+        attempts = [*_OVERPASS_ATTEMPTS, _OVERPASS_ATTEMPTS[0]]
+        for attempt, (url, timeout) in enumerate(attempts):
+            if attempt == len(_OVERPASS_ATTEMPTS):
+                time.sleep(_RETRY_FIRST_AFTER_SECONDS)  # last resort: the first server again, once it has cooled
             try:
-                response = self._client.post(url, data={"data": query})
+                response = self._client.post(url, data={"data": query}, timeout=self._timeout or timeout)
                 response.raise_for_status()
                 return response.json().get("elements", [])
             except (httpx.HTTPError, ValueError) as exc:
@@ -129,7 +154,21 @@ class OverpassNearbyTool:
             if key in seen:
                 continue
             seen.add(key)
-            found.setdefault(label, []).append(NearbyItem(name=name, kind=kind, distance_m=distance))
+            found.setdefault(label, []).append(
+                NearbyItem(
+                    name=name,
+                    kind=kind,
+                    distance_m=distance,
+                    latitude=lat,
+                    longitude=lon,
+                    opening_hours=tags.get("opening_hours"),
+                    website=tags.get("website") or tags.get("contact:website"),
+                    phone=tags.get("phone") or tags.get("contact:phone"),
+                    cuisine=(tags.get("cuisine") or "").replace(";", ", ").replace("_", " ") or None,
+                    address=_address_of(tags),
+                    wheelchair=tags.get("wheelchair"),
+                )
+            )
 
         groups = []
         for label, items in found.items():

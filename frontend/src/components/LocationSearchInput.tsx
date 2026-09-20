@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
+import { MagnifyingGlassIcon, MapPinIcon } from "@heroicons/react/24/outline";
 import { searchPlaces } from "../api";
 import type { ActiveLocation, PlaceCandidate } from "../types";
 
@@ -16,6 +17,7 @@ interface SearchOption {
   key: string;
   label: string;
   sublabel: string;
+  place: PlaceCandidate;
   toActiveLocation: () => ActiveLocation;
 }
 
@@ -24,6 +26,7 @@ function placeToOption(place: PlaceCandidate): SearchOption {
     key: `place:${place.display_name}:${place.latitude}:${place.longitude}`,
     label: place.name,
     sublabel: place.display_name.split(",").slice(1, 4).join(",").trim(),
+    place,
     toActiveLocation: () => ({
       rawQuery: place.display_name,
       displayName: `${place.name}${place.city ? `, ${place.city}` : ""}`,
@@ -52,8 +55,7 @@ export function LocationSearchInput({
   const [searching, setSearching] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Live POI search is debounced and cancellable — every keystroke would
-  // otherwise fire a real geocoding request per character typed.
+  // Live place search is debounced and cancellable: every keystroke would otherwise fire a real request.
   useEffect(() => {
     const query = value.trim();
     if (query.length < 3) {
@@ -106,45 +108,73 @@ export function LocationSearchInput({
     }
   }
 
+  const showList = open && (options.length > 0 || searching);
+
   return (
-    <div className="location-search" ref={containerRef}>
-      <span className="location-search-icon" aria-hidden="true">
-        🔍
-      </span>
-      <input
-        value={value}
-        autoFocus={autoFocus}
-        placeholder={placeholder ?? "Search a neighborhood, business, or address…"}
-        onChange={(e) => {
-          onChange(e.target.value);
-          setOpen(true);
-          setHighlighted(-1);
-        }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => window.setTimeout(() => setOpen(false), 120)}
-        onKeyDown={handleKeyDown}
-      />
-      {open && (options.length > 0 || searching) && (
-        <ul className="location-suggestions">
+    <div className="relative w-full" ref={containerRef}>
+      <div className="flex items-center gap-3 rounded-2xl border border-white/15 bg-white/[0.07] px-4 py-3.5 shadow-2xl shadow-violet-950/40 backdrop-blur-md transition focus-within:border-violet-300/60 focus-within:bg-white/[0.11]">
+        <MagnifyingGlassIcon className="h-5 w-5 flex-shrink-0 text-violet-200" aria-hidden="true" />
+        <input
+          value={value}
+          autoFocus={autoFocus}
+          placeholder={placeholder ?? "Search a neighborhood, business, or address…"}
+          className="w-full min-w-0 border-none bg-transparent text-base text-white outline-none placeholder:text-white/45"
+          onChange={(e) => {
+            onChange(e.target.value);
+            setOpen(true);
+            setHighlighted(-1);
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+          onKeyDown={handleKeyDown}
+          role="combobox"
+          aria-expanded={showList}
+          aria-autocomplete="list"
+        />
+        {searching && (
+          <span
+            className="h-4 w-4 flex-shrink-0 animate-spin rounded-full border-2 border-violet-200/30 border-t-violet-200"
+            aria-label="Searching"
+          />
+        )}
+      </div>
+
+      {showList && (
+        <ul
+          role="listbox"
+          className="absolute inset-x-0 top-full z-30 m-0 mt-2 max-h-80 list-none overflow-y-auto rounded-2xl border border-white/15 bg-[#14121f]/95 p-1.5 shadow-2xl backdrop-blur-xl"
+        >
           {options.map((option, i) => (
-            <li key={option.key}>
+            <li key={option.key} role="option" aria-selected={i === highlighted}>
               <button
                 type="button"
-                className={i === highlighted ? "active" : ""}
+                className={`flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition ${
+                  i === highlighted ? "bg-violet-400/20" : "hover:bg-white/10"
+                }`}
                 onMouseDown={(e) => e.preventDefault()}
+                onMouseEnter={() => setHighlighted(i)}
                 onClick={() => selectOption(option)}
               >
-                <span className="suggestion-pin" aria-hidden="true">
-                  🔎
+                <MapPinIcon className="mt-0.5 h-5 w-5 flex-shrink-0 text-violet-300" aria-hidden="true" />
+                <span className="min-w-0 text-sm text-white/90">
+                  <strong className="block truncate font-semibold text-white" dir="auto">
+                    {option.label}
+                  </strong>
+                  <span className="block truncate text-xs text-white/55" dir="auto">
+                    {option.sublabel}
+                  </span>
                 </span>
-                <span>
-                  <strong>{option.label}</strong>
-                  {option.sublabel ? `, ${option.sublabel}` : ""}
-                </span>
+                {option.place.is_business && (
+                  <span className="ml-auto flex-shrink-0 self-center rounded-full bg-violet-400/20 px-2 py-0.5 text-[10px] font-medium text-violet-200">
+                    {option.place.category}
+                  </span>
+                )}
               </button>
             </li>
           ))}
-          {searching && <li className="suggestion-loading">Searching real places…</li>}
+          {searching && options.length === 0 && (
+            <li className="px-3 py-2.5 text-sm text-white/55">Searching real places…</li>
+          )}
         </ul>
       )}
     </div>

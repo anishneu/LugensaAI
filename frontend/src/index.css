@@ -76,24 +76,18 @@ body {
   }
 }
 
-/* Landing page palette. Scoped to .landing so it can't leak into the app,
-   and light/dark like the rest of the site. */
-.landing {
-  --l-bg: #f5f1e8;
-  --l-card: #fffdf7;
-  --l-ink: #1c1b18;
-  --l-muted: #6b665a;
-  --l-rule: #dcd5c4;
-  --l-accent: #1e6a52;
+/* The indeterminate progress bar shown while a question is researched. */
+@keyframes slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
 }
 
-@media (prefers-color-scheme: dark) {
-  .landing {
-    --l-bg: #12110e;
-    --l-card: #1b1a16;
-    --l-ink: #f1ece0;
-    --l-muted: #a39d8d;
-    --l-rule: #2e2c25;
-    --l-accent: #6fcf9f;
+@media (prefers-reduced-motion: reduce) {
+  .animate-spin {
+    animation-duration: 2.4s;
   }
 }
