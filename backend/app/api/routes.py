@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.agents.factory import build_default_agent, build_location_resolver
 from app.core.config import (
@@ -11,6 +11,9 @@ from app.core.config import (
     OLLAMA_MODEL,
     TAVILY_API_KEY_ENV_VAR,
     geocoding_enabled,
+    live_feed_enabled,
+    news_rss_enabled,
+    reddit_archive_enabled,
     ollama_enabled,
     place_profile_enabled,
     search_enabled,
@@ -27,8 +30,11 @@ from app.retrieval.semantic_retriever import is_model_warm
 from app.tools.base import LocationNotFoundError, LocationResolverTool, ToolExecutionError
 from app.tools.google_places_tool import GooglePlacesTool, distance_m
 from app.tools.locale import LocaleResolver
-from app.tools.nominatim_tool import NominatimPlaceSearchTool, slugify
-from app.tools.overpass_tool import OverpassNearbyTool
+from app.tools.live_feed import LiveFeedTool
+from app.tools.news_rss import GoogleNewsRss
+from app.tools.nominatim_tool import NominatimClient, NominatimPlaceSearchTool, slugify
+from app.tools.overpass_tool import NEARBY_RADIUS_M, OverpassNearbyTool
+from app.tools.reddit_archive import RedditArchiveTool
 from app.tools.tavily_tools import TavilyLiveFeedTool
 from app.tools.post_dates import PostDateRecovery
 from app.tools.translation import default_translator, translate_short_texts
@@ -59,6 +65,7 @@ class Capabilities(BaseModel):
     llm_model: str | None = None
     live_search: bool
     live_geocoding: bool
+    live_feed: bool = Field(default=False, description="Whether the live feed has a source: free news and Reddit, or a search key")
     estimated_seconds_min: int
     estimated_seconds_max: int
     first_run_warmup: bool = False
@@ -96,6 +103,7 @@ def capabilities() -> Capabilities:
         llm_model=model,
         live_search=search_enabled(),
         live_geocoding=geocoding_enabled(),
+        live_feed=live_feed_enabled(),
         estimated_seconds_min=low,
         estimated_seconds_max=high,
         first_run_warmup=warming_up,
@@ -247,7 +255,7 @@ def popular_places(latitude: float, longitude: float) -> list[PopularPlace]:
 
 
 @router.get("/places/nearby", response_model=NearbyPlaces)
-def nearby_places(latitude: float, longitude: float, radius_m: int = 600) -> NearbyPlaces:
+def nearby_places(latitude: float, longitude: float, radius_m: int = NEARBY_RADIUS_M) -> NearbyPlaces:
     """What OpenStreetMap lists around a pin: food, transit, groceries, health,
     police, banks — each with a computed distance. Deterministic map data, not
     LLM output and not a web-page summary, so it can't be hallucinated.
@@ -293,19 +301,18 @@ def live_feed(
     country: str | None = None,
     refresh: bool = False,
 ) -> list[Evidence]:
-    """What's being said about this place lately — independent of any specific research question.
+    """What is new at and around this place, from the last 30 days — independent of any research question.
 
-    Recent news (last 30 days) and community conversation (Reddit, Quora, regional forums) about the
-    place's city, widening once to the region around it when the city has little (never to the whole
-    country). Each item's metadata says which (`feed_kind`, `feed_scope`). Real web search, not derived
-    from the Q&A pipeline's evidence.
+    Looks at the pin first (its name, its street, its neighbourhood) and only if there is nothing there at the city; every
+    item says which (`feed_scope` "near" or "city", and `feed_place`, the name), what kind it is (`feed_category`: crime,
+    accidents, weather, business, events, development, community, news) and whether it is news or a community post
+    (`feed_kind`). Politics and things irrelevant to a place are left out, and so is anything older than 30 days or with no
+    readable date. Sources: Google News RSS and Reddit's archive (free), and Tavily only when those give too little.
 
-    Returns an empty list (not an error) if `TAVILY_API_KEY` isn't set — there is no "live" surface at
-    all without live search. A cold load is 2 to 4 billed Tavily searches; the result is cached for an hour
-    (and each city's search is shared by every place in it). `refresh=true` skips the cache, for the
-    refresh button: the frontend must not use it to poll (see `frontend/README.md`).
+    Returns an empty list (not an error) when there is nothing to show, or no source at all is available. The result is
+    cached for 30 minutes; `refresh=true` skips the cache, for the refresh button: the frontend must not use it to poll.
     """
-    if not search_enabled():
+    if not live_feed_enabled():
         return []
 
     place = PlaceReference(
@@ -323,12 +330,18 @@ def live_feed(
         except ToolExecutionError:
             pass  # only the global communities are searched
 
-    tool = TavilyLiveFeedTool(
-        api_key=os.environ.get(TAVILY_API_KEY_ENV_VAR),
-        translator=default_translator() if translation_enabled() else None,
-        date_recovery=PostDateRecovery(),
+    translator = default_translator() if translation_enabled() else None
+    # The billed search is a fallback for a place the free sources say little about; without a key there is none.
+    fallback = (
+        TavilyLiveFeedTool(api_key=os.environ.get(TAVILY_API_KEY_ENV_VAR), translator=translator, date_recovery=PostDateRecovery())
+        if search_enabled()
+        else None
     )
-    try:
-        return tool.fetch(resolved, refresh=refresh)
-    except ToolExecutionError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    tool = LiveFeedTool(
+        rss=GoogleNewsRss() if news_rss_enabled() else None,
+        geocoder=NominatimClient() if geocoding_enabled() else None,
+        reddit_archive=RedditArchiveTool() if reddit_archive_enabled() else None,
+        tavily=fallback,
+        translator=translator,
+    )
+    return tool.fetch(resolved, refresh=refresh)

@@ -34,6 +34,8 @@ from app.core.config import (
     evidence_db_path,
     GOOGLE_PLACES_API_KEY_ENV_VAR,
     geocoding_enabled,
+    name_variants_enabled,
+    reddit_archive_enabled,
     llm_enabled,
     place_profile_enabled,
     search_enabled,
@@ -61,11 +63,16 @@ from app.tools.nominatim_tool import NominatimLocationResolverTool
 from app.tools.tavily_tools import TavilyPageRetrievalTool, TavilyWebSearchTool
 from app.tools.post_dates import PostDateRecovery
 from app.tools.translation import default_translator
+from app.tools.reddit_archive import RedditArchiveTool
 from app.tools.wiki_tool import WikiContextTool
-from app.tools.community_sources import community_domains, native_query, regional_domains
+from app.tools.wikidata_names import WikidataNameVariants
+from app.tools.community_sources import regional_domains
 from app.tools.locale import LocaleResolver
 from app.planning.local_queries import LLMLocalQueryWriter, LocalQueryWriter, RuleBasedLocalQueryWriter
 from app.verification.verifier import EvidenceBasedClaimVerifier
+
+# See the community search below.
+_COMMUNITY_MAX_RESULTS = 20
 
 
 def build_location_resolver(google: GooglePlacesTool | None, use_live_geocoding: bool) -> LocationResolverTool:
@@ -150,15 +157,15 @@ def build_default_agent(
         web_search_tool = tavily_search
         page_retrieval_tool = TavilyPageRetrievalTool(tavily_search.raw_content_cache)
         # Same search, restricted to forums and communities, sharing the page cache and all the relevance filters.
-        # The country's own forums ride along here only when there is no native name to search them by; otherwise
-        # they get their own search below, in their own language.
+        # Steered by the words of its query (see `community_query`), not restricted to a list of domains, which hid
+        # Reddit. Twenty results, not the usual few: Tavily prices a basic search at one credit whatever the count (up
+        # to 20; its usage counter lags too much to confirm that here), and Community Voices keeps only what names the
+        # place, so a longer list is what lets a Reddit thread through. The country's own forums get their own search
+        # below, in their own language, when the place has a native name.
         community_search_tool = TavilyWebSearchTool(
             api_key=os.environ.get(TAVILY_API_KEY_ENV_VAR),
-            max_results=TAVILY_MAX_RESULTS,
+            max_results=max(TAVILY_MAX_RESULTS, _COMMUNITY_MAX_RESULTS),
             translator=default_translator() if translation_enabled() else None,
-            include_domains_for=lambda place: community_domains(
-                place.country_code, include_regional=not (native_query(place) and regional_domains(place.country_code))
-            ),
             raw_content_cache=tavily_search.raw_content_cache,
             date_recovery=date_recovery,
         )
@@ -170,6 +177,7 @@ def build_default_agent(
             raw_content_cache=tavily_search.raw_content_cache,
             date_recovery=date_recovery,
         )
+        # Reddit: no domain filter (it returns pages unrelated to the place), only Reddit's own results kept.
     else:
         web_search_tool = UnconfiguredWebSearchTool()
         page_retrieval_tool = UnconfiguredPageRetrievalTool()
@@ -216,4 +224,9 @@ def build_default_agent(
         local_query_writer=local_query_writer,
         community_search_tool=community_search_tool,
         regional_search_tool=regional_search_tool,
+        # Free, and independent of Tavily: they work with no search key at all.
+        reddit_archive_tool=RedditArchiveTool(translator=default_translator() if translation_enabled() else None)
+        if reddit_archive_enabled() and use_live_geocoding
+        else None,
+        name_variants_tool=WikidataNameVariants() if name_variants_enabled() and use_live_geocoding else None,
     )

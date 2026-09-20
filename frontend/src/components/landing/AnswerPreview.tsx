@@ -181,19 +181,26 @@ export function AnswerPreview() {
 
           {/* live feed */}
           <div className="hidden flex-col gap-3 bg-[#0d0b1a] p-4 md:flex">
-            <span className="text-[11px] font-semibold text-white/70">Live feed</span>
-            <div className="flex gap-1 rounded-full border border-white/10 bg-white/[0.03] p-1 text-[10px] font-medium text-white/50">
-              <span className="flex-1 rounded-full bg-violet-500 py-1 text-center text-white">News</span>
-              <span className="flex-1 py-1 text-center">Community</span>
-            </div>
-            {[0, 1, 2, 3].map((n) => (
-              <div key={n} className="flex gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] p-2.5">
-                <span className="h-10 w-10 flex-shrink-0 rounded-lg bg-white/[0.09]" />
-                <div className="flex flex-1 flex-col gap-1.5 pt-0.5">
-                  <Bar w="40%" className="h-1.5" />
-                  <Bar w="94%" />
-                  <Bar w="70%" />
-                </div>
+            <span className="flex items-center gap-1.5 text-[11px] font-semibold text-white/70">
+              <span className="relative flex h-2 w-2" aria-hidden="true">
+                <span className="absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-70 motion-safe:animate-ping" />
+                <span className="live-blink relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+              </span>
+              Live feed
+            </span>
+            {["Now", "Today"].map((heading, group) => (
+              <div key={heading} className="flex flex-col gap-2">
+                <span className="text-[9.5px] font-semibold tracking-wide text-white/40 uppercase">{heading}</span>
+                {[0, 1].map((n) => (
+                  <div key={n} className="flex flex-col gap-1.5 rounded-xl border border-white/10 bg-white/[0.03] p-2.5">
+                    <div className="flex gap-1.5">
+                      <Bar w={group === 0 && n === 0 ? "34%" : "28%"} className="h-2.5 bg-violet-400/25" />
+                      <Bar w="26%" className="h-2.5" />
+                    </div>
+                    <Bar w="94%" />
+                    <Bar w="66%" />
+                  </div>
+                ))}
               </div>
             ))}
           </div>

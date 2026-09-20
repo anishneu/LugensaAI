@@ -15,8 +15,7 @@ needed anywhere: the map is MapLibre GL over free [OpenFreeMap](https://openfree
   used as Tailwind arbitrary values (`bg-[var(--bg-alt)]`). Those base rules sit in `@layer base`:
   an unlayered rule beats a layered utility regardless of specificity, so unlayered `h1`/`a` colour
   rules would silently override text-colour utilities.
-- **Headless UI** for the interactive pieces that need real accessibility: `Tab` (the answer's underlined tabs, the browser-style place tabs, live feed
-  tabs), `Popover` (opening hours), `Dialog` (the "Around this pin" detail pop-up), `Disclosure` (the research trace). The place search
+- **Headless UI** for the interactive pieces that need real accessibility: `Tab` (the answer's underlined tabs and the browser-style place tabs), `Popover` (opening hours), `Dialog` (the "Around this pin" detail pop-up), `Disclosure` (the research trace). The place search
   box is hand-written (keyboard-navigable list). **Heroicons** for icons.
 - **MapLibre GL** for both maps (`MapPanel.tsx` for the pin, `MapBackdrop.tsx` behind the search box), each
   lazy-loaded. They always use OpenFreeMap's light style, also in dark mode: its dark style rendered as
@@ -90,7 +89,7 @@ local-dev setting, not a production policy.
     trace). Evidence in English, or machine-translated to English, is listed before local-language sources.
   - A **place panel** (`components/place/`) of two **browser-style tabs** (`BrowserTabs`, shaped in `index.css` with plain CSS:
     rounded tops, and the selected tab flows into the panel through two concave feet, as in a real browser): Google Maps and
-    Around this pin. It is a different shape from the answer's underlined tabs and the live feed's pills on purpose: these are
+    Around this pin. It is a different shape from the answer's underlined tabs and the live feed's filter chips on purpose: these are
     sources for the place, not sections of one answer. A tab carries its rating or count beside its name when the panel is
     wide enough (a container query hides it when not). The chevron at the end folds the panel; every tab stays mounted, so
     the unselected one keeps loading and keeps its number current.
@@ -124,19 +123,18 @@ local-dev setting, not a production policy.
     English by the backend and marked "Machine-translated from Japanese" with the original one click away;
     text that couldn't be translated is marked "not translated" rather than shown as if it were readable.
   - The **live feed** (`LiveFeedSidebar`) — independent of any question, fetched from `GET /api/live-feed`.
-    It shows news from the last 30 days and community conversation (forums, Reddit) about the place's city;
-    when the city itself has little it widens once to the region around it and labels those items ("Wider
-    region · Taipei City"). It never goes country-wide. Each item shows its own publication time when it has
-    one, relative ("2 days ago") with the exact time on hover; community posts show the date read from
-    the post itself (PTT's URL, a Reddit archive, page metadata) and are listed newest first; one whose date
-    can't be read (Dcard, login-walled sites) says "date unknown" and is never given one. A load is 2 to 4 billed Tavily searches (plus free date lookups) and the server caches it
-    for an hour (see `../backend/README.md`, "What a feed load costs"), so it auto-refreshes every
-    `AUTO_REFRESH_MS` (60 minutes, in `LiveFeedSidebar.tsx`), which is free while the cache is warm. The
-    refresh button passes `refresh=true` to force a fresh search, and is the only thing that does. Each card shows the
-    headline, then the source site as a link, then a readable description: whole sentences picked out of the
-    page snippet by the backend (`app/tools/descriptions.py`), not the raw markup and navigation. If no sentence
-    qualifies the card shows just the headline and source. Items are paged client-side (6 at a time) from
-    the one fetched batch.
+    A **blinking red dot** beside the title says it is live (steady for anyone with reduced motion set). It is one
+    timeline, not tabs: everything from the last 30 days, newest first, under headings **Now** (the last hour), **Today**,
+    **Yesterday**, then dates. Each card shows its kind (Crime & safety, Accidents & traffic, Weather & alerts, Business,
+    Events & tourism, Development & transport, Community, News), the place it is about ("Near Massachusetts Avenue" when it is
+    at or near the pin, the city's name when nothing was found near it), the headline, its age with the exact time on hover,
+    and the outlet. Filter chips appear for the kinds present. The intro line does not name the place, since every card
+    does. The backend looks at the pin first and the city only if nothing is there; with nothing in 30 days the panel shows
+    only "Nothing new in the last 30 days." and no older item stands in. Politics and unrelated items never arrive. The
+    server caches a place's feed for 30 minutes, so it auto-refreshes every `AUTO_REFRESH_MS` (30 minutes, in
+    `LiveFeedSidebar.tsx`), which costs nothing while the cache is warm; the refresh button passes `refresh=true` and is
+    the only thing that forces a fresh load. Items are paged client-side (8 at a time). The panel is available when
+    `GET /api/capabilities` says `live_feed` (free news or Reddit switched on, or a Tavily key).
   - While a question runs, the response panel shows a **live elapsed timer** alongside a rough expected
     range from `GET /api/capabilities`, which varies by orders of magnitude depending on whether a local
     model is doing the reasoning.

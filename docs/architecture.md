@@ -9,13 +9,107 @@ If a later milestone's evaluation shows a stage genuinely benefits from being ru
 independent agent (e.g. because it needs its own multi-step tool loop), that's the point
 to reconsider — not before.
 
+## System at a glance
+
+A React front end talks to one FastAPI service, which holds the research agent, the live feed and the place
+endpoints. All three reach the outside world only through `app/tools`, one small client per source; the AI parts (the LLM,
+the embedding model, the translator) run locally.
+
+```mermaid
+flowchart LR
+  subgraph Client["Browser: React 19, TypeScript, Vite, Tailwind"]
+    UI["Landing page and<br/>research workspace"]
+    MAP["MapLibre map<br/>OpenFreeMap tiles"]
+  end
+
+  subgraph API["FastAPI backend, /api"]
+    ROUTES["routes.py<br/>research, places/*,<br/>live-feed, capabilities"]
+    AGENT["LocationResearchAgent<br/>bounded research loop"]
+    FEED["LiveFeedTool<br/>new in the last 30 days"]
+    PLACE["Nearby, place profile,<br/>translate"]
+    TOOLS["app/tools<br/>one client per source"]
+  end
+
+  subgraph Local["On your machine, free"]
+    OLLAMA["Ollama<br/>qwen3:30b"]
+    EMBED["MiniLM embeddings"]
+    STORE[("SQLite<br/>evidence store")]
+    ARGOS["Argos Translate"]
+  end
+
+  subgraph Public["Public data sources"]
+    TAVILY["Tavily web search<br/>free tier"]
+    GOOGLE["Google Places<br/>optional"]
+    OSM["OpenStreetMap<br/>Nominatim, Overpass"]
+    WIKI["Wikipedia, Wikivoyage,<br/>Wikidata"]
+    REDDIT["Reddit archive<br/>Arctic Shift"]
+    NEWS["Google News RSS"]
+  end
+
+  UI -->|"JSON over HTTP"| ROUTES
+  MAP --- UI
+  ROUTES --> AGENT
+  ROUTES --> FEED
+  ROUTES --> PLACE
+  AGENT --> OLLAMA
+  AGENT --> EMBED
+  AGENT --> STORE
+  AGENT --> TOOLS
+  FEED --> TOOLS
+  PLACE --> TOOLS
+  TOOLS --> ARGOS
+  TOOLS --> TAVILY
+  TOOLS --> GOOGLE
+  TOOLS --> OSM
+  TOOLS --> WIKI
+  TOOLS --> REDDIT
+  TOOLS --> NEWS
+```
+
+The same system as one request travels through it:
+
+```mermaid
+sequenceDiagram
+  actor U as User
+  participant W as React workspace
+  participant A as FastAPI
+  participant G as LocationResearchAgent
+  participant T as Tools and data sources
+  participant L as Ollama (local LLM)
+
+  U->>W: search and pick a place
+  par free, independent of the question
+    W->>A: GET /places/profile
+    W->>A: GET /places/nearby
+    W->>A: GET /live-feed
+  end
+  A->>T: Google Places, Overpass, news RSS, Reddit archive
+  T-->>A: ratings, nearby places, dated news and posts
+  A-->>W: profile, nearby places, feed
+  U->>W: ask a question
+  W->>A: POST /research
+  A->>G: run(place, question)
+  G->>L: plan topics
+  G->>T: search in parallel, then community and forums
+  G->>L: reflect: enough evidence?
+  G->>T: follow-up search or Wikipedia
+  G->>L: extract claims from evidence
+  G->>G: verify claims (deterministic)
+  G->>L: write the overview
+  G-->>A: answer, claims, evidence, limitations, trace
+  A-->>W: ResearchResponse
+  W-->>U: tabs: Overview, Community, Claims, Evidence
+```
+
 ## Layers
 
 ```
 app/models/       Pydantic schemas shared by every layer (Location, Evidence, Claim,
                    ResearchPlan/Topic, ResearchTraceStep, ResearchResponse)
 app/core/         config (AgentConfig — loop/budget limits) + LLMService interface
-app/tools/        LocationResolverTool, WebSearchTool, PageRetrievalTool
+app/tools/        LocationResolverTool, WebSearchTool, PageRetrievalTool, plus one client per source:
+                   Google Places, Nominatim, Overpass, Wikimedia, Wikidata, Reddit archive, Google News RSS,
+                   translation; live_feed.py and feed_topics.py (the live feed)
 app/planning/     topic taxonomy + ResearchPlanner
 app/retrieval/    EvidenceRetriever (keyword, semantic, hybrid)
 app/evidence/     EvidenceRepository (in-memory, SQLite) + evidence enrichment (quality/recency)
@@ -50,6 +144,32 @@ changing either way. Every LLM-backed implementation also falls back to its dete
 counterpart on failure (bad JSON, API error, a rejected/ungrounded response) — see
 `docs/research-workflow.md`'s "LLM integration" section for exactly what is and isn't trusted to
 the LLM.
+
+## Retrieval-augmented generation, and where it is checked
+
+The model never answers from memory: it sees retrieved evidence, and what it writes is checked twice, each claim against
+its cited source by a deterministic verifier and each overview sentence against the retrieved text.
+
+```mermaid
+flowchart TD
+  subgraph Retrieve["1. Retrieve"]
+    direction LR
+    Q["Question and<br/>planned topics"] --> SRCH["Live search, community,<br/>Reddit, Wikipedia, Google"] --> HYB["Hybrid ranking<br/>keyword + MiniLM"] --> EV[("Evidence: URL, publisher,<br/>date, exact passage")]
+  end
+  subgraph Generate["2. Generate"]
+    direction LR
+    CLM["LLM reads the evidence and<br/>proposes claims with citations"] --> GROUND["Grounding check: the cited id must exist,<br/>or the wording must match real evidence text"]
+  end
+  subgraph Verify["3. Verify, no LLM"]
+    direction LR
+    VER["Deterministic verifier:<br/>supported, contradicted,<br/>insufficient evidence"] --> CON["Cross-claim<br/>contradiction check"]
+  end
+  subgraph Answer["4. Answer"]
+    direction LR
+    ANS["LLM writes the overview only from<br/>verified claims and evidence"] --> CHK["Word-overlap check flags<br/>sentences no source backs"] --> RESP(["Answer with sources<br/>and limitations"])
+  end
+  Retrieve --> Generate --> Verify --> Answer
+```
 
 ## Why hybrid retrieval, not just semantic
 
@@ -216,8 +336,9 @@ All eight milestones from the original project plan are implemented, plus later 
   rebuilt UI. (1) *Community and regional sources*: `app/tools/community_sources.py` holds two curated
   domain lists, global (Reddit, TripAdvisor, Wikivoyage, Quora, Lonely Planet, ...) and per-country (for
   example PTT and Dcard for Taiwan, Naver for Korea, Tabelog for Japan, Pantip for Thailand), and
-  `community_domains(country_code)` puts the country's own first. A second `TavilyWebSearchTool`, built in
-  `agents/factory.py` with `include_domains_for`, searches only those domains and feeds the same
+  `community_domains(country_code)` puts the country's own first (this function and the domain-restricted English
+  search were removed in Milestone 28: the restriction hid Reddit). A second `TavilyWebSearchTool`, built in
+  `agents/factory.py` with `include_domains_for`, searched only those domains and fed the same
   translate-then-filter pipeline, so a forum page has to name the right place exactly as a web page does.
   This first version mixed every community site into one English query, and a search for Taiwan appeared to
   find nothing on PTT or Dcard, which I first wrote up as Tavily not indexing them. That was wrong: searched on
@@ -343,4 +464,98 @@ All eight milestones from the original project plan are implemented, plus later 
   re-drawing. The workspace preview under the hero was cut to the top of the layout with a fade, since showing all of it made it
   taller than the screen. The search page keeps a live map and now drifts up and down slowly on its own (26 s a sweep, eased
   at each turn, off for reduced motion) and fades in when its first frame is drawn, so the grey wait is not seen.
-
+- **Milestone 27:** four things from a review of the running product. (1) **Reddit had disappeared from the feed and the
+  Community tab.** Measured against the live API (Erfurt): `include_domains=["reddit.com"]` at basic depth returns
+  subreddits and pages unrelated to the place, alone or in a list with a country's forums, and the feed's query wording
+  ("what is it like") matched song titles; the place filters rightly dropped all of it. The same search with "reddit" as a
+  word in the query and no domain filter returns real threads, so the feed searches Reddit that way, keeping only Reddit's
+  own thread pages. The feed found 14 dated Erfurt threads (it had none). The country's forums in the feed became a
+  fallback, searched only when Reddit leaves the feed thin, because a second billed search per scope was the cost of
+  separating them; a failed Reddit search does not trigger it. (A Reddit search of its own for the research agent was
+  built and then removed: it cost a credit more on every question. Milestone 28 gets Reddit into Community Voices without
+  it.) Untouched and worth knowing: a business named for its city ("Hotel Erfurt-City") matches any thread that names the
+  city. (2) **"Around this pin" looks 1,000 m** around the pin
+  instead of 600. Public-server timings, cold: 3 s in central Manchester, 6 s in Erfurt, 12 s in Shibuya. (3) **CodeQL**
+  analyses cleanly; what failed was the upload, with "Code scanning is not enabled for this repository". That is a
+  property of a private repository without GitHub Code Security, not of the workflow. It now uploads only where code
+  scanning exists (public repository, or the `CODE_SCANNING` variable set), and otherwise keeps the SARIF file as an
+  artifact and prints findings in the job summary and as annotations (`.github/scripts/codeql_summary.py`), never failing
+  the job for a finding. (4) **Dependabot's pull requests went from 8 to 6** because it closed the two whose bumps the
+  config now ignores (TypeScript 7, `@types/node` 26); nothing new was opened. The five Python PRs still open predate the
+  grouping and are replaced by one grouped PR at its next monthly run.
+- **Milestone 28:** a Reddit thread that exists never reached Community Voices. The example was the place "Pa Sak Jolasid
+  Dam the floating train" in Thailand, whose thread (r/ThailandTourism, two years old) is titled with exactly that text.
+  Three separate causes, each measured. (1) The research community search sent a list of eleven domains, which returned
+  YouTube, Facebook and TikTok pages and no Reddit; it is now steered by its query (which starts with "reddit") with no domain
+  list, at 20 results instead of 4 (one credit either way), so it costs nothing extra. (2) The place filters rejected what
+  it found: Google labels the place "Tambon Manao Wan, Chang Wat Lopburi" and "Floating Train at Pa Sak Jolasid Dam", which
+  no page writes. Leading administrative words are ignored, "Pa Sak" equals "Pasak" and "Lop Buri" equals "Lopburi", a name
+  with three or more identifying words matches in any order and then does not also need the city, Google's " - Lop Buri" tag
+  is dropped, and a search is anchored to the province when the city is a subdistrict. Checked against counter-cases: a
+  two-word name is not matched in any order. (3) Even when found and accepted, the thread lost the top-four cut to travel
+  pages that scored slightly higher, so the community search's results are now kept forum threads first (Reddit and real
+  forums ahead of Facebook, Instagram, YouTube and TikTok posts, which are classed as community sources but are rarely
+  something to read), and at most two per site while others remain. Through the real search and the agent's own scoring the
+  thread now reaches the answer's evidence for two of the three entries Google lists for that place; for the third, Tavily did
+  not return it in the runs made (its ranking varies call to call). The country's forums no longer ride along in the English
+  search for places with no known native name. Also fixed on the way: the community query for a question-less request had
+  dropped the place's own name. The live feed gained the same name cleanup: it searched "Tambon Manao Wan, Chang Wat Lopburi",
+  and now searches "Manao Wan, Lopburi" and finds dated Lopburi threads.
+- **Milestone 29:** "as close to complete as you can", for what people say about a place. The limit was never the filters
+  alone: a web search returns a ranked sample, so a thread that exists can be absent from it whatever the filters do (the
+  third of Google's entries for the Pa Sak dam never had the thread returned). So a source that is not a sample was added.
+  (1) **Reddit archive** (`reddit_archive.py`): Arctic Shift, a public copy of Reddit, searched by words in a post's title
+  inside the place's own subreddits (found by name prefix), its country's, and the big travel ones. Free, no Tavily key, real
+  posting times. Measured: text search needs a subreddit; comment search times out; a title search takes 5 to 8 s; and it
+  rations requests (HTTP 429 with a reset time) after roughly two back-to-back runs of twelve, which I hit in testing and
+  which made two live runs return nothing until the client learned to wait out short refusals, stop on long ones, and cache
+  for an hour. Live, the thread that started all this came back for all three Google entries. (2) **Other names**
+  (`wikidata_names.py`): Wikidata's English label and aliases for the entity at the pin, kept on `Location.name_variants` and
+  used by every place filter and by the archive search, for the romanisation problem. It only helps a place Wikidata knows.
+  (3) **A bug the archive exposed**: a business named for its city (Hotel Erfurt-City) matched any text containing "Erfurt"
+  and "city", so the archive's first result for it was five off-topic posts (a flag collection, drug posts, a train story).
+  Such a name must now appear as a phrase. (4) `filter_for_place` was extracted from the Tavily tool so both sources use one
+  set of place rules. What is still not covered: text in comments, sites a search never returns, login-walled networks,
+  Google's five reviews, and spellings Wikidata does not list. Tavily's credit counter was at 864 of 1,000 for the month when this
+  was written; the archive and Wikidata spend none.
+- **Milestone 30:** the live feed said "the last 30 days" and showed Reddit posts three months old. Only the news search was
+  windowed (Tavily's `days` applies to its news topic); community posts were never filtered by date, and Tavily returns no
+  publication date for Reddit at all. Now everything is cut to 30 days after its date is known, and a post whose date cannot
+  be read is dropped, since it cannot be shown to be inside the window (Dcard posts, login-walled sites: the price of a
+  strict window). A date cut alone would have left the feed nearly empty, so Reddit comes first from the free archive asked
+  for posts after a date, which returns the last 30 days directly and spends no credit; the billed Reddit search is a fallback
+  when that leaves the feed under 3 posts, so a busy city's feed can cost one search instead of two. **A bug found only by
+  running it live:** the archive's `r/cambridge` is Cambridge, England, so a feed for Cambridge, Massachusetts filled with
+  posts about the University of Cambridge and Trumpington. City subreddits are now verified against their own descriptions
+  when the name is shared (r/CambridgeMA, r/cambridgeont), with two further mistakes caught by the control runs and fixed:
+  a sub's long sidebar can mention another country, so the short description is tried first; and a crypto sub called
+  KyotoSwap made Kyoto look ambiguous, so only a 2 or 3 letter code counts as a place qualifier. The archive's contribution is
+  capped at the 30 newest (Kyoto returned 75). Not verified: the billed Tavily paths were exercised with fake clients only,
+  since the credit counter was at 864 of 1,000.
+- **Milestone 31:** the live feed became "what is new at and around the place". Asked for: a blinking red dot; the last 30
+  days newest first with "Now" then later dates; crime, accidents, articles, community and business information; at the
+  pin and its streets first, the city only if nothing is there; nothing at all when there is nothing; no politics and nothing
+  irrelevant; and the place named on each item instead of in the intro. Built as `LiveFeedTool` over free sources, because the
+  billed search cost credits (864 of 1,000 already used) and returned a ranked sample: Google News' public RSS feed, which takes
+  a date window and quoted street names and returns real publication times and real local outlets (Patch, Cambridge Day, NBC
+  Boston), plus the Reddit archive. Tavily became a fallback below 3 items. Politics and irrelevance are keyword rules on the
+  headline (deterministic, free, blunt), items get one of eight kinds by the first matching rule, and the UI is one timeline with
+  kind filters instead of News and Community tabs. **Bugs found only by running it live**, each now fixed and tested: the street
+  at a city's centre point ("Broadway") pulled in New York theatre news, so a city-level pin has no street; OpenStreetMap put
+  Harvard Square in "Charlestown", so a headline must name the street or area *and* the city; my "outlet named for the area"
+  rule accepted the outlet "Broadway News" for the street Broadway, so it now means a website named for the area; and the busy
+  city subreddits' personal asks ("roommate wanted", "best cat vet?") were not information about the place, so community posts get
+  one more rule. Measured: Harvard Square 7 items in 7 s, Cambridge (city) 60 items, Hunts Bank nothing near and so
+  Manchester, and no politics or film trivia in any. Two judgement calls: the city is used only when there is *nothing* near (as
+  asked), so one nearby item hides the city's news and Reddit; and an empty feed shows a single line, not nothing at all. Not
+  covered: article text (headlines only), languages other than the country's English edition, and street-level Reddit (it has
+  city subreddits, not street ones).
+- **Milestone 32:** documentation and a landing-page fix. The README gained the landing-page screenshot, a tech-stack section,
+  author and status lines, a table of contents, and five Mermaid diagrams (system, research pipeline, retrieval and
+  verification, live feed, one request end to end), also placed in this file, `research-workflow.md` and the backend README.
+  The diagrams are validated by rendering them, and four of them were redrawn after the first renders were hard to read (a system
+  diagram with 27 crossing lines, a 3,200-pixel-tall pipeline). The screenshots were taken from a headless browser against
+  a local run; the Google Maps tab is left out of them because it shows reviewers' names. Found while taking them: the landing
+  page's workspace preview still drew the old News/Community tabs for the live feed, so it now draws the blinking dot and the
+  Now/Today grouping. An audit found no credentials in the working tree or in any commit on any branch, no commit carrying a
+  co-author line, and no fabricated sample content in the product (its invented fixtures live only under `backend/tests`).

@@ -11,9 +11,15 @@ search tool passes it to Tavily as `include_domains`. What was learned by measur
 * Tavily *does* index Reddit, PTT and Dcard, but not when they are one of a dozen domains in a single
   English query: the top results then come from whichever listed site ranks best (Pixnet blogs, TripAdvisor),
   and a search for Taiwan appeared to "miss" PTT and Dcard entirely. Searched on their own, and for PTT and
-  Dcard in Chinese, all three return real threads. So the sources are searched in separate groups: Reddit
-  with the country's forums for the live feed, and the country's forums in the place's own language for
-  research questions (see `regional_domains` and `feed_domains`).
+  Dcard in Chinese, all three return real threads. So the country's forums are searched on their own, in the
+  place's own language, for research questions (see `regional_domains`).
+* Reddit is the exception to `include_domains` altogether. Re-measured against the live API (Erfurt, Germany, and a
+  floating train in Thailand): `include_domains=["reddit.com"]` at basic depth returned no thread about the place,
+  alone or in a short list, only whatever subreddit matched a stray word (adult, gaming and AI subreddits, and song
+  titles for "what is it like"); the app's own community list of eleven domains returned YouTube, Facebook and TikTok
+  pages and no Reddit for a place that has a thread titled with its exact name. The same searches with "reddit" as
+  the first word of the query and no domain filter returned the threads. Both the live feed (`TavilyLiveFeedTool`)
+  and the research community search (`community_query`) now search Reddit that way.
 * `include_domains` is a strong preference, not a filter: a Reddit-only search still returned a few
   off-topic pages from other sites, which the place-relevance checks then drop.
 * Facebook, Instagram, TikTok and X are mostly behind a login. They are included because they are where
@@ -84,13 +90,6 @@ REGIONAL_COMMUNITY_DOMAINS: dict[str, tuple[str, ...]] = {
 _MAX_DOMAINS = 24
 
 
-def community_domains(country_code: str | None, include_regional: bool = True) -> list[str]:
-    """The domains for an English community search in `country_code`: the country's forums first (unless
-    they are searched separately, in the local language), then the global ones."""
-    regional = regional_domains(country_code) if include_regional else []
-    return list(dict.fromkeys((*regional, *GLOBAL_COMMUNITY_DOMAINS)))[:_MAX_DOMAINS]
-
-
 def native_query(location: Location) -> str:
     """The place's own name in its own script, for searching the country's forums in the language they are
     written in (PTT and Dcard return nothing useful for an English query). Empty where no native name is known."""
@@ -102,13 +101,6 @@ def regional_domains(country_code: str | None) -> list[str]:
     return list(REGIONAL_COMMUNITY_DOMAINS.get((country_code or "").lower(), ()))
 
 
-def feed_domains(country_code: str | None) -> list[str]:
-    """What the live feed searches for conversation: Reddit and the country's own forums, nothing else.
-    TripAdvisor, YouTube and the social networks are left out of the feed on purpose: they crowd the results
-    with listings and videos, and the feed is about what people are saying."""
-    return list(dict.fromkeys((*regional_domains(country_code), "reddit.com")))
-
-
 def is_community_domain(domain: str) -> bool:
     """Whether `domain` (a host like "www.reddit.com") is one of the listed forums or social sites."""
     host = domain.lower().removeprefix("www.")
@@ -116,11 +108,70 @@ def is_community_domain(domain: str) -> bool:
     return any(host == d or host.endswith("." + d) for d in everything)
 
 
+# Words Google puts in front of a Thai (and some Indonesian) place name: "Chang Wat Lopburi" is the province of Lopburi,
+# "Tambon Manao Wan" the subdistrict Manao Wan. Nobody writes them, so a page about the place never contains them.
+_ADMIN_PREFIXES: tuple[tuple[str, ...], ...] = (
+    ("chang", "wat"),
+    ("changwat",),
+    ("tambon",),
+    ("amphoe",),
+    ("khet",),
+    ("khwaeng",),
+    ("kabupaten",),
+    ("kecamatan",),
+    ("kelurahan",),
+)
+
+
+def without_admin_prefix(name: str) -> str:
+    """"Chang Wat Lopburi" -> "Lopburi", "Tambon Manao Wan" -> "Manao Wan"; any other name is returned as it is."""
+    words = name.split()
+    lowered = [w.lower() for w in words]
+    for prefix in _ADMIN_PREFIXES:
+        if tuple(lowered[: len(prefix)]) == prefix and len(words) > len(prefix):
+            return " ".join(words[len(prefix) :])
+    return name
+
+
+def place_names(location: Location) -> list[str]:
+    """Every name people may use for the place, as they write it: its own (without Google's " - Lop Buri" tag) and the
+    variants found for it, each once."""
+    names: list[str] = []
+    for raw in (location.name, *location.name_variants):
+        name = base_name(raw)
+        if name and name.lower() not in {n.lower() for n in names}:
+            names.append(name)
+    return names
+
+
+def search_area(location: Location) -> str:
+    """The area a search is anchored to: the city, unless the city is an administrative subunit (a Thai "Tambon", which
+    nobody writes about), and then the province. Without the words nobody writes ("Chang Wat Lopburi" is "Lopburi")."""
+    city = location.city or ""
+    if city and without_admin_prefix(city) != city and location.region:
+        return without_admin_prefix(location.region)
+    return without_admin_prefix(city or location.region or location.country or "")
+
+
+def base_name(name: str) -> str:
+    """The place's name as people write it: Google's "Pa Sak Jolasid Dam - Lop Buri" is "Pa Sak Jolasid Dam" (the part
+    after " - " tells two listings apart, and no page uses it). Searches and place checks both use this."""
+    head = name.split(" - ")[0].strip()
+    return head if len(head) >= 3 else name
+
+
 def community_query(location: Location, question: str) -> str:
     """What to ask the forums. A business is searched by its name; an area by its name plus the question,
-    or a general "what is it like" when the question names nothing more specific."""
-    area = location.city or location.region or location.country or ""
+    or a general "what is it like" when the question names nothing more specific.
+
+    "reddit" leads the query, and no domain filter is sent with it. Measured against the live API, the domain list
+    hid Reddit: for a floating train in Thailand it returned YouTube, Facebook and TikTok pages and no Reddit, though a
+    thread titled with the place's exact name exists; the same query with "reddit" first and no filter returned that
+    thread and kept TripAdvisor and the rest in the mix. (With "tripadvisor forum" added after it the thread was lost
+    again, so it is only the one word.)"""
+    name = base_name(location.name)
+    area = search_area(location)
     if location.is_business:
-        return f'"{location.name}" {area} reviews opinions experience'.strip()
-    label = ", ".join(part for part in (location.name, area) if part and part != location.name) or location.name
-    return f"{location.name} {area} {question}".strip()[:200] if question.strip() else f"{label} what is it like"
+        return f'reddit "{name}" {area} reviews opinions experience'.strip()
+    label = f"{name}, {area}" if area and area.lower() != name.lower() else name
+    return f"reddit {name} {area} {question}".strip()[:200] if question.strip() else f"reddit {label} what is it like"

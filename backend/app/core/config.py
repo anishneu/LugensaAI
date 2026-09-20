@@ -161,6 +161,29 @@ def geocoding_enabled() -> bool:
     return not bool(os.environ.get("DISABLE_LIVE_GEOCODING"))
 
 
+def reddit_archive_enabled() -> bool:
+    """Reddit posts about a place from Arctic Shift's free public archive (`app/tools/reddit_archive.py`): no key and no
+    search credit, but a network lookup, so it follows the live-lookup switch. Also off under DISABLE_REDDIT_ARCHIVE."""
+    return geocoding_enabled() and not os.environ.get("DISABLE_REDDIT_ARCHIVE")
+
+
+def news_rss_enabled() -> bool:
+    """Recent news about a place from Google News' public RSS feed (`app/tools/news_rss.py`): free, no key, real dates. A
+    network lookup, so it follows the live-lookup switch. Also off under DISABLE_NEWS_RSS."""
+    return geocoding_enabled() and not os.environ.get("DISABLE_NEWS_RSS")
+
+
+def live_feed_enabled() -> bool:
+    """Whether the live feed has anything to draw on: the free news and Reddit sources, or a Tavily key."""
+    return news_rss_enabled() or reddit_archive_enabled() or search_enabled()
+
+
+def name_variants_enabled() -> bool:
+    """Other English names for a place from Wikidata (`app/tools/wikidata_names.py`): free, no key. Also off under
+    DISABLE_NAME_VARIANTS."""
+    return geocoding_enabled() and not os.environ.get("DISABLE_NAME_VARIANTS")
+
+
 # Wikipedia/Wikivoyage (app/tools/wiki_tool.py): free, no key. Wikimedia blocks
 # clients that don't identify themselves with contact details, so this is sent
 # in the User-Agent. Override it if you fork the project.

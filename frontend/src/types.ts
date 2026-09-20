@@ -105,6 +105,8 @@ export interface Capabilities {
   llm_provider: "ollama" | "none";
   llm_model: string | null;
   live_search: boolean;
+  /** Whether the live feed has a source: free news and Reddit, or a Tavily key. Older servers do not send it. */
+  live_feed?: boolean;
   live_geocoding: boolean;
   estimated_seconds_min: number;
   estimated_seconds_max: number;

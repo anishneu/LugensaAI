@@ -1,22 +1,77 @@
 # Research Workflow
 
+The whole run, as `LocationResearchAgent._run` executes it (a fixed sequence with one decision loop in the middle):
+
+```mermaid
+flowchart LR
+  IN(["Place + question"]) --> Understand
+
+  subgraph Understand["1. Understand"]
+    direction TB
+    U1["Resolve the place<br/>Google Places, then Nominatim"]
+    U2["Adopt the business at the pin,<br/>or the venue the question names"]
+    U3["Plan topics (keyword or LLM)<br/>add local-language queries"]
+    U1 --> U2 --> U3
+  end
+
+  Understand --> Gather
+
+  subgraph Gather["2. Gather evidence"]
+    direction TB
+    G1["Google Maps profile<br/>rating, hours, reviews"]
+    G2["One web search per topic<br/>in parallel"]
+    G3["Community: Reddit, forums,<br/>Quora, review sites"]
+    G4["Reddit archive<br/>no search credit"]
+    G5["Regional forums in the<br/>local language"]
+    G6["Score, rank, translate<br/>hybrid keyword + embeddings"]
+    G1 --> G2 --> G3 --> G4 --> G5 --> G6
+  end
+
+  Gather --> Decide
+
+  subgraph Decide["3. Decide and act"]
+    direction TB
+    D1{"Reflector: enough evidence?<br/>at most 2 rounds"}
+    D2["Run one tool from a fixed menu:<br/>web_search or wikimedia"]
+    D1 -->|"no"| D2
+    D2 -->|"new evidence scored and stored"| D1
+  end
+
+  Decide --> Answer
+
+  subgraph Answer["4. Answer"]
+    direction TB
+    A1["Extract claims<br/>each cited to real evidence"]
+    A2["Verify every claim<br/>deterministic, never an LLM"]
+    A3["Write the overview from<br/>verified claims and evidence"]
+    A4["Flag unbacked sentences,<br/>list limitations"]
+    A1 --> A2 --> A3 --> A4
+  end
+
+  Answer --> OUT(["Cited answer, claims, evidence,<br/>limitations, research trace"])
 ```
-INPUT (raw location string, question)
+
+The same sequence as text, with the classes that do each step:
+
+```
+INPUT (a place, a question)
   -> LOCATION RESOLUTION        Google Places, then OpenStreetMap Nominatim
-  -> QUESTION UNDERSTANDING     folded into planning: intent detection
-  -> RESEARCH PLANNING          ResearchPlanner.plan() -> ResearchPlan
-                                 (KeywordResearchPlanner, or LLMResearchPlanner if
-                                  OLLAMA_ENABLED is set — see "LLM integration" below)
-  -> per topic, bounded by AgentConfig.max_tool_calls:
-       TOOL SELECTION           log which tool + queries are used
-       RETRIEVAL                WebSearchTool.search() -> KeywordEvidenceRetriever.score()
-       EVIDENCE PROCESSING      filter by relevance threshold, cap per topic,
-                                PageRetrievalTool.retrieve_full_text(), enrich_evidence()
+  -> IS THE PIN THE PLACE ASKED ABOUT?   adopt the business at an address, or a venue the question names
+  -> OTHER NAMES                Wikidata spellings of the name
+  -> RESEARCH PLANNING          KeywordResearchPlanner, or LLMResearchPlanner if OLLAMA_ENABLED is set
+  -> LOCAL-LANGUAGE QUERIES     where the country's web is not in English
+  -> GOOGLE MAPS PROFILE        rating, hours, reviews (with GOOGLE_PLACES_API_KEY)
+  -> FIRST PASS                 one web search per topic, in parallel
+  -> COMMUNITY SEARCH           Reddit, forums, Quora, review sites
+  -> REDDIT ARCHIVE             posts whose title names the place; no search credit
+  -> REGIONAL FORUMS            the country's own forums, in its language
+  -> SCORE, FILTER, TRANSLATE   hybrid keyword + embedding ranking; evidence stored
+  -> DECIDE AND ACT             Reflector: enough, or web_search / wikimedia; at most 2 rounds
   -> COVERAGE CHECK             which planned topics ended up with zero evidence
-  -> CLAIM EXTRACTION           ClaimExtractor.extract() (LLM-based; none without a model)
-  -> CLAIM VERIFICATION         EvidenceBasedClaimVerifier.verify()   <- always deterministic
-  -> SYNTHESIS                  Synthesizer.synthesize() (Template- or LLM-based)
-  -> FINAL RESPONSE             ResearchResponse, including the full research_trace
+  -> CLAIM EXTRACTION           LLMClaimExtractor (none without a model), grounded against real evidence
+  -> CLAIM VERIFICATION         EvidenceBasedClaimVerifier    <- always deterministic
+  -> SYNTHESIS                  Template- or LLM-based, from verified claims and evidence
+  -> FINAL RESPONSE             ResearchResponse, including the full research_trace and limitations
 ```
 
 Every stage above appends a `ResearchTraceStep` to the response — this is what "the user can
@@ -139,8 +194,8 @@ relevance filter and budget as the first pass. The loop runs at most `max_resear
 2) times and stops early when the reflector says enough or `max_tool_calls` is spent, so it always
 terminates. Every decision is a trace step (`ADDITIONAL_RESEARCH`), including "enough".
 
-The loop is only wired when live search is on: with no search configured there is nothing to search again.
-documents. Without it the run is the single fixed pass.
+The loop is only wired when live search is on: with no search configured there is nothing to search again, and the
+run is the single fixed pass.
 
 ## A place named in the question
 
@@ -170,16 +225,22 @@ why (`RESEARCH_PLANNING`). Any failure in the lookup is a limitation, never an e
 ## Forums and regional communities
 
 Web search alone returns listicles and hotel pages; what a place is *like* is said in threads. After the
-per-topic searches, `LocationResearchAgent` runs up to two more, through their own `TavilyWebSearchTool`
-instances restricted (`include_domains`) to community sites (`app/tools/community_sources.py`):
+per-topic searches, `LocationResearchAgent` runs up to three more (two spend a search credit; the Reddit archive search
+is free) (`app/tools/community_sources.py` holds the query and the forum lists):
 
-- an **English community search** over Reddit, Quora, TripAdvisor, Lonely Planet, YouTube and the social
-  networks, with `community_query()`: a business by its name plus city, an area by its name plus the question;
+- an **English community search** for what people say: Reddit, forums, TripAdvisor and other review sites, steered by
+  a query that starts with "reddit" and **not restricted to a domain list** (a list hid Reddit: measured, it returned
+  video and social pages and no thread for a place that has one), with `community_query()`: a business by its name plus city, an area by its name plus the question;
 - a **regional forum search in the local language** over the country's own forums (PTT, Dcard, Pixnet, Naver,
   Pantip, ...), for a place that has a native name. It is separate because an English query never reaches
   those forums, and mixing them into one query let Pixnet and TripAdvisor crowd out PTT and Dcard. It uses the
   plan's first local-language query (a topic as well as the name finds threads about the place; the name alone
   finds threads that merely mention it), else the native name.
+
+- a **Reddit archive search** (free, no key: `app/tools/reddit_archive.py`) for posts whose title names the place, in its own,
+  its country's and the big travel subreddits, using every name the place goes by (`Location.name_variants`, from Wikidata).
+  A web search returns a sample; the archive is Reddit itself, so a thread that a search never surfaces is found, with its real
+  posting time. Titles only, a few requests, rationed by the archive, cached for an hour.
 
 Results go through exactly the same steps as any web page (translation first, then the place-relevance
 filters), so a forum thread has to name the right place to count, and a page is classified forum, then review

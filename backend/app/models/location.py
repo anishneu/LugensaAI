@@ -35,5 +35,10 @@ class Location(BaseModel):
         description="Main written language to also search in (ISO 639-1), when English alone would miss local "
         "pages and the free translator can read it back. None for English-speaking places.",
     )
+    name_variants: list[str] = Field(
+        default_factory=list,
+        description="Other names the same place goes by in English (Wikidata's label and aliases: 'Pasak Chonlasit Dam' for "
+        "'Pa Sak Jolasid Dam'). Romanised names are spelled differently from page to page; used for matching and for searching.",
+    )
     local_name: str | None = Field(default=None, description="The place's name in that language, e.g. '翠藍'")
     local_area: str | None = Field(default=None, description="Its city's name in that language, e.g. '久留米市'")

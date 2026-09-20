@@ -32,6 +32,8 @@ const GROUP_ICON: Record<string, Icon> = {
   Money: BanknotesIcon,
 };
 
+// What the backend looks at by default (`NEARBY_RADIUS_M`), shown until its answer says otherwise.
+const DEFAULT_RADIUS_M = 1000;
 const WALKING_METERS_PER_MINUTE = 80;
 const WHEELCHAIR: Record<string, string> = { yes: "Step-free access", limited: "Limited step-free access", no: "Not step-free" };
 
@@ -267,7 +269,7 @@ export function NearbyTab({ location, onSummary }: { location: ActiveLocation; o
           className="text-[11px] text-[var(--text-muted)]"
           title="Ratings, reviews and opening status aren't reliably in map data. Those come from Google Maps and the web sources in the answer."
         >
-          OpenStreetMap · within {data?.radius_m ?? 600} m · not AI-generated
+          OpenStreetMap · within {data?.radius_m ?? DEFAULT_RADIUS_M} m · not AI-generated
         </span>
         {foreign.length > 0 && (
           <button
@@ -356,7 +358,7 @@ export function NearbyTab({ location, onSummary }: { location: ActiveLocation; o
         </div>
       )}
 
-      <GroupDialog group={selected} open={dialogOpen} radius={data?.radius_m ?? 600} translation={translation} onClose={() => setDialogOpen(false)} />
+      <GroupDialog group={selected} open={dialogOpen} radius={data?.radius_m ?? DEFAULT_RADIUS_M} translation={translation} onClose={() => setDialogOpen(false)} />
     </div>
   );
 }
