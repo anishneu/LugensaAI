@@ -10,7 +10,9 @@ one-time, cached) model download and CPU inference, unlike the instant,
 zero-dependency keyword retriever. The model is loaded lazily on first use,
 not at import or construction time, so importing this module (e.g. via
 `app/agents/factory.py`) never requires the package to be installed —
-only actually scoring does.
+only actually scoring does. Once loaded it is cached per process rather than
+per instance (`_MODEL_CACHE`), because a fresh retriever is built for every
+research run and re-reading the model off disk each time dominated run time.
 
 `encode_fn` exists so tests can inject a deterministic fake embedding
 function instead of loading a real model — see `tests/test_semantic_retriever.py`.
@@ -26,6 +28,34 @@ from app.models.evidence import Evidence
 from app.retrieval.base import EvidenceRetriever
 
 EncodeFn = Callable[[list[str]], Sequence[Sequence[float]]]
+
+# Loading a SentenceTransformer reads a real model off disk and takes tens of
+# seconds. A new retriever is constructed per research run (see
+# `build_default_agent()`, which the API layer calls per request), so caching
+# on the instance alone meant paying that load on *every* request. The model
+# is immutable once loaded and `encode` is safe to share, so it's cached per
+# process and keyed by model name.
+_MODEL_CACHE: dict[str, object] = {}
+
+
+def is_model_warm(model_name: str = SEMANTIC_MODEL_NAME) -> bool:
+    """Whether the embedding model is already in memory for this process.
+
+    Exposed so the API can tell callers that the *first* run after a restart
+    pays a one-time load the rest don't — the difference is large enough that
+    a single duration estimate would be misleading either way.
+    """
+    return model_name in _MODEL_CACHE
+
+
+def _load_model(model_name: str) -> object:
+    model = _MODEL_CACHE.get(model_name)
+    if model is None:
+        from sentence_transformers import SentenceTransformer
+
+        model = SentenceTransformer(model_name)
+        _MODEL_CACHE[model_name] = model
+    return model
 
 
 def _cosine_similarity(a: Sequence[float], b: Sequence[float]) -> float:
@@ -47,9 +77,7 @@ class SemanticEvidenceRetriever(EvidenceRetriever):
         if self._encode_fn is not None:
             return self._encode_fn(texts)
         if self._model is None:
-            from sentence_transformers import SentenceTransformer
-
-            self._model = SentenceTransformer(self._model_name)
+            self._model = _load_model(self._model_name)
         return self._model.encode(texts, normalize_embeddings=True)
 
     def score(self, candidates: list[Evidence], queries: list[str]) -> list[Evidence]:

@@ -101,7 +101,7 @@ class LLMResearchPlanner(ResearchPlanner):
                 priority = Priority.MEDIUM
 
             reason = entry.get("reason") or definition.reason_template.format(location=location.name)
-            topics.append(self._build_topic(location_label, definition, reason, priority))
+            topics.append(self._build_topic(location, location_label, definition, reason, priority))
 
         if not topics:
             raise ValueError("LLM planner returned no valid topics")
@@ -110,12 +110,14 @@ class LLMResearchPlanner(ResearchPlanner):
 
     @staticmethod
     def _build_topic(
-        location_label: str, definition: TopicDefinition, reason: str, priority: Priority
+        location: Location, location_label: str, definition: TopicDefinition, reason: str, priority: Priority
     ) -> ResearchTopic:
         return ResearchTopic(
             topic_id=definition.topic_id,
             reason=reason,
-            search_queries=[q.format(location=location_label) for q in definition.query_templates],
+            search_queries=definition.queries_for(
+                location_label, location.is_business, location.name, location.city or location.region or ""
+            ),
             preferred_source_types=list(definition.preferred_source_types),
             expected_evidence=definition.expected_evidence,
             priority=priority,

@@ -17,6 +17,11 @@ class ResearchTopic(BaseModel):
     topic_id: str = Field(..., description="Stable topic identifier, e.g. 'housing'")
     reason: str = Field(..., description="Why this topic is relevant to the question")
     search_queries: list[str] = Field(default_factory=list)
+    local_queries: list[str] = Field(
+        default_factory=list,
+        description="The same research in the place's own language. Used by the search tool only, never for "
+        "relevance scoring: the retrievers score English text against English queries.",
+    )
     preferred_source_types: list[str] = Field(default_factory=list)
     expected_evidence: str = Field(..., description="What kind of evidence would satisfy this topic")
     priority: Priority = Priority.MEDIUM

@@ -26,3 +26,8 @@ class Claim(BaseModel):
     contradicting_evidence_ids: list[str] = Field(default_factory=list)
     status: ClaimStatus = ClaimStatus.INSUFFICIENT_EVIDENCE
     limitations: list[str] = Field(default_factory=list)
+    check_wording: bool = Field(
+        default=False,
+        description="True for claims written by a model: the verifier then also requires the claim's words and "
+        "figures to appear in the sources it cites, not merely that the cited ids exist.",
+    )

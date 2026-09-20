@@ -136,88 +136,6 @@
   animation: hero-fade-in 0.25s ease both;
 }
 
-.workspace-header {
-  height: 64px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 0 20px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-alt);
-}
-
-.brand-mini {
-  font: inherit;
-  font-weight: 800;
-  font-size: 16px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--text-h);
-  padding: 0;
-}
-
-.brand-mini span {
-  color: var(--accent);
-}
-
-.header-map {
-  width: 92px;
-  height: 44px;
-  border-radius: 8px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  flex-shrink: 0;
-  background: var(--bg-alt);
-}
-
-.header-map-inner {
-  width: 100%;
-  height: 100%;
-  background: var(--bg-alt);
-}
-
-.header-location-text {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-}
-
-.header-location-label {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-}
-
-.header-location-name {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-h);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.change-location-button {
-  font: inherit;
-  font-size: 13px;
-  padding: 7px 14px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--text);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.change-location-button:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
 .workspace-body {
   flex: 1;
   display: grid;
@@ -242,7 +160,6 @@
 
 /* --- Sidebars (shared look) --- */
 
-.chat-sidebar,
 .live-feed-sidebar {
   overflow-y: auto;
   min-height: 0;
@@ -252,13 +169,6 @@
   flex-direction: column;
   gap: 16px;
   min-width: 0;
-}
-
-.chat-sidebar {
-  border-right: 1px solid var(--border);
-}
-
-.live-feed-sidebar {
   border-left: 1px solid var(--border);
 }
 
@@ -274,146 +184,45 @@
   margin: 0;
 }
 
-/* --- Chat sidebar --- */
-
-.chat-input-form {
+.feed-heading-row {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
 }
 
-.chat-input-form textarea {
-  width: 100%;
-  font: inherit;
-  font-size: 13px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  resize: vertical;
-  background: var(--bg);
-  color: var(--text);
+.feed-heading-row h2 {
+  margin: 0;
 }
 
-.chat-input-form button {
-  align-self: flex-end;
-  font: inherit;
-  font-weight: 600;
-  font-size: 13px;
-  padding: 8px 18px;
-  border: none;
-  border-radius: 999px;
-  background: var(--accent);
-  color: white;
-  cursor: pointer;
-}
-
-.chat-input-form button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.chat-suggestions {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.chat-suggestions button {
-  text-align: left;
-  font: inherit;
-  font-size: 12px;
-  padding: 7px 10px;
-  border-radius: 8px;
+.feed-refresh-button {
+  font-size: 14px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
   border: 1px solid var(--border);
   background: var(--bg);
-  cursor: pointer;
   color: var(--text);
-}
-
-.chat-suggestions button:hover {
-  border-color: var(--accent);
-}
-
-.chat-history {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  overflow-y: auto;
-}
-
-.chat-history-item {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  text-align: left;
-  padding: 8px 10px;
-  border-radius: 10px;
-  border: 1px solid transparent;
-  background: none;
   cursor: pointer;
-  font: inherit;
-  width: 100%;
-}
-
-.chat-history-item:hover {
-  background: var(--bg);
-}
-
-.chat-history-item.active {
-  background: var(--bg);
-  border-color: var(--accent);
-}
-
-.history-status-icon {
-  font-size: 11px;
-  margin-top: 2px;
-  flex-shrink: 0;
-}
-
-.icon-loading {
-  color: var(--insufficient);
-  animation: pulse 1s infinite;
-}
-
-.icon-done {
-  color: var(--supported);
-}
-
-.icon-error {
-  color: var(--contradicted);
-}
-
-@keyframes pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.3;
-  }
-}
-
-.history-text {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
+  align-items: center;
+  justify-content: center;
 }
 
-.history-question {
-  font-size: 12.5px;
-  color: var(--text);
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+.feed-refresh-button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
-.history-time {
-  font-size: 10.5px;
+.feed-refresh-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.feed-updated-at {
+  font-size: 10.5px !important;
   color: var(--text-muted);
+  margin-top: 4px !important;
 }
 
 /* --- Live feed sidebar --- */
@@ -530,6 +339,63 @@
   text-transform: capitalize;
 }
 
+.feed-item-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.feed-item-location {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.feed-item-posted {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+.feed-pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.feed-pagination button {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.feed-pagination button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text-h);
+}
+
+.feed-pagination button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.feed-pagination button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* --- Responsive: stack below desktop width --- */
 
 @media (max-width: 1000px) {
@@ -539,7 +405,6 @@
     overflow-y: auto;
   }
 
-  .chat-sidebar,
   .live-feed-sidebar {
     border: none;
     border-bottom: 1px solid var(--border);

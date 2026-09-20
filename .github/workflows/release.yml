@@ -1,0 +1,80 @@
+name: Release
+
+# Pushing a version tag (for example `git tag v0.2.0 && git push --tags`)
+# tests and builds everything again from that exact commit, then publishes a
+# GitHub Release with generated notes and the production frontend bundle
+# attached. A release is never cut from code that doesn't pass the tests.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Test and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install CPU-only PyTorch
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Backend tests
+        working-directory: backend
+        run: pytest -q
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run build
+
+      - name: Package the frontend bundle
+        run: cd frontend/dist && zip -r "$GITHUB_WORKSPACE/frontend-${GITHUB_REF_NAME}.zip" .
+
+      - name: Upload for the publish job
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-bundle
+          path: frontend-*.zip
+
+  publish:
+    name: Publish GitHub Release
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: release-bundle
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" frontend-*.zip --generate-notes --title "$GITHUB_REF_NAME"

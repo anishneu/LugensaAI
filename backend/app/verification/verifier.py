@@ -21,6 +21,7 @@ from app.core.config import AgentConfig
 from app.models.claim import Claim, ClaimStatus
 from app.models.evidence import Evidence
 from app.verification.contradiction import claims_contradict
+from app.verification.support import MIN_CLAIM_OVERLAP, wording_support
 
 
 class ClaimVerifier(ABC):
@@ -45,6 +46,21 @@ class EvidenceBasedClaimVerifier(ClaimVerifier):
             limitations.append("No supporting evidence met the minimum relevance threshold.")
         else:
             status = ClaimStatus.SUPPORTED
+            if claim.check_wording:
+                support = wording_support(claim.text, [f"{e.source_title} {e.text}" for e in relevant])
+                if not support.ok(MIN_CLAIM_OVERLAP):
+                    status = ClaimStatus.INSUFFICIENT_EVIDENCE
+                    if support.missing_numbers:
+                        limitations.append(
+                            "The claim states figure(s) that do not appear in its cited source(s): "
+                            + ", ".join(support.missing_numbers)
+                            + "."
+                        )
+                    else:
+                        limitations.append(
+                            "The claim's wording is not found in its cited source(s) (only "
+                            f"{support.overlap:.0%} of its content words appear there)."
+                        )
             stale = [e for e in relevant if e.recency_days is not None and e.recency_days > config.stale_evidence_days]
             if stale:
                 limitations.append(

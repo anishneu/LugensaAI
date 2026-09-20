@@ -18,10 +18,19 @@ def _isolated_test_environment(monkeypatch, tmp_path):
     path inject a fake/scripted implementation directly instead of relying
     on env vars or real external resources.
     """
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.delenv("OLLAMA_ENABLED", raising=False)
+    monkeypatch.delenv("GOOGLE_PLACES_API_KEY", raising=False)
     monkeypatch.setenv("DISABLE_SEMANTIC_RETRIEVAL", "1")
+    monkeypatch.setenv("DISABLE_LIVE_GEOCODING", "1")
+    monkeypatch.setenv("DISABLE_TRANSLATION", "1")
     monkeypatch.setenv("EVIDENCE_DB_PATH", str(tmp_path / "evidence.db"))
+    # Module-level caches would otherwise carry one test's mocked Google answer
+    # into the next test that asks the same question.
+    from app.tools import google_places_tool
+
+    google_places_tool._CACHE.clear()
+    google_places_tool._SEARCH_CACHE.clear()
 
 
 @pytest.fixture
@@ -35,4 +44,21 @@ def harvard_square() -> Location:
         latitude=42.3736,
         longitude=-71.119,
         raw_query="Harvard Square, Cambridge, MA",
+    )
+
+
+@pytest.fixture
+def starbucks_cambridge() -> Location:
+    """A specific POI with a generic chain name — used to test that live-feed
+    relevance filtering doesn't let name-only matches through unrelated
+    content about the same chain in other cities."""
+    return Location(
+        name="Starbucks",
+        city="Cambridge",
+        region="MA",
+        country="US",
+        slug="starbucks-120-broadway-cambridge-ma",
+        latitude=42.3656,
+        longitude=-71.1029,
+        raw_query="Starbucks, 120, Broadway, MIT, Cambridge, Massachusetts",
     )

@@ -1,29 +1,105 @@
 # Backend — LocationResearchAgent
 
-The research pipeline described in [`docs/architecture.md`](../docs/architecture.md). By
-default it runs fully free and mostly offline: fixture-backed tools, rule-based planning,
-keyword retrieval, local SQLite storage. Setting `ANTHROPIC_API_KEY` and/or `TAVILY_API_KEY`
-opts into LLM-backed reasoning and live web search respectively (independent of each other);
-having `sentence-transformers` installed opts into hybrid semantic retrieval automatically. See
-below for all three.
+The research pipeline described in [`docs/architecture.md`](../docs/architecture.md). It ships
+no sample data. `TAVILY_API_KEY` turns on live web search and `OLLAMA_ENABLED` turns on LLM-backed
+reasoning (a free local model), independently of each other; with neither, the pipeline has nothing
+to search and every response says so. Having `sentence-transformers` installed opts into hybrid
+semantic retrieval automatically. Storage is a local SQLite file. See below for all of these.
 
 ## What this does and doesn't do
 
-**Does:** resolve a location, decompose a question into research topics (adaptively — a
+**Does:** resolve a location — any real point of interest, via Google Places when configured and
+otherwise live geocoding (`NominatimLocationResolverTool`, free, opt-out via
+`DISABLE_LIVE_GEOCODING=1`) — decompose a question into research topics (adaptively — a
 nightlife-only question does not trigger housing research), retrieve and score evidence
 (lexically, and semantically if available), extract claims and link them to the evidence that
 supports them, verify those claims (including a coarse cross-source contradiction check), and
-synthesize a transparent, cited answer with a full execution trace. Claim verification is always
-a fixed, deterministic step — never LLM-backed, and it never moves in the pipeline — regardless
-of which other components are in use (see `docs/research-workflow.md`).
+synthesize a transparent, cited answer — a direct summary, key findings, and question-organized
+details, not just a claims list — with a full execution trace. Claim verification is always a
+fixed, deterministic step — never LLM-backed, and it never moves in the pipeline — regardless of
+which other components are in use (see `docs/research-workflow.md`).
 
-**Doesn't:** real geocoding (location resolution is still fixture/alias-based), or a second,
-broadened search attempt when a topic comes back empty. Both are flagged explicitly where
-relevant rather than silently assumed away.
+**Doesn't:** act open-endedly. After the first search it may search again or consult Wikipedia and
+Wikivoyage, but only twice and only from that fixed menu (see `docs/research-workflow.md`); it does
+not write code or browse freely. And it doesn't invent data: **the product ships no sample places,
+sources or claims.** Invented documents used to exist for two US neighborhoods and were served as if
+they were research when no keys were set; they now live only in `tests/fixtures`, are never imported
+by `app/`, and a test enforces that. With no search configured a response has no evidence and says why.
 
-**Fixture data is synthetic.** Everything under `fixtures/` was written for this project to test
-the pipeline. It does not describe real, current conditions at Harvard Square or Davis Square and
-must not be treated as such outside local development.
+## Overview synthesis: evidence in, reasoning, an answer out
+
+Early on, the Overview was gated entirely behind atomic claim extraction: no successfully
+extracted claim meant no answer, just "insufficient evidence" — even when real, useful evidence
+had been collected. Two changes fixed this:
+
+1. **`LLMClaimExtractor` grounds claims by more than trusting a citation.** The LLM is asked to
+   cite the evidence id/topic it used, and that citation is used directly when it validates. When
+   it doesn't (a smaller model reliably fails this exact instruction — e.g. citing a source name
+   it noticed inside the passage, like `"FBI Uniform Crime Reporting data"`, instead of the
+   literal `[evidence_id]` token it was shown), `_best_matching_evidence()` recovers grounding
+   deterministically: it checks the claim's own wording against the real evidence text via
+   lexical overlap, and only keeps the claim if that independent check clears a high bar. Either
+   way, a claim's grounding is *checked*, never assumed from the LLM's self-report.
+2. **`Synthesizer.synthesize()` sees the full evidence, not only claims that survived extraction.**
+   `LLMSynthesizer`'s prompt is given verified claims *and* raw, per-topic evidence excerpts
+   (labeled by source type, publisher, and date), with instructions to reason across both:
+   prefer concrete facts/numbers, treat review/forum content as opinion rather than fact, present
+   a "contradicted" claim as unresolved disagreement, never state a fact the evidence doesn't
+   support, and — for safety/incident questions specifically — never claim something "hasn't
+   happened" or "is safe" from a mere absence of search hits; say what the sources checked did
+   and didn't turn up, with the time window, instead. `TemplateSynthesizer` (the free, non-LLM
+   fallback) does the deterministic version of the same idea: for a topic with evidence but no
+   claim, it quotes the single most relevant *and* credible excerpt (blending relevance with a
+   source-type quality score) rather than reporting only a gap.
+
+Both synthesizers still never get to invent a limitation — coverage gaps, per-claim caveats, and
+the contradiction-detection caveat are computed in code (`deterministic_limitations()`) and
+appended regardless of what either synthesizer wrote.
+
+## What makes a run slow
+
+Run time is dominated by two things, in this order:
+
+1. **Loading the semantic-retrieval model.** `sentence-transformers` reads a
+   real model off disk, which takes about a minute. A fresh retriever is built
+   per research run, so this used to be paid on *every* request; it's now
+   cached per process (`_MODEL_CACHE` in
+   `app/retrieval/semantic_retriever.py`), making it a one-time cost on the
+   first request after a restart. Measured with the LLM off, the same run took
+   **67.4s cold and 6.3s warm** — so this caching is worth roughly 10x on
+   every request after the first. `DISABLE_SEMANTIC_RETRIEVAL=1` removes the
+   cost entirely, at the price of keyword-only retrieval.
+2. **LLM inference, if an LLM is enabled.** Minutes on a CPU, seconds to a minute or two
+   on a GPU (see "Choosing the local model" below). Reading the prompt dominates, which is why
+   the claim-extraction prompt caps each evidence passage
+   (`_MAX_EVIDENCE_CHARS_FOR_EXTRACTION`) and `best_excerpt` picks the relevant passage of a
+   page rather than shipping full page extracts.
+
+Per-topic web searches run concurrently (`_MAX_SEARCH_WORKERS` in
+`app/agents/location_research_agent.py`), so N topics cost roughly one search
+round trip rather than N. Only the searches are parallel — scoring, evidence
+enrichment, and the SQLite writes stay on one thread and in topic order, so
+results remain deterministic.
+
+`GET /api/capabilities` reports which of these are active along with a rough
+expected duration range, which the UI shows beside a live elapsed timer while
+a question runs.
+
+## Live feed: regional, not location-specific
+
+`GET /api/live-feed` (`TavilyLiveFeedTool`) is a separate, unverified surface: "what's happening
+recently in the broader area", independent of both the Q&A pipeline and the specific selected
+place. It's deliberately not "what's being said about this exact business" — a single POI (one
+Starbucks branch, one specific cafe) rarely has anything published about it by name in the last
+week, so both the search query and the relevance filter are anchored on the area (the selected
+place's city, or region if no city is known — derived dynamically, never hardcoded) rather than
+the place's own name. The relevance check also requires that anchor to appear in a result's title,
+or be repeated in its body — a single passing mention (e.g. a national sports thread that
+name-checks a city once) isn't enough to count as regional activity. Results are deduplicated by
+URL and sorted newest-first; the frontend paginates the returned list (5 items/page, up to 3 pages
+shown) without any extra requests per page. Every fetch (initial load, manual refresh, or the
+frontend's periodic auto-refresh) is one real, billed Tavily search — see the frontend's refresh
+interval in `frontend/README.md` before making it more aggressive.
 
 ## Setup
 
@@ -65,19 +141,87 @@ Copy `.env.example` to `.env` (gitignored, never committed) and fill in whicheve
 cp .env.example .env
 ```
 
-**`ANTHROPIC_API_KEY`** — opts into `LLMResearchPlanner`, `LLMClaimExtractor`, and
-`LLMSynthesizer` in place of the rule-based/fixture-based defaults. Billed per Anthropic's normal
-usage pricing once set (the default model, `claude-haiku-4-5`, is inexpensive; override with
-`ANTHROPIC_MODEL`).
+**`OLLAMA_ENABLED`** — opts into `LLMResearchPlanner`, `LLMClaimExtractor` and `LLMSynthesizer` in
+place of the rule-based planner and the no-claims extractor, using a model running on this machine through
+[Ollama](https://ollama.com). No API key, no per-token billing, and nothing leaves the machine. The
+project has no billed model API by design.
+
+```bash
+# 1. install Ollama (ollama.com/download)
+# 2. pull the model once (~19GB)
+ollama pull qwen3:30b
+# 3. in backend/.env:
+OLLAMA_ENABLED=1
+```
+
+Override the model with `OLLAMA_MODEL` (it must be pulled) and the server with `OLLAMA_BASE_URL`
+(default `http://localhost:11434`). If a call fails or times out (`OLLAMA_TIMEOUT_SECONDS`, default
+600), that component falls back to its deterministic counterpart and says so in `limitations`.
+
+### Choosing the local model
+
+Measured on one laptop (Intel i7-1255U, 64GB RAM, integrated Iris Xe graphics, no dedicated GPU),
+not assumed. The "one call" rows use a realistic ~2,800-token prompt, cold (model load included):
+
+| Model | One call, CPU only | One call, integrated GPU |
+|---|---|---|
+| `llama3.2:3b` | 227 s | **42 s** |
+| `llama3.1` (8B) | 450 s | 100 s |
+| `gpt-oss:20b` | 329 s | 92 s |
+| `qwen3:30b` (thinking off) | 470 s | **127 s** |
+
+Three findings drove the choice:
+
+1. **Reading the prompt is the cost, not writing.** On this CPU a model reads 8–15 tokens/s whatever
+   its size, so time scales with prompt length (a business question sends ~2.8k tokens across the
+   three calls, a neighbourhood question ~6k). The integrated GPU reads at 40–120 tokens/s. A quick
+   test on a 48-token prompt showed 226 tokens/s and was badly misleading; always time a real prompt.
+2. **"Thinking" mode must be off.** `qwen3:30b` took 233 s for a trivial request with it on and 6.7 s
+   with it off, for an extract-and-summarize task that gains nothing from reasoning. `OLLAMA_THINK`
+   defaults to `false`; models with no thinking mode accept and ignore it.
+3. **A mixture-of-experts model is bigger for free.** `qwen3:30b` holds 30B parameters of knowledge
+   but activates ~3B per token, so it writes about as fast as a small model. End to end through the
+   real pipeline on the same question and hardware:
+
+   | | `qwen3:30b` | `llama3.2:3b` |
+   |---|---|---|
+   | Time, business question | 192 s | 182 s |
+   | Claims produced | 3, each traceable to a source | 13, several padding ("has a pleasant atmosphere") |
+   | Time, neighbourhood question | 259 s | not run |
+
+   So the bigger model cost no extra time and gave a more precise answer. One caveat: claim grounding
+   is a lexical check against real evidence text, so a weaker model's plausible-but-unsourced claims
+   can still pass it; a stronger model mostly avoids producing them in the first place.
+
+**Make Ollama use the integrated GPU (Windows).** This is what turns 15+ minutes into ~3–4. Ollama
+skips integrated GPUs unless told otherwise. Set these user environment variables, then restart
+Ollama:
+
+```powershell
+[Environment]::SetEnvironmentVariable("OLLAMA_VULKAN", "1", "User")
+[Environment]::SetEnvironmentVariable("OLLAMA_IGPU_ENABLE", "1", "User")
+[Environment]::SetEnvironmentVariable("OLLAMA_FLASH_ATTENTION", "1", "User")
+```
+
+Check with `ollama ps`: the `PROCESSOR` column should read `100% GPU`. With no GPU at all, expect
+`qwen3:30b` to take roughly 15–25 minutes per question; set `OLLAMA_MODEL=llama3.2:3b` (about 8
+minutes on CPU) if that's too slow. Other settings: `OLLAMA_NUM_CTX` (default 8192; Ollama
+truncates silently past the window), `OLLAMA_KEEP_ALIVE` (default `30m`, so the 25–40 s model load
+isn't repeated after a short break).
+
+Hosted free tiers were considered and not adopted: Groq's free tier, for example, allows roughly
+100K tokens/day on its 70B model (about ten questions), and sends the research to a third party.
 
 **`TAVILY_API_KEY`** — opts into real web search + page retrieval
-(`TavilyWebSearchTool`/`TavilyPageRetrievalTool`) in place of the fixture tools. Tavily has a free
-tier; heavier usage is billed by Tavily. **Setting this alone collects real evidence but produces
-no claims** — `FixtureClaimExtractor` can't read real page text, so set `ANTHROPIC_API_KEY` too if
-you want live search to actually produce claims. See `docs/research-workflow.md`'s "Live search"
-section for what this looks like in practice (verified against the real API).
+(`TavilyWebSearchTool`/`TavilyPageRetrievalTool`); without it nothing is searched and every
+response says so. Tavily has a free tier (1,000 credits a month); heavier usage is billed by Tavily.
+**Setting this alone collects real evidence but produces no claims** — reading claims out of real
+page text needs a model, so set `OLLAMA_ENABLED` too if you want live search to actually produce
+claims. See
+`docs/research-workflow.md`'s "Live search" section for what this looks like in practice (verified
+against the real API).
 
-Either key can be set independently of the other. `app/agents/factory.py` detects both
+Any of these can be set independently of the others. `app/agents/factory.py` detects all of them
 automatically. Every LLM-backed component falls back to its deterministic counterpart on any
 failure — a bad response, a network error, a rejected/ungrounded output — and records why in the
 response's `limitations`, so a flaky call degrades the run rather than crashing it.
@@ -90,7 +234,7 @@ pytest
 
 The test suite never calls a real external API or loads a real embedding model, **even if `.env`
 has real keys and `sentence-transformers` is installed** — an autouse fixture in
-`tests/conftest.py` forces both API keys off, semantic retrieval off, and evidence storage into a
+`tests/conftest.py` forces every API key and optional feature off, semantic retrieval off, and evidence storage into a
 per-test temp file. LLM-backed components are tested against a scripted fake `LLMService`
 (`tests/llm_doubles.py`); Tavily against a fake client (`tests/test_tavily_tools.py`); semantic
 retrieval against a fake embedding function (`tests/test_semantic_retriever.py`). The suite is
@@ -105,27 +249,211 @@ python -m evaluation.run_benchmark
 Runs the benchmark from [`../docs/evaluation.md`](../docs/evaluation.md) for real (Baseline B vs.
 the proposed system, both against live Tavily search) and prints/saves actual metrics — not just
 the plan. Requires `TAVILY_API_KEY`; results and their scope (what could and couldn't be measured
-without an `ANTHROPIC_API_KEY`) are written up in that doc.
+without the LLM-backed components) are written up in that doc.
 
 ## Layout
 
 ```
 app/
-  models/       Pydantic schemas shared by every layer
-  core/         config (incl. .env loading), LLMService + AnthropicLLMService, shared LLM JSON parsing
-  tools/        LocationResolver / WebSearch / PageRetrieval interfaces + fixture and Tavily implementations
+  models/       Pydantic schemas shared by every layer (incl. PlaceCandidate for live POI search)
+  core/         config (incl. .env loading), LLMService + OllamaLLMService,
+                shared LLM JSON parsing
+  tools/        LocationResolver / WebSearch / PageRetrieval interfaces + Tavily, Google Places,
+                Nominatim, Overpass, Wikimedia, translation and locale implementations, plus
+                FallbackLocationResolver (composite.py) and "unconfigured" stand-ins that return
+                nothing and say why (unconfigured.py)
   planning/     topic taxonomy + KeywordResearchPlanner + LLMResearchPlanner
   retrieval/    EvidenceRetriever interface + keyword, semantic, and hybrid implementations
   evidence/     EvidenceRepository (in-memory, SQLite) + evidence enrichment (quality/recency)
-  synthesis/    claim extraction (fixture- or LLM-based) + answer synthesis (template- or LLM-based)
+  synthesis/    claim extraction (LLM-based, with deterministic grounding recovery; none without a
+                model) + answer synthesis (template- or LLM-based, from claims *and* raw
+                evidence — see "Overview synthesis" below)
   verification/ checks every claim against the evidence store before it can be marked "supported",
                 plus a deterministic cross-claim contradiction check (always non-LLM)
   agents/       LocationResearchAgent — orchestrates the bounded lifecycle, plus the default-agent
-                factory (auto-selects rule-based/fixture vs. LLM-backed/live components per API key)
-  api/          FastAPI route
-fixtures/       synthetic locations + source documents, keyed by location slug and topic id
+                factory (auto-selects components per API key)
+  api/          FastAPI routes, incl. /api/places/search (live POI autocomplete) and
+                /api/live-feed (independent, region-scoped recent activity)
 evaluation/     the benchmark from docs/evaluation.md, actually runnable (`run_benchmark.py`)
-tests/          pytest suite: planner, retrieval (keyword/semantic/hybrid), evidence repository
+tests/          pytest suite (with invented fixtures in tests/fixtures, never served by the app): planner, retrieval (keyword/semantic/hybrid), evidence repository
                 (in-memory/SQLite), verification (incl. contradiction), agent end-to-end, API,
                 and the LLM-backed and Tavily components (against fakes, never live)
 ```
+
+## Nearby places (OpenStreetMap, not AI)
+
+`GET /api/places/nearby?latitude=&longitude=&radius_m=` lists food, transit, groceries, health,
+police, and banking places around a pin, each with a computed distance, via the free Overpass API
+(`app/tools/overpass_tool.py`). It exists because "is there a bar / station / pharmacy nearby" is
+a factual question the LLM should not be the source of: every item is a real map feature, so it
+can't be hallucinated. Two honest limits, both shown in the UI: it is only as complete as
+OpenStreetMap's volunteer mapping, and OSM has no ratings, reviews, or live opening hours — those
+still come from web sources and are only as reliable as they are. Google's Places API would
+supply them but needs a billing account, and scraping Google Maps breaks its terms, so it isn't
+used. Returns 503 when `DISABLE_LIVE_GEOCODING=1`, 502 if Overpass is down.
+
+Location search only treats a *trailing* US state ("Boston, MA 02122", "Cambridge MA") as a
+signal to restrict results to the US. Scanning every word was a bug: "hotel in Tokyo" read "in" as
+Indiana and returned New York hotels.
+
+## Translation (any language to English)
+
+A place in Japan, Germany or Russia is mostly written about in that language, so evidence and live
+feed items in other languages are machine-translated to English before the rest of the pipeline
+sees them (`app/tools/translation.py`). It runs locally with Argos Translate: free, no API key,
+and nothing about the research leaves the machine. Language is detected with `langdetect`
+(ignored below 90% confidence), and each language's pack (~100MB) downloads the first time it is
+needed, so the first Japanese page in a fresh install is slow and later ones are not.
+
+Translating happens *before* the relevance filters, because a Japanese page doesn't spell the
+place the way an English query does. It also means retrieval, claim extraction and synthesis all
+work on English. The original title and text are kept in `Evidence.metadata`
+(`original_title`, `original_text`, `language`) and the UI labels every translated item as
+machine-translated with the original one click away. If a pack can't be downloaded, the original
+text is kept and flagged "not translated"; it is never dropped or faked. Nominatim is asked for
+English place names (`accept-language=en`), and a missing prefecture/state is recovered from the
+address text (a Tokyo address has none in the structured fields).
+
+Limits: machine translation is imperfect (it can flatten tone and mistranslate idiom), quality
+varies by language, and at most 20 items per search are translated. Optional like semantic
+retrieval: skip the two packages in `requirements.txt` or set `DISABLE_TRANSLATION=1` to turn it off.
+
+## Researching one specific business (a cafe, a hotel)
+
+A business is not a neighborhood, and treating it like one produced wrong answers: area-style
+queries ("... restaurants cafes food scene") returned roundups of *other* cafes in the same city,
+and one of them was cited as evidence about the cafe actually asked about. So a location now
+carries `is_business` (from OpenStreetMap's category: amenity, shop, tourism, craft, ...), and for
+a business:
+
+- The plan searches for that business by name (`"<name>" <city> customer reviews ...`) instead
+  of the area templates (`business_query_templates` in `app/planning/topics.py`).
+- A page counts as evidence only if it names the business's *distinguishing* words (not "coffee" or
+  "bar", which every cafe shares) **and** the right city or region (`_mentions_business`,
+  `_mentions_place_context` in `tavily_tools.py`). There is no soft fallback: another business's
+  reviews are worse than none, so the honest result is "nothing found".
+- If fewer than three web pages mention it, a limitation says coverage is thin.
+
+The model also no longer reads only the first few hundred characters of each page (usually site
+navigation). `app/synthesis/excerpt.py` picks the passage that matches the question instead; it
+only selects text, never rewrites it.
+
+### Google Maps ratings and reviews (optional)
+
+For one specific business, open-web search finds a couple of pages while Google Maps has hundreds
+of dated reviews, and no amount of prompting closes that gap. Setting `GOOGLE_PLACES_API_KEY`
+adds Google's rating, review count, price level, hours and up to five recent reviews (each with its
+real post date, translated to English by Google with the original kept) as ordinary cited
+evidence, and shows them in a card (`GET /api/places/profile`).
+
+It is off by default because it needs a Google Cloud project **with billing enabled** (a card on
+file); the reviews fields are in a paid tier with a monthly free allowance, so check current
+pricing. One lookup per place is cached for 30 minutes. A result is used only if it is within
+400 m of the pin and carries the business's name words. Google's API returns at most five reviews
+per place, so the rating reflects all of them and the quotes only some; the UI says so.
+`app/tools/google_places_tool.py` is covered by mocked tests and has been run against the live API
+(a Tokyo cafe and a restaurant in Kurume: rating, review count, price, hours and Google's review
+summary came back correctly). The auto-created "Maps Platform demo" key returned the rating, count
+and summary but never `reviews` or `photos` (not even for the Eiffel Tower). A key from your own
+project with billing enabled returns up to five real, dated reviews and ten photos per place (photos
+are not used yet); the code handles both cases.
+Google's terms
+restrict storing its content, and reviews are written to the local per-run evidence database, so
+clear `backend/data/evidence.db` if that matters for your use.
+
+**Finding places with Google.** With the key set, Google also *finds* the place, ahead of
+OpenStreetMap. OpenStreetMap has no listing for most small businesses and can't read plus codes
+(the "8JG8+44 Kurume" that Google Maps gives you when you share a spot); without Google, that
+search dropped a pin on the generic city area, treated it as a neighbourhood rather than a
+business, and never asked Google for the rating. `GooglePlacesTool.search_places` (used by
+`GET /api/places/search` and by the research request's text resolver) fixes that, and for a plus
+code it also looks up the business standing on the point. Searches ask only for the cheap
+identifying fields and are cached for 10 minutes. One limit: Google ranks a bare name by relevance,
+not by your intent, so "Suiran Kurume" returns a Kyoto hotel; add the prefecture ("Suiran Kurume
+Fukuoka") or paste the plus code.
+
+### Wikipedia and Wikivoyage, and the follow-up research loop (free)
+
+`app/tools/wiki_tool.py` reads Wikipedia articles within 3 km of the pin and the Wikivoyage guide for
+the surrounding town, cut to the passage that matches the question. It needs no key and the content
+is CC BY-SA 4.0, so every item is attributed to its source and licence. It is what a "is this worth
+visiting?" question needs and reviews don't give. Wikimedia blocks clients that send no contact
+details, so requests carry the repository URL in the User-Agent; set `WIKIMEDIA_CONTACT` to your
+fork's URL.
+
+The agent chooses when to use it. After the first search pass it reflects on what it found and may
+search again with a query built from the question or consult Wikimedia, at most
+`AgentConfig.max_research_rounds` (2) times. See `docs/research-workflow.md`. On a live test this
+added about a minute and a half to a run and surfaced a town's official tourism page the first pass
+had missed.
+
+**What "supported" means.** A claim the model wrote is `supported` only if its cited source is
+relevant *and* at least half of its content words and every figure in it appear in that source. Overview
+sentences that no single source backs are listed in the limitations as the model's own inference.
+Both are lexical checks, not natural-language inference: they reject a faithful paraphrase that
+shares few words, but cannot accept a statement whose words and figures aren't in the source.
+
+### Working in any country
+
+The project was first built and tested on two US neighborhoods. Checking it against 15 places worldwide
+(`python -m evaluation.global_coverage`, which anyone can re-run) found real defects, fixed since:
+
+| Found | Fix |
+|---|---|
+| English queries only reach English pages: 14 of 15 places returned English-only sources, and a restaurant in Kurume, Japan got five pages about a hotel in Kyoto | Also search in the place's own language, and match pages on its native-script name (`app/tools/locale.py`, `app/planning/local_queries.py`) |
+| Topic keywords matched as substrings: "Barcelona" planned *nightlife* (`bar`), "Busan" planned *transportation* (`bus`) | Whole-word matching |
+| Topics assumed a US college student (housing, campus) | Added attractions, climate, local customs and healthcare, plus visitor and newcomer personas |
+| Islands, beaches and parks were researched as if they were cafes ("Victoria Island" returned nothing) | Google's `establishment` type no longer means "business" |
+| "Sukhumvit, Bangkok" resolved 158 km from Bangkok | Search again around the locality the user typed |
+| Only `.gov` / `.edu` counted as official (`go.jp`, `gov.uk`, `gouv.fr`, `gob.mx`, `ac.uk` scored as "other") | Global government and university domains |
+| The overlap and figure checks ignored non-Latin scripts and numerals | Unicode-aware |
+| Arabic and Hebrew rendered left-to-right | `dir="auto"` |
+| The public Overpass server failed for 6 of 15 places, each after a long wait | Shorter timeout, three mirrors, one retry |
+
+**How local-language search works.** From the pin, a reverse geocode gives the country, and a curated
+table (`PRIMARY_LANGUAGE`) gives its main written language. The place's name and its city's name in
+that language come from OpenStreetMap (an area) or Google Places (a business). One query per top topic
+is then written in that language (by the model if there is one, else just the native name and city),
+searched alongside the English one, and the results go through the same translation and relevance
+filters as everything else. Pages are matched on the native name too, so a Japanese page about
+"翠藍" is accepted even though the English name "Suiran" appears nowhere in it.
+
+**Translation is the slow part.** The free translator (Argos) runs on the CPU at about 11 ms per
+character. So it translates only pages that mention the place (checked on the original text), at
+most 6 per search and only their first 700 characters; the full original is kept and shown on request.
+
+**Measured effect** (`python -m evaluation.global_coverage`, 16 places, before and after these fixes):
+
+| | Before | After |
+|---|---|---|
+| Pin within tolerance of the true location | 14 of 15 (Bangkok 158 km off) | 16 of 16 (Bangkok 8.8 km, on the road, inside the city) |
+| Places returning any non-English web source | 1 of 15 | 7 of 16 |
+| Areas researched as if they were a business | 3 | 0 |
+| "Around this pin" unavailable (public Overpass server) | 6 of 15 | 4 of 16 |
+
+Full runs on real questions (local model, all sources live): a restaurant in Kurume 328 s, a Tokyo
+district 299 s, a Cairo district 278 s, a Paris district 254 s, and an English-speaking beach 135-196
+s. All are inside the 20-minute limit; the local-language runs are slower because of translation. The
+Kurume restaurant went from 3-4 sources to 10 (seven Japanese pages about the right restaurant, with a
+real price and dishes), and the check that every figure in a claim appears in its source rejected
+one claim that had quoted three numbers from nowhere.
+
+Two limits this exposed. Without a model, only places whose native name differs from the English one
+(non-Latin scripts) get a local query, because writing "sécurité" or "Sicherheit" needs a model;
+with one, French, German, Spanish and the rest are covered. And an ambiguous name can pull in the
+wrong subject: in Arabic "Zamalek" is also a football club, whose news reached the evidence list
+(not the claims).
+
+**What "any country" does and does not mean here**
+
+- Countries where English is the everyday web language (US, UK, Australia, India, Nigeria, Kenya,
+  Singapore, ...) are searched in English only, which works.
+- About 60 countries have a curated language. Languages the free translator has no pack for (for
+  example Amharic, Tamil, Telugu, Georgian, Nepali, Burmese, Khmer) get English-only search: a page
+  we can't translate couldn't pass the relevance or wording checks anyway. Coverage there is thinner
+  and the answer says so in its limitations.
+- OpenStreetMap and Google coverage varies: dense in Europe, Japan and the big cities, sparser in
+  rural areas and parts of Africa and Central Asia. An empty result is reported, not invented.
+- Machine translation is imperfect and every translated item is labeled with its original one click away.
+- This is a probe over 16 places and a handful of full runs, not a benchmark of answer quality.
+

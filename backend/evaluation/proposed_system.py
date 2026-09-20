@@ -2,9 +2,10 @@
 
 Uses live search (the same TavilyWebSearchTool Baseline B uses, for a fair
 comparison of orchestration rather than search-quality differences) but not
-the LLM-backed planner/extractor/synthesizer, since this environment has no
-ANTHROPIC_API_KEY — see docs/evaluation.md for what that means for claim-
-level metrics (there won't be any claims, on either system, in this run).
+the LLM-backed planner/extractor/synthesizer, so the benchmark measures
+orchestration rather than model quality — see docs/evaluation.md for what that
+means for claim-level metrics (there won't be any claims, on either system,
+in this run).
 """
 
 from __future__ import annotations

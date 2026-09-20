@@ -1,7 +1,7 @@
 """A scripted LLMService test double shared by the Milestone 2 LLM tests.
 
-None of these tests call the real Anthropic API — that would cost money and
-require a key. This double lets us exercise the LLM-backed components'
+None of these tests call a real model — that would be slow and nondeterministic.
+This double lets us exercise the LLM-backed components'
 parsing, validation, and fallback logic deterministically instead.
 """
 

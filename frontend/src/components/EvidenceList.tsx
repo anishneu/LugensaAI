@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Evidence } from "../types";
 import { cleanDisplayText } from "../textUtils";
+import { TranslationNote } from "./TranslationNote";
 import { SOURCE_TYPE_ICON } from "../sourceTypeIcon";
 
 export type EvidenceSortMode = "relevance" | "newest";
@@ -71,11 +72,12 @@ function TopicGroup({ topic, items, sortMode }: { topic: string; items: Evidence
                   )}
                   {item.recency_days != null && <span className="recency">{item.recency_days}d old</span>}
                 </div>
-                <a href={item.source_url} target="_blank" rel="noreferrer" className="evidence-title">
+                <a href={item.source_url} target="_blank" rel="noreferrer" className="evidence-title" dir="auto">
                   {item.source_title}
                 </a>
                 {item.publisher && <div className="evidence-publisher">{item.publisher}</div>}
-                <p className="evidence-text">{cleanDisplayText(item.text)}</p>
+                <TranslationNote item={item} />
+                <p className="evidence-text" dir="auto">{cleanDisplayText(item.text)}</p>
                 <a href={item.source_url} target="_blank" rel="noreferrer" className="evidence-source-link">
                   Read full source →
                 </a>

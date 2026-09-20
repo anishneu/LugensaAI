@@ -47,3 +47,27 @@ def test_every_topic_has_queries_and_completion_criteria(harvard_square):
         assert topic.completion_criteria
         assert topic.expected_evidence
         assert harvard_square.name in topic.reason
+
+
+def test_a_specific_business_gets_queries_about_that_business_not_its_neighborhood(harvard_square):
+    """Regression test: area-flavored queries ("... restaurants cafes food scene")
+    for a single cafe returned roundups of other cafes in the same city."""
+    business = harvard_square.model_copy(update={"name": "SR Coffee Roaster & Bar", "is_business": True})
+
+    plan = KeywordResearchPlanner().plan(business, "How is the coffee and what do customers say in reviews?")
+
+    queries = [q for topic in plan.topics for q in topic.search_queries]
+    assert any('"SR Coffee Roaster & Bar"' in q and "reviews" in q for q in queries)
+    assert not any("food scene" in q for q in queries)
+
+
+def test_an_area_keeps_area_queries(harvard_square):
+    plan = KeywordResearchPlanner().plan(harvard_square, "What are the restaurants and food like here?")
+
+    assert any("food scene" in q for topic in plan.topics for q in topic.search_queries)
+
+
+def test_transit_query_is_not_hardcoded_to_boston(harvard_square):
+    plan = KeywordResearchPlanner().plan(harvard_square, "How is public transportation and commuting?")
+
+    assert not any("MBTA" in q for topic in plan.topics for q in topic.search_queries)

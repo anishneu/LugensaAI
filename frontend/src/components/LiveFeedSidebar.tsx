@@ -1,20 +1,23 @@
-import { useMemo, useState } from "react";
-import type { Evidence } from "../types";
-import { cleanDisplayText, relativeTimeFrom } from "../textUtils";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { fetchCapabilities, fetchLiveFeed, ResearchApiError } from "../api";
+import { absoluteTimeFrom, cleanDisplayText, formatFeedTimestamp, relativeTimeFrom } from "../textUtils";
+import { TranslationNote } from "./TranslationNote";
 import { SOURCE_TYPE_ICON } from "../sourceTypeIcon";
+import type { ActiveLocation, Evidence } from "../types";
 
 interface LiveFeedSidebarProps {
-  evidence: Evidence[];
-  locationName: string;
+  location: ActiveLocation;
 }
 
-// Guards against stale localStorage history saved before the backend's
-// location-relevance filter existed — never show something this weakly
-// related to the topic it was retrieved for, regardless of when it was cached.
-const MIN_FEED_RELEVANCE = 0.3;
+// Every fetch is several real, billed Tavily searches (the backend queries
+// a few complementary regional facets and merges them), so auto-refresh is
+// deliberately infrequent; the manual button covers "I want it now."
+const AUTO_REFRESH_MS = 10 * 60 * 1000;
+const PAGE_SIZE = 5;
+const MAX_PAGES = 3;
 
-function feedTimestamp(item: Evidence): number {
-  return new Date(item.published_at ?? item.retrieved_at).getTime();
+function regionLabel(location: ActiveLocation): string {
+  return [location.city, location.region].filter(Boolean).join(", ") || location.displayName;
 }
 
 function FeedMedia({ item }: { item: Evidence }) {
@@ -37,46 +40,151 @@ function FeedMedia({ item }: { item: Evidence }) {
   );
 }
 
-export function LiveFeedSidebar({ evidence, locationName }: LiveFeedSidebarProps) {
-  const feed = useMemo(() => {
-    const seen = new Set<string>();
-    const deduped = evidence.filter((item) => {
-      if (seen.has(item.evidence_id)) return false;
-      seen.add(item.evidence_id);
-      return item.relevance_score == null || item.relevance_score >= MIN_FEED_RELEVANCE;
-    });
-    return deduped.sort((a, b) => feedTimestamp(b) - feedTimestamp(a));
-  }, [evidence]);
+export function LiveFeedSidebar({ location }: LiveFeedSidebarProps) {
+  const [feed, setFeed] = useState<Evidence[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
+  const [page, setPage] = useState(1);
+  // Whether the backend has live search at all. An empty feed means two different things: no key, or
+  // simply nothing published about this place in the last 7 days (normal for a village).
+  const [liveSearch, setLiveSearch] = useState<boolean | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const load = useCallback(() => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    setLoading(true);
+    setError(null);
+    fetchLiveFeed(
+      {
+        location: location.rawQuery,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        city: location.city,
+        region: location.region,
+        country: location.country,
+      },
+      controller.signal,
+    )
+      .then((items) => {
+        setFeed(items);
+        setUnavailable(items.length === 0);
+        setLastUpdated(new Date().toISOString());
+        setPage(1);
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        setError(err instanceof ResearchApiError ? err.message : "Could not load the live feed.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+  }, [location.rawQuery, location.latitude, location.longitude, location.city, location.region, location.country]);
+
+  useEffect(() => {
+    fetchCapabilities().then((caps) => setLiveSearch(caps ? caps.live_search : null));
+  }, []);
+
+  useEffect(() => {
+    load();
+    const interval = window.setInterval(load, AUTO_REFRESH_MS);
+    return () => {
+      window.clearInterval(interval);
+      abortRef.current?.abort();
+    };
+  }, [load]);
+
+  const totalPages = Math.min(Math.ceil(feed.length / PAGE_SIZE) || 1, MAX_PAGES);
+  const pageItems = feed.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <aside className="live-feed-sidebar">
       <div className="sidebar-heading">
-        <h2>Live feed</h2>
-        <p>Real sources the agent has surfaced for {locationName} so far, newest first.</p>
+        <div className="feed-heading-row">
+          <h2>Live feed</h2>
+          <button type="button" className="feed-refresh-button" onClick={load} disabled={loading} title="Refresh now">
+            {loading ? "⏳" : "↻"}
+          </button>
+        </div>
+        <p>
+          Recent local reporting from around {regionLabel(location)} — published in the last 7 days, each item
+          showing its own publication time. Independent of the questions on the left, and not limited to{" "}
+          {location.displayName} itself.
+        </p>
+        {lastUpdated && (
+          <p className="feed-updated-at">{loading ? "Refreshing…" : `Updated ${relativeTimeFrom(lastUpdated)}`}</p>
+        )}
       </div>
 
-      {feed.length === 0 ? (
-        <p className="empty-note">Nothing yet — ask a question to start collecting evidence.</p>
-      ) : (
-        <div className="feed-items">
-          {feed.map((item) => (
-            <a key={item.evidence_id} href={item.source_url} target="_blank" rel="noreferrer" className="feed-item">
-              <FeedMedia item={item} />
-              <div className="feed-item-body">
-                <div className="feed-item-meta">
-                  <span className={`feed-source-type type-${item.source_type}`}>
-                    {item.source_type.replace(/_/g, " ")}
-                  </span>
-                  <span className="feed-time">{relativeTimeFrom(item.published_at ?? item.retrieved_at)}</span>
+      {error && <p className="empty-note">{error}</p>}
+
+      {!error && unavailable && !loading && (
+        <p className="empty-note">
+          {liveSearch === false
+            ? "No live feed available — this needs a Tavily API key configured on the backend (`TAVILY_API_KEY`)."
+            : `Nothing was published about ${regionLabel(location)} in the last 7 days. Small places often have no local news; this is not an error.`}
+        </p>
+      )}
+
+      {!error && pageItems.length > 0 && (
+        <>
+          <div className="feed-items">
+            {pageItems.map((item) => (
+              <a key={item.evidence_id} href={item.source_url} target="_blank" rel="noreferrer" className="feed-item">
+                <FeedMedia item={item} />
+                <div className="feed-item-body">
+                  <div className="feed-item-meta">
+                    <span className={`feed-source-type type-${item.source_type}`}>
+                      {item.source_type.replace(/_/g, " ")}
+                    </span>
+                    <span className="feed-time" title={item.published_at ?? undefined}>
+                      {formatFeedTimestamp(item.published_at, item.retrieved_at)}
+                    </span>
+                  </div>
+                  <TranslationNote item={item} inline />
+                  <div className="feed-item-title" dir="auto">{item.source_title}</div>
+                  <p className="feed-item-snippet" dir="auto">{cleanDisplayText(item.text)}</p>
+                  <div className="feed-item-footer">
+                    <span className="feed-item-location">📍 {item.location_scope}</span>
+                    {item.publisher && <span className="feed-item-publisher">{item.publisher}</span>}
+                  </div>
+                  {item.published_at && (
+                    <div className="feed-item-posted">🕒 Posted {absoluteTimeFrom(item.published_at)}</div>
+                  )}
                 </div>
-                <div className="feed-item-title">{item.source_title}</div>
-                {item.publisher && <div className="feed-item-publisher">{item.publisher}</div>}
-                <p className="feed-item-snippet">{cleanDisplayText(item.text)}</p>
-                <span className="feed-item-topic">#{item.topic}</span>
-              </div>
-            </a>
-          ))}
-        </div>
+              </a>
+            ))}
+          </div>
+
+          {totalPages > 1 && (
+            <div className="feed-pagination">
+              <button type="button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
+                ‹
+              </button>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  className={n === page ? "active" : ""}
+                  onClick={() => setPage(n)}
+                >
+                  {n}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+              >
+                ›
+              </button>
+            </div>
+          )}
+        </>
       )}
     </aside>
   );

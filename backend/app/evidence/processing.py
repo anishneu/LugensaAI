@@ -13,6 +13,7 @@ _SOURCE_TYPE_QUALITY: dict[SourceType, float] = {
     SourceType.LOCAL_GOVERNMENT: 0.9,
     SourceType.ACADEMIC: 0.9,
     SourceType.NEWS: 0.8,
+    SourceType.REFERENCE: 0.7,
     SourceType.BUSINESS_DIRECTORY: 0.6,
     SourceType.REVIEW_AGGREGATOR: 0.6,
     SourceType.COMMUNITY_FORUM: 0.5,

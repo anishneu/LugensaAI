@@ -7,6 +7,7 @@ export interface Location {
   latitude: number | null;
   longitude: number | null;
   raw_query: string;
+  is_business: boolean;
 }
 
 export type SourceType =
@@ -17,6 +18,7 @@ export type SourceType =
   | "community_forum"
   | "academic"
   | "blog"
+  | "reference"
   | "other";
 
 export interface Evidence {
@@ -72,6 +74,8 @@ export interface ResearchResponse {
   location: Location;
   question: string;
   summary: string;
+  key_findings: string[];
+  details: string;
   recommendation: string;
   topics: ResearchTopic[];
   claims: Claim[];
@@ -83,17 +87,45 @@ export interface ResearchResponse {
 export interface ResearchRequest {
   location: string;
   question: string;
+  // Set together when the caller already committed to one exact place (a
+  // specific POI picked from live search) — skips server-side text
+  // resolution, which could otherwise land on a different same-named place.
+  latitude?: number | null;
+  longitude?: number | null;
+  city?: string | null;
+  region?: string | null;
+  country?: string | null;
+  is_business?: boolean;
+  is_address?: boolean;
 }
 
-export interface LocationSuggestion {
+/** What the backend has switched on, and roughly how long a run takes as a
+ * result — see GET /api/capabilities. */
+export interface Capabilities {
+  llm_provider: "ollama" | "none";
+  llm_model: string | null;
+  live_search: boolean;
+  live_geocoding: boolean;
+  estimated_seconds_min: number;
+  estimated_seconds_max: number;
+  /** True when the local embedding model hasn't been loaded yet this process,
+   * so the next run pays a one-time warm-up the following ones won't. */
+  first_run_warmup: boolean;
+}
+
+/** A real point-of-interest candidate from a live search (e.g. one specific
+ * Starbucks among several) — see GET /api/places/search. */
+export interface PlaceCandidate {
   name: string;
+  display_name: string;
+  category: string;
   city: string | null;
   region: string | null;
   country: string | null;
-  raw_query: string;
-  aliases: string[];
-  latitude: number | null;
-  longitude: number | null;
+  latitude: number;
+  longitude: number;
+  is_business: boolean;
+  is_address: boolean;
 }
 
 /** The location currently being researched in the workspace. May start out
@@ -104,8 +136,12 @@ export interface ActiveLocation {
   displayName: string;
   city: string | null;
   region: string | null;
+  country: string | null;
   latitude: number | null;
   longitude: number | null;
+  isBusiness: boolean;
+  /** A street address or building rather than a named place; the backend looks for a business at it. */
+  isAddress: boolean;
 }
 
 /** One asked-and-answered question, kept in the session's chat history. */
@@ -116,4 +152,54 @@ export interface QuerySession {
   status: "loading" | "done" | "error";
   response: ResearchResponse | null;
   error: string | null;
+}
+
+export interface NearbyItem {
+  name: string;
+  kind: string;
+  distance_m: number;
+}
+
+export interface NearbyGroup {
+  label: string;
+  total: number;
+  nearest: NearbyItem[];
+}
+
+export interface NearbyPlaces {
+  latitude: number;
+  longitude: number;
+  radius_m: number;
+  groups: NearbyGroup[];
+  source: string;
+}
+
+export interface PlaceReview {
+  author: string | null;
+  rating: number | null;
+  text: string;
+  original_text: string | null;
+  original_language: string | null;
+  published_at: string | null;
+  relative_time: string | null;
+}
+
+export interface PlaceProfile {
+  place_id: string;
+  name: string;
+  address: string | null;
+  rating: number | null;
+  review_count: number | null;
+  price_level: string | null;
+  summary: string | null;
+  review_summary: string | null;
+  review_summary_disclosure: string | null;
+  review_summary_report_url: string | null;
+  open_now: boolean | null;
+  opening_hours: string[];
+  website: string | null;
+  phone: string | null;
+  maps_url: string | null;
+  reviews: PlaceReview[];
+  source: string;
 }

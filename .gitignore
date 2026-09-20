@@ -11,3 +11,19 @@ build/
 .DS_Store
 backend/data/
 *.db
+
+# Secrets: any .env variant, but keep the template
+.env.*
+!.env.example
+
+# Tool caches and build output
+.ruff_cache/
+.mypy_cache/
+*.tsbuildinfo
+.vite/
+*.whl
+*.log
+
+# AI-assistant config and notes, never committed
+.claude/
+CLAUDE.md

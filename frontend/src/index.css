@@ -1,3 +1,5 @@
+@import "tailwindcss";
+
 :root {
   --text: #3a3540;
   --text-muted: #6b6375;
@@ -55,14 +57,43 @@ body {
   margin: 0;
 }
 
-h1,
-h2,
-h3,
-h4 {
-  color: var(--text-h);
-  font-weight: 600;
+/* Cascade-layer note: Tailwind's utilities live in `@layer utilities`, and an
+   unlayered rule always beats a layered one regardless of specificity — so
+   without this `@layer base` wrapper, these defaults would silently win over
+   any Tailwind text-color/weight utility applied to an h1-h4 anywhere
+   (exactly what broke the landing page's white heading text). */
+@layer base {
+  h1,
+  h2,
+  h3,
+  h4 {
+    color: var(--text-h);
+    font-weight: 600;
+  }
+
+  a {
+    color: var(--accent);
+  }
 }
 
-a {
-  color: var(--accent);
+/* Landing page palette. Scoped to .landing so it can't leak into the app,
+   and light/dark like the rest of the site. */
+.landing {
+  --l-bg: #f5f1e8;
+  --l-card: #fffdf7;
+  --l-ink: #1c1b18;
+  --l-muted: #6b665a;
+  --l-rule: #dcd5c4;
+  --l-accent: #1e6a52;
+}
+
+@media (prefers-color-scheme: dark) {
+  .landing {
+    --l-bg: #12110e;
+    --l-card: #1b1a16;
+    --l-ink: #f1ece0;
+    --l-muted: #a39d8d;
+    --l-rule: #2e2c25;
+    --l-accent: #6fcf9f;
+  }
 }

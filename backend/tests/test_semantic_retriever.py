@@ -64,3 +64,33 @@ def test_empty_candidates_returns_empty_without_encoding():
 
     assert result == []
     assert calls == []
+
+
+def test_model_is_loaded_once_per_process_not_once_per_retriever(monkeypatch):
+    """A fresh retriever is built for every research run, so loading the model
+    per instance meant re-reading it off disk on every request."""
+    import sys
+    import types
+
+    from app.retrieval import semantic_retriever
+
+    monkeypatch.setattr(semantic_retriever, "_MODEL_CACHE", {})
+    constructions: list[str] = []
+
+    class FakeSentenceTransformer:
+        def __init__(self, model_name: str) -> None:
+            constructions.append(model_name)
+
+        def encode(self, texts, normalize_embeddings=False):
+            return [[1.0, 0.0] for _ in texts]
+
+    fake_module = types.ModuleType("sentence_transformers")
+    fake_module.SentenceTransformer = FakeSentenceTransformer
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_module)
+
+    evidence = [_evidence("e1", "Title", "Some passage about getting to campus.")]
+
+    for _ in range(3):
+        semantic_retriever.SemanticEvidenceRetriever().score(evidence, ["commute options"])
+
+    assert len(constructions) == 1, f"expected one model load across runs, got {len(constructions)}"
