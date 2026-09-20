@@ -30,6 +30,10 @@ from app.tools.base import ToolExecutionError
 # server after a pause, and the last good answer for that spot when every one of them fails.
 # Two mirrors that were once popular (overpass.openstreetmap.fr, maps.mail.ru) now refuse or time out for
 # this query, and overpass.osm.jp and overpass.openstreetmap.ie were unreachable when tried: all dropped.
+# How far around the pin "Around this pin" looks. It was 600 m; 1 km covers what a visitor would walk to. The area, and
+# so the work the public servers do, is nearly three times as large, which the per-attempt timeouts below allow for.
+NEARBY_RADIUS_M = 1000
+
 _OVERPASS_ATTEMPTS: tuple[tuple[str, float], ...] = (
     ("https://lz4.overpass-api.de/api/interpreter", 12.0),
     ("https://overpass-api.de/api/interpreter", 12.0),
@@ -101,7 +105,7 @@ class OverpassNearbyTool:
         self._timeout = timeout
         self._client = httpx.Client(transport=transport, headers={"User-Agent": _USER_AGENT})
 
-    def nearby(self, latitude: float, longitude: float, radius_m: int = 600) -> NearbyPlaces:
+    def nearby(self, latitude: float, longitude: float, radius_m: int = NEARBY_RADIUS_M) -> NearbyPlaces:
         cache_key = (round(latitude, 4), round(longitude, 4), radius_m)
         with _CACHE_LOCK:
             cached = _CACHE.get(cache_key)

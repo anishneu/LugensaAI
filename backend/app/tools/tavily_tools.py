@@ -46,7 +46,7 @@ import re
 import threading
 import time
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
 
@@ -54,7 +54,7 @@ from app.models.evidence import Evidence, SourceType
 from app.models.location import Location
 from app.models.plan import ResearchTopic
 from app.tools.base import PageRetrievalTool, ToolConfigurationError, ToolExecutionError, WebSearchTool
-from app.tools.community_sources import feed_domains, is_community_domain
+from app.tools.community_sources import base_name, is_community_domain, place_names, regional_domains, without_admin_prefix
 from app.tools.descriptions import readable_description
 from app.tools.post_dates import PostDateRecovery
 from app.tools.translation import (
@@ -152,6 +152,27 @@ _KNOWN_UI_JUNK_LINES = {
 # coverage, often has nothing in a week, and a feed that is empty most of the time is not a feed.
 LIVE_FEED_WINDOW_DAYS = 30
 
+
+def _now() -> datetime:
+    """The current time; a function so tests can pin it."""
+    return datetime.now(timezone.utc)
+
+
+def _within_window(items: list[Evidence], days: int = LIVE_FEED_WINDOW_DAYS) -> list[Evidence]:
+    """Only what was published in the last `days` days. An item whose date could not be read is dropped too: the feed says
+    "the last 30 days", and a post that cannot be dated cannot be shown to be in it."""
+    cutoff = _now() - timedelta(days=days)
+    kept = []
+    for item in items:
+        published = item.published_at
+        if published is None:
+            continue
+        if published.tzinfo is None:
+            published = published.replace(tzinfo=timezone.utc)
+        if published >= cutoff:
+            kept.append(item)
+    return kept
+
 # The feed is about the place's own city and, if that is too thin, the wider region around it (Xinyi District,
 # then Taipei City). It never widens to the whole country: that pulled in stories that were about Taiwan and
 # not about Taipei, and each extra scope is more billed searches. Only a place with no city or region at all
@@ -182,6 +203,8 @@ _NEWS_QUERY_LOCAL = "local news and events"
 _NEWS_QUERY_GENERAL = "news travel culture events"
 # Forums, Reddit, Quora and regional communities. Undated, and kept: see community_sources.py.
 _COMMUNITY_FACET = "living and visiting: what is it like"
+# What the Reddit search adds after the place: short on purpose (see `_search_scope`).
+_REDDIT_FACET = "living visiting"
 
 # Job listings match a regional news query (a company's careers page names
 # the city its office is in) and carry a real posted date, so neither the
@@ -282,7 +305,7 @@ def _truncate_for_display(text: str, limit: int = _MAX_DISPLAY_LENGTH) -> str:
 
 def _is_relevant_to_location(item_text: str, location: Location) -> bool:
     haystack = item_text.lower()
-    needles = [location.name.lower()]
+    needles = [location.name.lower(), *(n.lower() for n in place_names(location))]
     if location.city:
         needles.append(location.city.lower())
     # Native-script names: a page that survived translation may still spell the place its own way.
@@ -306,7 +329,13 @@ def _name_words(text: str) -> list[str]:
     return [w.lower() for w in _WORD_RE.findall(text.replace("'", "").replace("’", ""))]
 
 
-def _mentions_business(text: str, business_name: str) -> bool:
+def _area_words(location: Location) -> frozenset[str]:
+    """The words of the place's city, region and country: what a name built from them ("Hotel Erfurt-City") shares with
+    every page about that area."""
+    return frozenset(w for a in (location.city, location.region, location.country) if a for w in _name_words(without_admin_prefix(a)))
+
+
+def _mentions_business(text: str, business_name: str, area_words: frozenset[str] = frozenset()) -> bool:
     """Whether `text` is actually about this one business.
 
     A business needs a much stricter test than an area: its city appearing on
@@ -321,8 +350,20 @@ def _mentions_business(text: str, business_name: str) -> bool:
     text_set = set(text_words)
 
     distinctive = [w for w in name_words if w not in _GENERIC_NAME_WORDS]
+    if distinctive and max(distinctive, key=len) in area_words and len(distinctive) > 1:
+        # "Hotel Erfurt-City": its rarest word is the city's own name, which every page about Erfurt has, and the other is
+        # "city". The two words anywhere on a page are not the hotel (a post about a flag collection in "this City" and
+        # "Erfurt" was taken for it), so they must stand together, in order.
+        return " ".join(distinctive) in " ".join(text_words)
     if distinctive:
-        return all(w in text_set for w in distinctive)
+        # A name written as two words in one place and one in another ("Pa Sak" and "Pasak", "Lop Buri" and "Lopburi",
+        # common in romanised names) is still that name: neighbouring words also count joined.
+        text_set |= {a + b for a, b in zip(text_words, text_words[1:])}
+        joined: dict[str, set[str]] = {}
+        for a, b in zip(distinctive, distinctive[1:]):
+            joined.setdefault(a, set()).add(a + b)
+            joined.setdefault(b, set()).add(a + b)
+        return all(w in text_set or any(j in text_set for j in joined.get(w, ())) for w in distinctive)
 
     phrase = " ".join(name_words)
     return phrase in " ".join(text_words)
@@ -343,13 +384,30 @@ def _mentions_place_context(text: str, location: Location) -> bool:
     if location.local_area and location.local_area in text:
         return True
     words = set(_name_words(text))
-    return any(all(w in words for w in _name_words(anchor)) for anchor in anchors)
+    compact_text = "".join(_name_words(text))
+    for anchor in anchors:
+        for form in _name_forms(anchor):
+            if all(w in words for w in _name_words(form)):
+                return True
+            # "Lopburi" and "Lop Buri" are one province: compare without the spaces (only for names long enough
+            # that a match inside another word is unlikely).
+            compact_form = "".join(_name_words(form))
+            if len(compact_form) >= 6 and compact_form in compact_text:
+                return True
+    return False
+
+
+def _has_distinctive_name(name: str) -> bool:
+    """A name with three or more identifying words ("Floating Train at Pa Sak Jolasid Dam"): a page that carries all of
+    them, in any order, is about that place without also needing its city, which people often leave out."""
+    return len([w for w in _name_words(name) if w not in _GENERIC_NAME_WORDS]) >= 3
 
 
 def _is_about_business(text: str, location: Location) -> bool:
     """`_mentions_business` for the English name, or the native-script name ("翠藍") that a local
     page uses even after translation renders it differently."""
-    if _mentions_business(text, location.name):
+    area = _area_words(location)
+    if _mentions_business(text, location.name, area) or any(_mentions_business(text, name, area) for name in place_names(location)):
         return True
     return bool(location.local_name) and location.local_name in text
 
@@ -360,17 +418,25 @@ def _region_label(location: Location) -> str:
     POI's own city/region if known; only a bare place name (no city/region
     at all) falls back to its own name, since there's nothing broader to
     anchor on."""
-    return ", ".join(filter(None, [location.city, location.region])) or location.name
+    return ", ".join(filter(None, [without_admin_prefix(p) for p in (location.city, location.region) if p])) or location.name
 
 
 def _region_anchor(location: Location) -> str:
     return (location.city or location.region or location.name).lower()
 
 
+def _is_reddit_non_thread(url: object) -> bool:
+    """A Reddit page that is not a post: a subreddit's front page ("r/erfurt", "r/erfurt/best"), the site's own pages.
+    Only a thread has a "/comments/" path, and only a thread is something someone said."""
+    if not isinstance(url, str) or not _host_matches(url, ("reddit.com",)):
+        return False
+    return "/comments/" not in urlparse(url.lower()).path
+
+
 def _is_non_activity_url(url: str) -> bool:
     parsed = urlparse(url.lower())
     target = f"{parsed.netloc}{parsed.path}"
-    return any(pattern in target for pattern in _NON_ACTIVITY_URL_PATTERNS)
+    return _is_reddit_non_thread(url) or any(pattern in target for pattern in _NON_ACTIVITY_URL_PATTERNS)
 
 
 def _mentions_whole_word(text: str, word: str) -> bool:
@@ -435,6 +501,11 @@ _GENERIC_SUFFIXES = {"city", "district", "county", "province", "prefecture", "mu
 def _name_forms(name: str) -> list[str]:
     parts = name.lower().split()
     forms = [" ".join(parts)]
+    # "Chang Wat Lopburi" is written "Lopburi", and "Tambon Manao Wan" "Manao Wan".
+    plain = without_admin_prefix(name.lower()).split()
+    if plain != parts:
+        forms.append(" ".join(plain))
+        parts = plain
     if len(parts) > 1 and parts[-1] in _GENERIC_SUFFIXES:
         forms.append(" ".join(parts[:-1]))
     return forms
@@ -490,10 +561,16 @@ def _is_relevant_to_community_voice(title: str, body: str, location: Location, s
     """
     haystack = f"{title} {body}".lower()
     source_text = source.lower()
-    name = (location.name or "").strip().lower()
+    name = base_name((location.name or "").strip()).lower()
 
-    if len(name.split()) > 1 and _mentions_whole_word(haystack, name):
-        return True
+    for each in place_names(location) or [name]:
+        each = each.lower()
+        if len(each.split()) > 1 and _mentions_whole_word(haystack, each):
+            return True
+        # "Pa Sak Jolasid Dam the floating train" is the thread about "Floating Train at Pa Sak Jolasid Dam": the words
+        # of a long, distinctive name are enough in any order (short names are not: "Hotel Erfurt-City" is two words).
+        if _has_distinctive_name(each) and _mentions_business(haystack, each):
+            return True
     # Native-script names have no word boundaries, so match them as plain substrings.
     if location.local_name and location.local_name.lower() in haystack:
         return True
@@ -626,6 +703,79 @@ def _build_candidates(
     return candidates
 
 
+def _host_matches(url: object, hosts: tuple[str, ...]) -> bool:
+    """Whether `url` is on one of `hosts` (or a subdomain of one): "old.reddit.com" is on "reddit.com"."""
+    if not isinstance(url, str):
+        return False
+    host = (urlparse(url).hostname or "").lower().removeprefix("www.")
+    return any(host == h or host.endswith("." + h) for h in hosts)
+
+
+def filter_for_place(candidates: list[Evidence], location: Location, raw_content_cache: dict[str, str] | None = None) -> list[Evidence]:
+    """The place filters every search result goes through, whichever tool found it: only what is about this place stays.
+
+    A business must be named (by any of its names) and placed; an area's results are kept softly (flagged when none match),
+    and a forum or review result must pass the stricter check Community Voices needs."""
+    if location.is_business:
+        # One specific business: a page either mentions it or it isn't
+        # evidence about it. No soft fallback here — unlike an area, where
+        # a nearby-but-imperfect page is still informative, another
+        # business's reviews are actively misleading, so an honest
+        # "nothing found" beats them.
+        about_this_business = []
+        for c in candidates:
+            haystack = (
+                f"{c.source_title} {c.text} {c.source_url} {(raw_content_cache or {}).get(c.source_url, '')} "
+                f"{c.metadata.get(META_ORIGINAL_TITLE, '')} {c.metadata.get(META_ORIGINAL_TEXT, '')}"
+            )
+            if _is_about_business(haystack, location) and (
+                _mentions_place_context(haystack, location) or any(_has_distinctive_name(n) for n in place_names(location))
+            ):
+                about_this_business.append(c)
+        return about_this_business
+
+    relevant = [
+        c
+        for c in candidates
+        if _is_relevant_to_location(
+            f"{c.source_title} {c.text} {c.metadata.get(META_ORIGINAL_TITLE, '')} "
+            f"{c.metadata.get(META_ORIGINAL_TEXT, '')}",
+            location,
+        )
+    ]
+
+    # Soft filter: an empty topic with an honest coverage-gap limitation
+    # is more honest than quietly keeping off-topic results to avoid it,
+    # but dropping every single candidate (e.g. the location name
+    # appears only in the query, never in any real result) is worse than
+    # showing the unfiltered results, clearly flagged as such.
+    if relevant:
+        result = relevant
+    else:
+        for candidate in candidates:
+            candidate.metadata["location_match"] = "false"
+        result = candidates
+
+    # Community Voices (frontend) reads forum/review evidence straight
+    # out of the research response, with no verification step downstream
+    # to catch a wrong-place match the way claim extraction does for
+    # everything else — so unlike the soft filter above, a forum/review
+    # result that fails the stricter place check is dropped outright
+    # rather than shown flagged. See `_is_relevant_to_community_voice`.
+    kept = [
+        c
+        for c in result
+        if c.source_type not in (SourceType.COMMUNITY_FORUM, SourceType.REVIEW_AGGREGATOR)
+        or _is_relevant_to_community_voice(
+            c.source_title,
+            f"{c.text} {c.metadata.get(META_ORIGINAL_TEXT, '')}",
+            location,
+            f"{c.source_url} {c.publisher or ''}",
+        )
+    ]
+    return kept
+
+
 class TavilyWebSearchTool(WebSearchTool):
     def __init__(
         self,
@@ -706,6 +856,8 @@ class TavilyWebSearchTool(WebSearchTool):
                 continue
             for result in response.get("results", []):
                 url = result.get("url") if isinstance(result, dict) else None
+                if _is_reddit_non_thread(url):
+                    continue  # a subreddit's front page is a link to a community, not something anyone said
                 if url and url in seen_urls:
                     continue
                 if url:
@@ -731,61 +883,7 @@ class TavilyWebSearchTool(WebSearchTool):
             # translated item's description would still be the original), and only if a sentence qualified.
             if META_TRANSLATED_BY in c.metadata or not c.metadata.get("description"):
                 c.metadata.pop("description", None)
-        if location.is_business:
-            # One specific business: a page either mentions it or it isn't
-            # evidence about it. No soft fallback here — unlike an area, where
-            # a nearby-but-imperfect page is still informative, another
-            # business's reviews are actively misleading, so an honest
-            # "nothing found" beats them.
-            about_this_business = []
-            for c in candidates:
-                haystack = (
-                    f"{c.source_title} {c.text} {c.source_url} {self.raw_content_cache.get(c.source_url, '')} "
-                    f"{c.metadata.get(META_ORIGINAL_TITLE, '')} {c.metadata.get(META_ORIGINAL_TEXT, '')}"
-                )
-                if _is_about_business(haystack, location) and _mentions_place_context(haystack, location):
-                    about_this_business.append(c)
-            return about_this_business
-
-        relevant = [
-            c
-            for c in candidates
-            if _is_relevant_to_location(
-                f"{c.source_title} {c.text} {c.metadata.get(META_ORIGINAL_TITLE, '')} "
-                f"{c.metadata.get(META_ORIGINAL_TEXT, '')}",
-                location,
-            )
-        ]
-
-        # Soft filter: an empty topic with an honest coverage-gap limitation
-        # is more honest than quietly keeping off-topic results to avoid it,
-        # but dropping every single candidate (e.g. the location name
-        # appears only in the query, never in any real result) is worse than
-        # showing the unfiltered results, clearly flagged as such.
-        if relevant:
-            result = relevant
-        else:
-            for candidate in candidates:
-                candidate.metadata["location_match"] = "false"
-            result = candidates
-
-        # Community Voices (frontend) reads forum/review evidence straight
-        # out of the research response, with no verification step downstream
-        # to catch a wrong-place match the way claim extraction does for
-        # everything else — so unlike the soft filter above, a forum/review
-        # result that fails the stricter place check is dropped outright
-        # rather than shown flagged. See `_is_relevant_to_community_voice`.
-        kept = [
-            c
-            for c in result
-            if c.source_type not in (SourceType.COMMUNITY_FORUM, SourceType.REVIEW_AGGREGATOR)
-            or _is_relevant_to_community_voice(
-                c.source_title,
-                f"{c.text} {c.metadata.get(META_ORIGINAL_TEXT, '')}",
-                location,
-                f"{c.source_url} {c.publisher or ''}",
-            )
-        ]
+        kept = filter_for_place(candidates, location, self.raw_content_cache)
         # Only what survived every filter is worth a page request for its date.
         if self._date_recovery is not None:
             self._date_recovery.enrich([c for c in kept if c.source_type in _DATED_SOURCE_TYPES])
@@ -825,8 +923,12 @@ class TavilyLiveFeedTool:
         client: object | None = None,
         translator: Translator | None = None,
         date_recovery: PostDateRecovery | None = None,
+        reddit_archive: object | None = None,
     ) -> None:
         self.raw_content_cache: dict[str, str] = {}
+        # Reddit's archive (`RedditArchiveTool`), asked for the last 30 days of posts: free, with real dates. When it
+        # answers well the feed's Reddit search, a billed credit, is not sent at all.
+        self._reddit_archive = reddit_archive
         self._max_results = max_results
         self._translator = translator
         self._date_recovery = date_recovery
@@ -917,13 +1019,85 @@ class TavilyLiveFeedTool:
             if cached and time.monotonic() - cached[0] < _FEED_CACHE_TTL_SECONDS:
                 return [item.model_copy(deep=True) for item in cached[1]], 0, []
 
+        failed: list[str] = []
+        ran = 0  # billed searches sent
         if kind == "news":
             query = f"{label} {_NEWS_QUERY_GENERAL if scope == 'country' else _NEWS_QUERY_LOCAL}"
-            extra: dict = {"topic": "news", "days": LIVE_FEED_WINDOW_DAYS}
+            kept, failed = self._feed_search(scoped, query, {"topic": "news", "days": LIVE_FEED_WINDOW_DAYS}, kind="news")
+            ran = 1
+            kept = _within_window(kept)  # `days` is a request to the search API, not a guarantee about what it returns
         else:
-            query = f"{label} {_COMMUNITY_FACET}"
-            extra = {"include_domains": feed_domains(scoped.country_code)}
+            # The last 30 days of Reddit come first, from the archive: free, and asked for by date, which a search API cannot
+            # do for Reddit (it has no publication date for it at all). Only when that leaves the feed thin is the Reddit
+            # web search sent, which costs a credit, and it finds threads of any age, so it is cut to the window afterwards.
+            kept = self._recent_from_archive(scoped)
+            if len(kept) < _FEED_MIN_PER_KIND:
+                # Reddit by putting "reddit" in the query, with no `include_domains` and only Reddit's own results kept.
+                # Measured against the live API: with `include_domains=["reddit.com"]`, alone or in a list with a country's
+                # forums, a basic-depth search returned pages that had nothing to do with the place (adult, gaming and AI
+                # subreddits, song titles for "what is it like"), so the feed showed no Reddit at all. The same search with
+                # "reddit" in the query returned five real threads about the place out of six.
+                found, failed = self._feed_search(
+                    scoped, f"reddit {label} {_REDDIT_FACET}", {}, kind="community", only_hosts=("reddit.com",)
+                )
+                ran = 1
+                known = {item.source_url for item in kept}
+                kept.extend(item for item in self._dated_in_window(found) if item.source_url not in known)
+                # The country's own forums are searched only when Reddit alone leaves the feed thin: a second billed
+                # search. Not after a failed one, which would only be a second failure to pay for.
+                forums = regional_domains(scoped.country_code)
+                if forums and not failed and len(kept) < _FEED_MIN_PER_KIND:
+                    more, problems = self._feed_search(
+                        scoped, f"{label} {_COMMUNITY_FACET}", {"include_domains": forums}, kind="community"
+                    )
+                    ran += 1
+                    failed.extend(problems)
+                    known = {item.source_url for item in kept}
+                    kept.extend(item for item in self._dated_in_window(more) if item.source_url not in known)
 
+        if ran and len(failed) == ran:
+            # Every search failed: reported, and not cached, so the next load tries again.
+            return [], ran, failed
+        if kind == "community":
+            kept.sort(key=_newest_first_undated_last)
+        if not failed:
+            with _FEED_CACHE_LOCK:
+                _SCOPE_CACHE[cache_key] = (time.monotonic(), [item.model_copy(deep=True) for item in kept])
+        return kept, ran, failed
+
+    def _dated_in_window(self, items: list[Evidence]) -> list[Evidence]:
+        """Community posts from a web search, dated and cut to the window. The search API gives no date for these; read it
+        from the post itself where it can be read (post_dates.py). A post whose date cannot be read is not shown."""
+        if self._date_recovery is not None:
+            self._date_recovery.enrich(items)
+        return _within_window(items)
+
+    def _recent_from_archive(self, scoped: Location) -> list[Evidence]:
+        """The last 30 days of Reddit about the area, from the archive, through the feed's own area check. Best effort."""
+        if self._reddit_archive is None:
+            return []
+        try:
+            posts = self._reddit_archive.recent(scoped, LIVE_FEED_WINDOW_DAYS)  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001 - a free extra source must never stop the feed
+            return []
+        return [
+            post
+            for post in posts
+            if not _is_non_activity_url(post.source_url)
+            and _is_relevant_to_live_feed(post.source_title, post.text, scoped, f"{post.source_url} {post.publisher or ''}")
+        ]
+
+    def _feed_search(
+        self,
+        scoped: Location,
+        query: str,
+        extra: dict,
+        *,
+        kind: str,
+        only_hosts: tuple[str, ...] | None = None,
+    ) -> tuple[list[Evidence], list[str]]:
+        """One billed search and the filters that keep its results about this place. Returns the kept items and
+        the failures (empty on success)."""
         try:
             # Basic depth is one credit; advanced is two, and nothing here needs it.
             response = self._client.search(
@@ -935,10 +1109,13 @@ class TavilyLiveFeedTool:
                 **extra,
             )
         except Exception as exc:  # noqa: BLE001 - the Tavily SDK's own exception types aren't guaranteed
-            # A failed search is reported, not cached: the next load should try again.
-            return [], 1, [f"'{query}': {exc}"]
+            return [], [f"'{query}': {exc}"]
         results = response.get("results", []) if isinstance(response, dict) else []
         images = response.get("images", []) if isinstance(response, dict) else []
+        if only_hosts:
+            # Filtering breaks the pairing of a result with its picture, so no pictures are used for these.
+            results = [r for r in results if isinstance(r, dict) and _host_matches(r.get("url"), only_hosts)]
+            images = []
         found = _build_candidates(scoped, "live_feed", results, images, self.raw_content_cache, describe=True)
 
         kept = []
@@ -959,15 +1136,7 @@ class TavilyLiveFeedTool:
             # The filters above judged the full text; what the card shows is the readable description, or
             # nothing (title and source only) where no sentence qualified.
             item.text = item.metadata.pop("description", "")
-        if kind == "community":
-            # Every post has a date; the search API just does not say. Read it from the post itself where it
-            # can be read (post_dates.py), and leave the rest undated rather than guess.
-            if self._date_recovery is not None:
-                self._date_recovery.enrich(kept)
-            kept.sort(key=_newest_first_undated_last)
-        with _FEED_CACHE_LOCK:
-            _SCOPE_CACHE[cache_key] = (time.monotonic(), [item.model_copy(deep=True) for item in kept])
-        return kept, 1, []
+        return kept, []
 
 
 def _newest_first_undated_last(item: Evidence) -> tuple[bool, float]:

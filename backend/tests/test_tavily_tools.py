@@ -399,7 +399,7 @@ def test_live_feed_requests_recency_and_labels_topic_live_feed(harvard_square):
 
 
 class _NewsAndCommunityClient(FakeTavilyClient):
-    """News queries (topic="news") get `news`; the domain-restricted community query gets `community`."""
+    """News queries (topic="news") get `news`; every other feed query (Reddit, the country's forums) gets `community`."""
 
     def __init__(self, news=None, community=None) -> None:
         super().__init__()
@@ -407,11 +407,11 @@ class _NewsAndCommunityClient(FakeTavilyClient):
 
     def search(self, query, **kwargs):
         super().search(query, **kwargs)
-        results = self._community if kwargs.get("include_domains") else self._news
+        results = self._news if kwargs.get("topic") == "news" else self._community
         return {"results": results, "images": []}
 
 
-def test_undated_news_is_dropped_but_an_undated_forum_post_is_kept_and_stays_undated(harvard_square):
+def test_undated_news_and_undated_forum_posts_are_dropped_and_a_dated_one_is_kept(harvard_square):
     """News claims to be recent, so it must not backfill an unknown time with the moment it was fetched. Forum
     posts are usually undated, and dropping them discarded all community content: they are kept, as undated."""
     client = _NewsAndCommunityClient(
@@ -425,6 +425,9 @@ def test_undated_news_is_dropped_but_an_undated_forum_post_is_kept_and_stays_und
         community=[
             {"url": "https://www.reddit.com/r/cambridgema/comments/1", "title": "Best cafes in Cambridge, MA?",
              "content": "Looking for quiet cafes to work from in Cambridge, MA, any recommendations from locals?"},
+            {"url": "https://www.reddit.com/r/cambridgema/comments/2", "title": "Cambridge, MA street fair this weekend",
+             "content": "The street fair is on this weekend in Cambridge, MA, with music and food.",
+             "published_date": "Fri, 18 Sep 2026 09:00:00 GMT"},
         ],
     )
 
@@ -432,8 +435,9 @@ def test_undated_news_is_dropped_but_an_undated_forum_post_is_kept_and_stays_und
 
     by_kind = {kind: [e for e in feed if e.metadata["feed_kind"] == kind] for kind in ("news", "community")}
     assert [e.source_url for e in by_kind["news"]] == ["https://example.org/real-article"]
-    assert [e.source_url for e in by_kind["community"]] == ["https://www.reddit.com/r/cambridgema/comments/1"]
-    assert by_kind["community"][0].published_at is None, "no time is invented for a forum post"
+    # A post whose date cannot be read is not shown: the feed says "the last 30 days" and that cannot be shown for it,
+    # and no date is invented for it.
+    assert [e.source_url for e in by_kind["community"]] == ["https://www.reddit.com/r/cambridgema/comments/2"]
 
 
 def test_live_feed_keeps_local_reporting_whose_headline_omits_the_city(harvard_square):
@@ -497,7 +501,7 @@ def test_live_feed_sorts_newest_first(harvard_square):
                 "url": "https://example.org/older",
                 "title": "Older Cambridge news",
                 "content": "An older discussion thread about the Cambridge, MA area from a while back.",
-                "published_date": "Mon, 06 Jan 2025 10:00:00 GMT",
+                "published_date": "Mon, 07 Sep 2026 10:00:00 GMT",
             },
             {
                 "url": "https://example.org/newer",
@@ -683,7 +687,7 @@ def test_live_feed_survives_one_facet_query_failing(harvard_square):
     client = FlakyClient(
         results=[
             {
-                "url": "https://example.org/article",
+                "url": "https://www.reddit.com/r/cambridgema/comments/1/bike_lane",
                 "title": "Cambridge council approves new bike lane",
                 "content": "The Cambridge, MA city council voted on Tuesday to approve a protected bike lane.",
                 "published_date": "Wed, 16 Sep 2026 15:14:23 GMT",
@@ -693,7 +697,8 @@ def test_live_feed_survives_one_facet_query_failing(harvard_square):
 
     feed = TavilyLiveFeedTool(client=client).fetch(harvard_square)
 
-    assert [e.source_url for e in feed] == ["https://example.org/article"]
+    # The news search failed; the Reddit search still answers (only Reddit's own results are kept from it).
+    assert [e.source_url for e in feed] == ["https://www.reddit.com/r/cambridgema/comments/1/bike_lane"]
 
 
 def test_live_feed_missing_api_key_and_client_raises_configuration_error():

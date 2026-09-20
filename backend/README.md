@@ -85,20 +85,86 @@ results remain deterministic.
 expected duration range, which the UI shows beside a live elapsed timer while
 a question runs.
 
-## Live feed: what's being said about the place and its region
+## Live feed: what is new at and around the place
 
-`GET /api/live-feed` (`TavilyLiveFeedTool`) is a separate, unverified surface, independent of the Q&A
-pipeline: "what is going on around here", not "what is said about this exact business" (one cafe rarely
-has anything published about it by name). It answers with two kinds of item, tagged in
+`GET /api/live-feed` (`LiveFeedTool`, `app/tools/live_feed.py`) is a separate, unverified surface, independent of the Q&A
+pipeline: everything new about the place in the last 30 days, in one list, newest first. Nothing in it is generated.
+
+```mermaid
+flowchart TD
+  PIN(["Pin"]) --> NAMES["Reverse geocode, then local names:<br/>the pin's own name, its street, its neighbourhood<br/>(none for a city-level pin)"]
+  NAMES --> NEAR["Near tier: Google News RSS per name<br/>+ Reddit archive posts naming it"]
+  NEAR --> ANY{"Anything near<br/>the pin?"}
+  ANY -->|"yes"| FILTER
+  ANY -->|"no"| CITY["City tier: 3 news queries (general, safety,<br/>business and tourism) + the city's subreddit"]
+  CITY --> ENOUGH{"3 or more items?"}
+  ENOUGH -->|"yes"| FILTER
+  ENOUGH -->|"no, and a Tavily key is set"| TAV["Billed Tavily fallback"]
+  TAV --> FILTER
+  FILTER["Drop politics and irrelevant items, anything older than<br/>30 days or with no readable date, and duplicates"]
+  FILTER --> CAT["Label each item, newest first, cache 30 minutes"]
+  CAT --> UI(["Timeline: Now, Today, Yesterday, dates<br/>empty when there is nothing"])
+```
+
+**Where it looks, and in what order.** First *near* the pin: the pin's own name (a compound one such as "Hunts Bank & Victoria
+Station Approach" is split into its places), the street it is on and its neighbourhood, from a reverse geocode
+(`NominatimClient.reverse`, zoom 18, in English). Only if nothing at all is found there, the *city*, searched three ways (all
+its news, its safety news, its business and tourism news) so a busy city's crime does not push its restaurants and events out.
+When the city yields nothing either, the answer is an empty list and the UI shows nothing. A pin that is the city itself has no
+street: the street at a city's centre point says nothing about the city (it returned New York theatre news for "Broadway" in
+Cambridge, Massachusetts). Every item records `feed_scope` ("near" or "city"), `feed_place` (the street, area or city it is
+about), `feed_category` and `feed_kind` ("news" or "community"), so the reader sees which place each item is about.
+
+**Precision rules, from running it live.** A headline counts as *near* only if it names the street or area and also the city or
+region, or comes from a website named for the area (`harvardsquare.com`; not an outlet merely containing the name: "Broadway
+News" is not the street). Without that, a search for a street returned other places' news, and OpenStreetMap's own
+neighbourhood for a point was sometimes the wrong one (Harvard Square came back as "Charlestown", another polygon). Live:
+Harvard Square gave 7 items, nearly all from `harvardsquare.com`; Hunts Bank in Manchester found nothing near and fell back to
+Manchester.
+
+**Sources, all free by default.** (1) *News*: Google News' public RSS feed (`app/tools/news_rss.py`), with a date window
+(`when:30d`), quoted names and the country's English edition. It gives headlines with a link, an outlet and a real publication
+time, no article text; it is unofficial (documented for feed readers, not as an API), so the client is polite, caches 30 minutes,
+refuses any response that declares a DOCTYPE or entities, and returns nothing on any failure. (2) *Community*: the last 30 days
+of Reddit from the free archive (`RedditArchiveTool.recent`, see "Community and regional sources"); a post in the city's
+subreddit that names the street or area is *near*, any other is the city's. (3) *Fallback only*: the billed Tavily search
+(`TavilyLiveFeedTool`, described below), tried only for the city and only when the free sources find fewer than 3 items, and only
+with a key. With no key the feed still works.
+
+**What is left out** (`app/tools/feed_topics.py`, plain keyword patterns on the headline: deterministic, free, blunt; each rule
+is a line to change). *Politics*: elections, parties and their politicians, national and international political news; municipal
+matters (a council approving a bike lane, roadworks, planning) are kept, being about the place. *Irrelevant*: film and celebrity
+trivia, sport scores, stock prices, deals, horoscopes, job listings, obituaries; and, for community posts only, personal asks
+(roommate wanted, "recommendations?", missed connections). Also dropped: anything older than 30 days or with no readable date, and
+repeats (the same URL, or the same headline from two outlets). Each item is put in one kind by the first rule that matches:
+Crime & safety, Accidents & traffic, Weather & alerts, Business, Events & tourism, Development & transport, else Community or News.
+These filters will occasionally drop something worth keeping or let something through; they were tuned on live Cambridge, Kyoto and
+Manchester feeds, not benchmarked.
+
+**Cost.** A normal load spends no search credit. The result is cached 30 minutes per place, and a load takes 7 to 17 seconds cold
+(a reverse geocode, 2 to 6 news requests and up to 4 archive requests, run in parallel).
+
+### The billed fallback: `TavilyLiveFeedTool`
+
+Used only as the last step above. It answers with two kinds of item, tagged in
 `metadata["feed_kind"]`:
 
 - **news**: Tavily's news topic over the last 30 days (`LIVE_FEED_WINDOW_DAYS`), in several facets.
   A news item with no real publication time is dropped, never stamped with the time it was fetched.
-- **community**: conversation from Reddit and the country's own forums (`feed_domains` in
-  `app/tools/community_sources.py`; TripAdvisor, YouTube and the social networks are left out because they
-  crowd the results with listings and videos). Each post's real date is read from the post itself
-  (see "Post dates" below) and the list is newest first, undated last. A post whose date can't be read is kept
-  and shown as "date unknown".
+- **community**: conversation from Reddit, and the country's own forums when Reddit leaves the feed thin
+  (TripAdvisor, YouTube and the social networks are left out because they crowd the results with listings and
+  videos). Reddit is searched by putting "reddit" in the query with no `include_domains`, keeping only Reddit's
+  own thread pages (never a subreddit's front page); see "Community and regional sources". Each post's real date is read from the post itself
+  (see "Post dates" below) and the list is newest first. **Everything in the feed is from the last 30 days**
+  (`LIVE_FEED_WINDOW_DAYS`): news and community posts alike are cut to the window after their dates are known, and a post
+  whose date can't be read is dropped, because it cannot be shown to be inside it (`_within_window`). Tavily's `days`
+  argument only applies to its news topic, and even there it is a request, not a guarantee; it has no date filter for
+  Reddit at all (no publication date is returned for it), so the filter has to be applied here.
+  **Reddit comes first from the free archive** (`RedditArchiveTool.recent`, see "Community and regional sources"): the
+  archive is asked for posts `after` a date, so it returns the last 30 days directly. Every post from the subreddit named
+  for the place's own city counts (that is what the subreddit is), and in the region's and country's subreddits only posts
+  whose title names the area. Only when that gives fewer than 3 posts is the billed Reddit search sent, and the country's
+  forums after it.
 
 The search starts at the place's city, and if that yields fewer than `_FEED_MIN_ITEMS` (6) items in total
 it widens **once**, to the region around it (Xinyi District, then Taipei City). It never widens to the whole
@@ -110,7 +176,7 @@ check is unchanged: the anchor (city, else region, else country) must appear in 
 named or repeated in the text, and a non-local outlet must also name the surrounding region (so a Cambridge,
 MA query cannot surface a Cambridge, New York report). Results are deduplicated by URL.
 
-### What a feed load costs
+#### What the billed fallback costs
 
 Tavily's free plan is 1,000 credits a month, shared with every research question, and a basic search is one
 credit (the tool sends `search_depth="basic"` explicitly, since advanced would be two). So the feed is built
@@ -118,10 +184,12 @@ to spend as few as it can:
 
 | Case | Searches |
 |---|---|
-| Best case: the city has enough on its own | 2 (one news, one community) |
-| Widened to the region | at most 4 |
+| Best case: the free Reddit archive alone has enough recent posts | 1 (the news search) |
+| The archive is thin or down: the city has enough on its own | 2 (one news, one Reddit) |
+| The city's Reddit is thin, in a country with listed forums | 3 (the forums are searched too) |
+| Widened to the region | at most 6, or 4 where Reddit alone is enough |
 | Repeat load, or a second tab, within an hour | 0 (served from the cache) |
-| Another place in the same city, within an hour | only its own 2; the region's search is shared |
+| Another place in the same city, within an hour | only its own 2 or 3; the region's searches are shared |
 | Two simultaneous loads of one place (React's dev mode does this) | one set: the second waits for the first |
 
 The old design ran two news queries per scope over three scopes and widened whenever *either* kind was short,
@@ -181,7 +249,7 @@ independently of it, and two unrelated mirrors), each with its own timeout (12 s
 30 s for the mirrors), a last retry of the first after a pause, and the last good answer for that spot (up to a day
 old) when every one of them fails. The result is cached for an hour. The query no longer ends in `out center 400`:
 in a dense centre the first 400 elements are not the nearest 400, and Manchester has 400+ food and drink places
-within 600 m.
+within 1,000 m (`NEARBY_RADIUS_M`; it was 600 m). At that radius a dense centre lists over a thousand food places, so the card shows the nearest 15 per kind and the total. Cold queries measured on the public servers: 3 s in central Manchester, 6 s in Erfurt, 12 s in Shibuya; each is cached for an hour.
 
 ### Translating names and addresses
 
@@ -212,19 +280,87 @@ a translated item's description would still be the original), and the UI prefers
 
 ## Community and regional sources in the Q&A pipeline
 
-Besides the per-topic web searches, `LocationResearchAgent` runs up to two more, each through its own
-`TavilyWebSearchTool` built with `include_domains_for`, and each passing through the same translation and
-place-relevance filters as any web page:
+Besides the per-topic web searches, `LocationResearchAgent` runs up to three more (two spend a search credit, the
+third is free), and each result passes through the same place filters (`filter_for_place`) as any web page:
 
-1. **Community search** (English): Reddit, Quora, TripAdvisor, Lonely Planet, YouTube and the social
-   networks (`community_domains`). For a place with no native name, the country's forums ride along here.
+1. **Community search** (English), one search per question. It is steered by its query and **not restricted to a
+   list of domains**: `community_query()` starts with "reddit" and the place's name and area, so Reddit threads,
+   forums, TripAdvisor and other review sites come back together. It asks for 20 results, which Tavily's pricing lists as the same one
+   credit as 4 (its usage counter lags too much here to confirm it), because Community Voices keeps only what names the
+   place and a longer list is what lets a thread through. The list of domains this search used to send hid Reddit (see below). Its results are kept in this order:
+   English first, then forum threads (Reddit, a country's forums) ahead of social posts and videos (Facebook,
+   Instagram, YouTube, TikTok, X: mostly login-walled and rarely something to read), then by relevance, with at
+   most two from any one site while other sites remain. Without that ordering, four travel-site pages that each scored
+   a little higher filled the topic and the Reddit thread scoring just below them was never shown.
 2. **Regional forum search** (in the local language), only for a place with a native-script name in a country
    with listed forums: PTT, Dcard, Pixnet, Naver, Pantip and so on, by the plan's first local-language query
    ("台北101 觀景台 心得") or, failing that, the bare native name. This one exists because of a measurement:
    with the forums mixed into one English query, Tavily's top results came from whichever listed site ranked
    best (Pixnet blogs, TripAdvisor), and PTT and Dcard appeared to be missing from the index. They are not:
    searched alone, in Chinese, they return real threads (8 of 8 relevant for Taipei 101). A cost of one more
-   search per question in those countries.
+   search per question in those countries. For a place with no known native name this search does not run, and
+   the country's forums are not searched at all: they used to ride along in the English search's domain list,
+   which is what hid Reddit, and an English query rarely reached them anyway.
+
+3. **Reddit archive** (free, `app/tools/reddit_archive.py`), which needs no Tavily key at all. A web search returns a small
+   ranked sample of the internet; the archive (Arctic Shift, a public copy of Reddit) *is* Reddit and can be asked directly:
+   "posts in r/ThailandTourism whose title has 'Jolasid'". Each post comes with its own posting time, so no date is guessed.
+   How it works and what was measured: it finds the place's subreddits by name prefix (r/erfurt, r/Kyoto, r/Thailand and
+   r/ThailandTourism, but not r/ThailandBarGirls), adds r/travel, r/solotravel and r/backpacking, and searches each for the
+   name's rarest word (or two words when that word is only the city's name, so "Hotel Erfurt-City" is searched as "erfurt
+   city"). Text search needs a subreddit (the archive refuses it otherwise), and it searches titles only: comment search times
+   out, so a place mentioned only in a comment is not found. Each title search takes 5 to 8 seconds and the archive rations
+   them (HTTP 429, with the seconds until its window resets, after a couple of runs of a dozen), so there are at most 8
+   per place, two at a time, a short refusal is waited out once, a long one stops the rest, and every answer is cached for
+   an hour: a second question about the same place sends none. Live, the thread that started this was found for all
+   three of Google's entries for that place; Ginkaku-ji returned six to fifteen dated posts depending on how many requests
+   the archive refused that time. When the archive is down or refusing, this source returns nothing and nothing else
+   changes. Its posts are ingested on their own (up to four, forum threads first), on top of the community search's four.
+
+**Which subreddit is the place's.** A city's name is shared: r/cambridge is Cambridge, England, and a live feed for
+Cambridge, Massachusetts, built on it was full of posts about the University of Cambridge (found by running the feed live;
+the 30-day window was right, the city was wrong). A subreddit's own description is in the archive's record, so a city's
+subreddit is now checked: if other subreddits carry a place code for the same name (r/CambridgeMA, r/cambridgeont: 2 or 3
+letters, at least 2,000 members, so an adult sub called "Erfurtsex" does not count) then only one whose title or short
+description names the place's region or country is used, and one with a code always must (its long sidebar is a fallback
+only, since r/CambridgeMA's mentions England). A name nobody else shares (r/Kyoto, r/erfurt) needs nothing more. Live: Cambridge,
+Massachusetts gets r/CambridgeMA only, Cambridge, England r/cambridge only, and a place with no matching subreddit gets
+none rather than a guess. Regional and national subreddits (r/Massachusetts, r/Thailand) are not checked this way; a
+region or country whose name is also another's (Georgia) could still be wrong.
+
+**Other names for a place.** Romanised names are spelled differently from page to page. `WikidataNameVariants`
+(`app/tools/wikidata_names.py`, free, no key) looks the place up on Wikidata (also by the part after "at" in a Google label)
+and keeps the English label and aliases of an entity within 20 km of the pin, stored on `Location.name_variants`. Every
+place filter and the archive search then use all of the place's names: for Pa Sak Jolasid Dam it adds "Pa Sak Cholasit Dam"
+(and "Pasak Chonlasit Dam" where Wikidata lists it), so a post using that spelling matches. It only helps a place that has a
+Wikidata entry (dams, temples, landmarks, not most businesses), and never invents a name.
+
+**Why Reddit was missing, measured on the live API.** `include_domains=["reddit.com"]` at basic depth, alone or
+inside a list, returned no thread about the place, only whatever subreddit matched a stray word (adult, gaming and AI
+subreddits, song titles for "what is it like"), so the place filters correctly dropped everything and the feed showed
+no Reddit. The community search's own list of eleven domains had the same effect on a Thai place: for "Pa Sak Jolasid
+Dam the floating train" it returned YouTube, Facebook and TikTok pages, though a Reddit thread with exactly that title
+exists. With "reddit" as the query's first word and no domain filter the thread comes back. A separate Reddit search
+for the research agent was tried and removed: it cost a credit more on every question, and the community search can
+carry Reddit at no extra cost.
+
+**Place matching, for names as Google writes them.** Finding the thread was half of it; the place filters then rejected it.
+Google labels that place "Tambon Manao Wan, Chang Wat Lopburi" and lists it as "Floating Train at Pa Sak Jolasid Dam",
+while people write "Lopburi" and "Pasak Jolasid Dam the floating train". So: the words Thai (and some Indonesian)
+addresses put in front of a name (Chang Wat, Tambon, Amphoe, Khet, Khwaeng, Kabupaten, Kecamatan, Kelurahan) are ignored
+in queries and in the place check (`without_admin_prefix`), and a search is anchored to the province when the city is
+such a subunit (`search_area`); "Pa Sak" and "Pasak", "Lop Buri" and "Lopburi" count as the same word; a name with three
+or more identifying words matches a page carrying all of them in any order, and then no longer also needs the city on the
+page (a two-word name like "Hotel Erfurt-City" is not matched that way); Google's " - Lop Buri" tag on a name is ignored
+(`base_name`); and a subreddit's front page is never evidence. A business named for its city ("Hotel Erfurt-City": its rarest word is
+"Erfurt") used to match any page containing the words "Erfurt" and "city"; the archive search made that visible, returning a
+flag collection, drug posts and an ICE-train story for the hotel. Such a name must now appear as a phrase, in order.
+Not solved: romanisations that differ in letters and that Wikidata does not list ("Jolasid", "Cholasit", "Chonlasit").
+
+Result for that place, through the real search and the agent's own scoring: the thread reaches the answer's evidence for
+the first two of Google's three entries for it. For the third (a "state park" entry that goes through the softer, non-business
+path) Tavily did not return the thread on the runs made, and its ranking varies from call to call, so a specific thread
+is likely but not guaranteed for any place.
 
 Limits, measured: `include_domains` is a strong preference, not a filter (a Reddit-only search still returned
 a few unrelated pages, which the relevance checks drop), and Facebook, Instagram, TikTok and X are mostly
@@ -254,7 +390,8 @@ sturdier source and is not wired in.
 
 In a live run for Xinyi District, all 8 Reddit threads in the feed were dated (2015 to 2026), and all 8 PTT and
 Pixnet threads from the regional search were dated (PTT from the URL, Pixnet from page metadata). Dcard threads
-come back undated. Live-feed community posts are listed newest first, undated last.
+come back undated. Live-feed community posts are listed newest first, and an undated one is not shown (the feed is
+limited to the last 30 days).
 
 ## Setup
 
@@ -312,6 +449,10 @@ OLLAMA_ENABLED=1
 Override the model with `OLLAMA_MODEL` (it must be pulled) and the server with `OLLAMA_BASE_URL`
 (default `http://localhost:11434`). If a call fails or times out (`OLLAMA_TIMEOUT_SECONDS`, default
 600), that component falls back to its deterministic counterpart and says so in `limitations`.
+
+**`DISABLE_REDDIT_ARCHIVE`** / **`DISABLE_NAME_VARIANTS`** — set to `1` to turn off the free Reddit archive search or the
+Wikidata lookup of a place's other names (see "Community and regional sources"). Both follow `DISABLE_LIVE_GEOCODING`
+too, and neither needs a key or spends a search credit.
 
 **`DISABLE_POST_DATE_FETCH`** — set to `1` to stop reading forum posts' publication dates from the web. Dates
 carried in the URL (PTT, dated blog paths) are still used; Reddit and page-metadata dates need a small request
@@ -442,8 +583,8 @@ app/
   agents/       LocationResearchAgent — orchestrates the bounded lifecycle, plus the default-agent
                 factory (auto-selects components per API key)
   api/          FastAPI routes, incl. /api/places/search (live POI autocomplete) and
-                /api/live-feed (independent news and community activity for the place's city,
-                cached for an hour; ?refresh=true skips the cache)
+                /api/live-feed (what is new at and around the place in the last 30 days: news, safety,
+                business, events and community posts; cached 30 minutes; ?refresh=true skips the cache)
 evaluation/     the benchmark from docs/evaluation.md, actually runnable (`run_benchmark.py`)
 tests/          pytest suite (with invented fixtures in tests/fixtures, never served by the app): planner, retrieval (keyword/semantic/hybrid), evidence repository
                 (in-memory/SQLite), verification (incl. contradiction), agent end-to-end, API,

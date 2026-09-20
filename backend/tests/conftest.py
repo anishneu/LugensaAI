@@ -34,6 +34,10 @@ def _isolated_test_environment(monkeypatch, tmp_path):
     from app.tools import tavily_tools
 
     tavily_tools._FEED_CACHE.clear()
+    # The live feed shows the last 30 days: pin the clock so the tests' dates stay inside (or outside) it whenever they run.
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(tavily_tools, "_now", lambda: datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc))
     tavily_tools._SCOPE_CACHE.clear()
     tavily_tools._FEED_INFLIGHT.clear()
 

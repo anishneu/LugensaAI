@@ -168,3 +168,24 @@ body {
   right: calc(var(--tab-radius) * -1);
   background: radial-gradient(circle at 100% 0, transparent var(--tab-radius), var(--tab-active) calc(var(--tab-radius) + 0.5px));
 }
+
+/* The live feed's red dot: it blinks. Steady for anyone who has asked for reduced motion. */
+@keyframes live-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.live-blink {
+  animation: live-blink 1.3s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-blink {
+    animation: none;
+  }
+}

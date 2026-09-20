@@ -27,12 +27,13 @@ from __future__ import annotations
 import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from app.core.config import AgentConfig
 from app.evidence.processing import enrich_evidence
 from app.evidence.repository import EvidenceRepository
 from app.models.claim import ClaimStatus
-from app.models.evidence import Evidence
+from app.models.evidence import Evidence, SourceType
 from app.models.location import Location
 from app.models.place_profile import PlaceProfile
 from app.models.response import ResearchResponse
@@ -43,19 +44,60 @@ from app.synthesis.claim_extractor import ClaimExtractor
 from app.synthesis.synthesizer import Synthesizer
 from app.agents.reflection import Reflector
 from app.planning.local_queries import LocalQueryWriter
-from app.tools.community_sources import community_domains, community_query, native_query, regional_domains
+from app.tools.community_sources import base_name, community_query, native_query, regional_domains
 from app.tools.locale import LocaleResolver
 from app.evidence.place_profile_evidence import pick_topic, profile_to_evidence
 from app.tools.base import LocationResolverTool, PageRetrievalTool, ToolExecutionError, WebSearchTool
 from app.tools.google_places_tool import GooglePlacesTool
 from app.tools.translation import META_ORIGINAL_TEXT
 from app.tools.wiki_tool import WikiContextTool
+from app.tools.wikidata_names import WikidataNameVariants
 from app.verification.support import untraceable_sentences
 from app.verification.verifier import ClaimVerifier
 
 # Caps concurrent outbound searches. Bounded because the far end is a rate-
 # limited third-party API, not because of local CPU.
 _MAX_SEARCH_WORKERS = 4
+
+# At most this many of the sources kept for one topic may come from the same site, unless too few sites are left to fill it.
+_MAX_PER_SITE = 2
+_SECOND_LEVEL_LABELS = frozenset({"co", "com", "org", "net", "gov", "edu", "ac"})
+
+
+def _site_of(url: str) -> str:
+    """The site a URL belongs to, so "ca.trip.com" and "www.trip.com" count as one: its last two labels ("bbc.co.uk": three)."""
+    labels = (urlparse(url).hostname or "").lower().split(".")
+    keep = 3 if len(labels) >= 3 and labels[-2] in _SECOND_LEVEL_LABELS else 2
+    return ".".join(labels[-keep:])
+
+
+# Social networks and video sites are classed as community sources, but a post or a video there is rarely something to read
+# (mostly behind a login); a forum thread is. Within the community search, threads come first.
+_SOCIAL_SITES = frozenset({"facebook.com", "instagram.com", "tiktok.com", "youtube.com", "x.com", "twitter.com"})
+
+
+def _community_rank(item: Evidence) -> int:
+    """0 for a forum thread (Reddit, a country's forum), 1 for a social or video post, 2 for anything else."""
+    if item.source_type != SourceType.COMMUNITY_FORUM:
+        return 2
+    return 1 if _site_of(item.source_url) in _SOCIAL_SITES else 0
+
+
+def _spread_across_sites(items: list[Evidence], limit: int) -> list[Evidence]:
+    """The best `limit` items, but no more than `_MAX_PER_SITE` from one site while others remain (the list is already in
+    order of preference). Without it, four listings from one travel site can fill a topic and leave out a Reddit thread that
+    scored just below them, which is what Community Voices then has nothing of."""
+    chosen: list[Evidence] = []
+    overflow: list[Evidence] = []
+    per_site: dict[str, int] = {}
+    for item in items:
+        site = _site_of(item.source_url)
+        if len(chosen) < limit and per_site.get(site, 0) < _MAX_PER_SITE:
+            chosen.append(item)
+            per_site[site] = per_site.get(site, 0) + 1
+        else:
+            overflow.append(item)
+    return chosen + overflow[: max(0, limit - len(chosen))]
 
 
 
@@ -93,6 +135,8 @@ class LocationResearchAgent:
         local_query_writer: LocalQueryWriter | None = None,
         community_search_tool: WebSearchTool | None = None,
         regional_search_tool: WebSearchTool | None = None,
+        reddit_archive_tool: WebSearchTool | None = None,
+        name_variants_tool: WikidataNameVariants | None = None,
     ) -> None:
         self.location_resolver = location_resolver
         self.web_search_tool = web_search_tool
@@ -116,6 +160,25 @@ class LocationResearchAgent:
         self.community_search_tool = community_search_tool
         # The country's own forums (PTT, Dcard, Naver, ...) searched in their own language, by the place's native name.
         self.regional_search_tool = regional_search_tool
+        # Reddit's own archive, searched by words in a post's title: free, and not a sample the way a web search is.
+        self.reddit_archive_tool = reddit_archive_tool
+        # Other English spellings of the place's name (Wikidata), for matching pages and searching the archive.
+        self.name_variants_tool = name_variants_tool
+
+    def _add_name_variants(self, location: Location, log) -> Location:
+        """Other English names of the place (Wikidata), so a page or post that spells it differently still counts.
+        Best effort: nothing found, or any failure, leaves the location as it was."""
+        if self.name_variants_tool is None:
+            return location
+        try:
+            found = self.name_variants_tool.variants(base_name(location.name), location.latitude, location.longitude)
+        except Exception:  # noqa: BLE001 - a name lookup must never stop a research run
+            return location
+        variants = [v for v in found if base_name(v).lower() != base_name(location.name).lower()]
+        if not variants:
+            return location
+        log(TraceStage.LOCATION_RESOLUTION, f"Wikidata lists other names for this place: {', '.join(variants)}")
+        return location.model_copy(update={"name_variants": variants})
 
     def _regional_is_separate(self, location: Location) -> bool:
         """Whether the country's forums get their own local-language search instead of riding along in the English one."""
@@ -387,6 +450,7 @@ class LocationResearchAgent:
         limitations: list[str] = []
         location = self._adopt_business_at_address(location, limitations, log)
         location = self._adopt_venue_named_in_question(location, question, limitations, log)
+        location = self._add_name_variants(location, log)
 
         plan = self.planner.plan(location, question)
         log(
@@ -433,10 +497,13 @@ class LocationResearchAgent:
         else:
             candidates_per_topic = []
 
-        def ingest(topic, candidates: list[Evidence], queries: list[str], fetch_full_text: bool = True) -> int:
+        def ingest(
+            topic, candidates: list[Evidence], queries: list[str], fetch_full_text: bool = True, forums_first: bool = False
+        ) -> int:
             """Score, filter, enrich and store one batch of candidates. Shared by
             the first pass and every later research round so both apply exactly
-            the same relevance bar and budget."""
+            the same relevance bar and budget. `forums_first` is for the community search, whose purpose is what
+            people said: its forum threads are kept ahead of social posts and the travel-site pages that outscore them."""
             nonlocal tool_calls_made
             scored = self.retriever.score(candidates, queries)
             log(TraceStage.RETRIEVAL, f"Scored {len(scored)} candidate(s) for '{topic.topic_id}'")
@@ -444,11 +511,15 @@ class LocationResearchAgent:
             accepted_candidates = [e for e in scored if (e.relevance_score or 0.0) >= self.config.min_relevance_score]
             # English is primary and other languages secondary: a source in the reader's language comes
             # first, and a translated one only fills the places English sources didn't. Within each, the
-            # best-matching source wins.
+            # best-matching source wins (forum threads first, for the community search).
             accepted_candidates.sort(
-                key=lambda e: (e.metadata.get("language") not in (None, "en"), -(e.relevance_score or 0.0))
+                key=lambda e: (
+                    e.metadata.get("language") not in (None, "en"),
+                    _community_rank(e) if forums_first else 0,
+                    -(e.relevance_score or 0.0),
+                )
             )
-            accepted_candidates = accepted_candidates[: self.config.max_evidence_per_topic]
+            accepted_candidates = _spread_across_sites(accepted_candidates, self.config.max_evidence_per_topic)
 
             enriched: list[Evidence] = []
             for candidate in accepted_candidates:
@@ -488,18 +559,43 @@ class LocationResearchAgent:
             probe = community_topic.model_copy(update={"search_queries": [query], "local_queries": []})
             log(
                 TraceStage.TOOL_SELECTION,
-                f"Selected community search for '{community_topic.topic_id}' (forums, Reddit, Quora, social media and "
-                f"{location.country_code or 'regional'} communities)",
+                f"Selected community search for '{community_topic.topic_id}' (Reddit, forums, Quora, review sites: steered by "
+                "the query, not restricted to a list of sites)",
                 query=query,
-                domains=", ".join(community_domains(location.country_code, include_regional=not self._regional_is_separate(location))[:8]),
             )
             try:
                 found = self.community_search_tool.search(location, probe)
                 tool_calls_made += 1
                 seen_urls = {e.source_url for e in self.evidence_repository.list_all()}
-                ingest(community_topic, [c for c in found if c.source_url not in seen_urls], [question, location.name])
+                ingest(
+                    community_topic,
+                    [c for c in found if c.source_url not in seen_urls],
+                    [question, location.name],
+                    forums_first=True,
+                )
             except ToolExecutionError as exc:
                 limitations.append(f"Community search failed ({exc}); forum and social-media sources are not included.")
+
+        if self.reddit_archive_tool is not None and plan.topics and tool_calls_made < self.config.max_tool_calls:
+            reddit_topic = next((t for t in plan.topics if t.topic_id == "community_sentiment"), plan.topics[0])
+            log(
+                TraceStage.TOOL_SELECTION,
+                f"Selected Reddit archive search for '{reddit_topic.topic_id}' (posts whose title names the place, in its "
+                "own, its country's and the big travel subreddits; no search credit)",
+            )
+            try:
+                found = self.reddit_archive_tool.search(location, reddit_topic)
+                tool_calls_made += 1
+                seen_urls = {e.source_url for e in self.evidence_repository.list_all()}
+                ingest(
+                    reddit_topic,
+                    [c for c in found if c.source_url not in seen_urls],
+                    [question, location.name],
+                    fetch_full_text=False,  # the archive returns the post's own text
+                    forums_first=True,
+                )
+            except ToolExecutionError as exc:
+                limitations.append(f"Reddit archive search failed ({exc}); some Reddit posts may be missing.")
 
         # The country's own forums, in their own language. An English query never reaches them, so this is a
         # separate search by the place's native name, run only where there is one and the country has such forums.

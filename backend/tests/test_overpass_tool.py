@@ -164,6 +164,23 @@ def test_the_query_does_not_cap_the_number_of_elements():
     assert "out center;" in _query(_LAT, _LON, 600) and "out center 400" not in _query(_LAT, _LON, 600)
 
 
+def test_the_default_search_radius_is_one_kilometre():
+    from urllib.parse import parse_qs
+
+    from app.tools.overpass_tool import NEARBY_RADIUS_M
+
+    queries = []
+
+    def handler(request):
+        queries.append(parse_qs(request.content.decode())["data"][0])
+        return httpx.Response(200, json={"elements": []})
+
+    result = OverpassNearbyTool(transport=httpx.MockTransport(handler)).nearby(51.5, -0.1)
+
+    assert NEARBY_RADIUS_M == 1000 and result.radius_m == 1000
+    assert "around:1000,51.5,-0.1" in queries[0]
+
+
 def test_when_every_server_fails_an_earlier_answer_for_the_same_spot_is_used(monkeypatch):
     monkeypatch.setattr("app.tools.overpass_tool.time.sleep", lambda s: None)
     answer = {"elements": [{"type": "node", "lat": _LAT, "lon": _LON, "tags": {"amenity": "bar", "name": "Old Bar"}}]}
