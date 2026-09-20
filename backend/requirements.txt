@@ -10,7 +10,7 @@ tavily-python>=0.5,<1.0
 
 # Loads backend/.env for local development so API keys don't need to be
 # exported by hand every session. .env itself is gitignored.
-python-dotenv>=1.0,<2.0
+python-dotenv>=1.2.3,<2.0
 
 # Milestone 4 (semantic retrieval). Local model, no API key — but a real,
 # if one-time and cached, model download (~90MB) plus the torch dependency.
