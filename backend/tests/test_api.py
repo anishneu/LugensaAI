@@ -216,3 +216,58 @@ def test_the_frontend_may_call_the_api_from_either_dev_port():
 
     stranger = client.get("/api/capabilities", headers={"Origin": "http://evil.example"})
     assert "access-control-allow-origin" not in stranger.headers
+
+
+# ---- translating "Around this pin"
+
+
+def test_translate_endpoint_is_unavailable_when_translation_is_off():
+    response = client.post("/api/places/translate", json={"latitude": 35.0, "longitude": 135.8, "texts": ["円通殿"]})
+
+    assert response.status_code == 200
+    assert response.json() == {"available": False, "language": None, "translations": []}
+
+
+def test_translate_endpoint_translates_by_the_language_of_the_place(monkeypatch):
+    from app.api import routes
+    from app.tools.locale import LocalContext
+    from app.tools.translation import Translator
+
+    class Fake(Translator):
+        def detect(self, text):
+            return None
+
+        def translate_to_english(self, text, source_language):
+            return {"円通殿": "Entsu Hall"}.get(text)
+
+    class FakeLocale:
+        def resolve(self, location):
+            return LocalContext(country_code="jp", language="ja")
+
+    monkeypatch.setattr(routes, "translation_enabled", lambda: True)
+    monkeypatch.setattr(routes, "LocaleResolver", FakeLocale)
+    monkeypatch.setattr(routes, "default_translator", lambda: Fake())
+
+    response = client.post("/api/places/translate", json={"latitude": 35.0, "longitude": 135.8, "texts": ["円通殿", "Starbucks"]})
+
+    assert response.json() == {"available": True, "language": "ja", "translations": ["Entsu Hall", None]}
+
+
+def test_translate_endpoint_says_unavailable_where_the_place_has_no_local_language(monkeypatch):
+    from app.api import routes
+    from app.tools.locale import LocalContext
+
+    class FakeLocale:
+        def resolve(self, location):
+            return LocalContext(country_code="us", language=None)
+
+    monkeypatch.setattr(routes, "translation_enabled", lambda: True)
+    monkeypatch.setattr(routes, "LocaleResolver", FakeLocale)
+
+    response = client.post("/api/places/translate", json={"latitude": 42.0, "longitude": -71.0, "texts": ["x"]})
+
+    assert response.json()["available"] is False
+
+
+def test_popular_places_is_503_without_google():
+    assert client.get("/api/places/popular", params={"latitude": 35.0, "longitude": 135.8}).status_code == 503

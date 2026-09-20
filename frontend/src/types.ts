@@ -111,6 +111,8 @@ export interface Capabilities {
   /** True when the local embedding model hasn't been loaded yet this process,
    * so the next run pays a one-time warm-up the following ones won't. */
   first_run_warmup: boolean;
+  /** Whether Google Maps ratings and reviews are connected on the server. */
+  place_profile: boolean;
 }
 
 /** A real point-of-interest candidate from a live search (e.g. one specific
@@ -126,6 +128,8 @@ export interface PlaceCandidate {
   longitude: number;
   is_business: boolean;
   is_address: boolean;
+  /** Google's id for the place, when the candidate came from Google Maps. */
+  google_place_id?: string | null;
 }
 
 /** The location currently being researched in the workspace. May start out
@@ -142,6 +146,9 @@ export interface ActiveLocation {
   isBusiness: boolean;
   /** A street address or building rather than a named place; the backend looks for a business at it. */
   isAddress: boolean;
+  /** Google's id for the pin, when it was picked from a Google result: the link to Google Maps then opens the exact listing.
+   * Cleared whenever the pin moves to another place. */
+  googlePlaceId?: string | null;
 }
 
 /** One asked-and-answered question, kept in the session's chat history. */
@@ -211,4 +218,24 @@ export interface PlaceProfile {
   maps_url: string | null;
   reviews: PlaceReview[];
   source: string;
+}
+
+/** A well-known place near a pin with Google Maps' own rating (Google's data, shown with attribution). */
+export interface PopularPlace {
+  name: string;
+  category: string;
+  rating: number;
+  review_count: number | null;
+  distance_m: number;
+  maps_url: string | null;
+  latitude: number;
+  longitude: number;
+}
+
+/** English for place names and addresses in another script. `translations` lines up with what was sent; null means
+ * "already readable, or could not be translated". */
+export interface TranslatedTexts {
+  available: boolean;
+  language: string | null;
+  translations: (string | null)[];
 }

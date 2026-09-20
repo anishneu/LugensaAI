@@ -150,7 +150,10 @@ station approach adopts a place the *question names* (`_adopt_venue_named_in_que
 most popular places within 300 m (popularity, because by distance the arena beside Manchester Victoria was not among
 the nearest 20), and the first whose whole distinguishing name is in the question becomes the subject. It is asked
 only when the question contains a capitalized word that does not merely start a sentence, streets and areas are never
-adopted, and the response says what happened in its limitations. The business's Google listing then enters as
+adopted, and the response says what happened in its limitations. A pin that is a named place but not a business (a
+temple, a museum) gets a quiet exact-name Google lookup as evidence without being switched to business mode, so a
+general tourist question about it carries its Google rating and reviews too; an address adopts the most popular place
+within 60 m, landmarks included; an area matches nothing. The business's Google listing then enters as
 evidence, and its rating opens the key findings unless a finding already states it.
 
 ## Places outside the English-speaking world

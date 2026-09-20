@@ -210,3 +210,36 @@ def translate_evidence(
         if new_title:
             item.source_title = new_title
         translated += 1
+
+
+def has_non_latin_letters(text: str) -> bool:
+    """Whether `text` contains a letter outside the Latin script (Japanese, Chinese, Korean, Cyrillic, Arabic, Thai...).
+
+    Short names cannot be language-detected (langdetect needs about 20 characters), but their script gives them away."""
+    return any(ord(ch) > 0x24F and ch.isalpha() for ch in text)
+
+
+def translate_short_texts(texts: list[str], language: str | None, translator: Translator) -> list[str | None]:
+    """English for each of `texts` (place names, addresses), or None where there is nothing to translate or it cannot be done.
+
+    Any script: a German name like "Bundespolizeiinspektion Erfurt" is as opaque to a visitor as a Japanese one. What
+    comes back is a gloss (a machine translation of a name), which the UI shows with the original beneath and labels as
+    such, and a "translation" identical to the input (a brand, a proper name) is dropped as no translation. `language` is
+    what the place's own people write, known from where the pin is, since a three-character name cannot be detected;
+    text long enough to detect that is confidently English is left alone."""
+    if not language or language == "en":
+        return [None] * len(texts)
+    results: list[str | None] = []
+    for text in texts:
+        if not any(ch.isalpha() for ch in text):
+            results.append(None)  # a house number, a bare "24"
+            continue
+        if text.isupper() and " " not in text.strip():
+            results.append(None)  # a brand or an acronym ("REWE"): the translator turned it into "REWEB"
+            continue
+        if not has_non_latin_letters(text) and translator.detect(text) == "en":
+            results.append(None)
+            continue
+        translated = translator.translate_to_english(text[:_MAX_TRANSLATE_CHARS], language)
+        results.append(translated if translated and translated.strip().casefold() != text.strip().casefold() else None)
+    return results

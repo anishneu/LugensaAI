@@ -59,6 +59,10 @@ _MAX_SEARCH_WORKERS = 4
 
 
 
+# How close a listed place must be to an address pin to be taken as what stands there.
+_ADDRESS_VENUE_RADIUS_M = 60.0
+
+
 def _names_something(question: str) -> bool:
     """Whether a question looks like it names a place or business: a capitalized word that does not merely
     start a sentence (and is not "I")."""
@@ -144,9 +148,15 @@ class LocationResearchAgent:
         self, location: Location, plan, limitations: list[str], log
     ) -> tuple[list[Evidence], PlaceProfile | None]:
         """Google Maps rating, hours and reviews for a specific business, as
-        evidence. Every failure mode is recorded as a limitation, never hidden."""
-        if not location.is_business or location.latitude is None or location.longitude is None:
+        evidence. Every failure mode is recorded as a limitation, never hidden.
+
+        A pin that is not a business (a temple or a museum picked from search, which Google lists as an attraction)
+        is looked up too, quietly and only on an exact name match, so a tourist question about it gets Google's
+        rating and reviews as well. An area never matches, and nothing is said about it when nothing does."""
+        if location.latitude is None or location.longitude is None:
             return [], None
+        if not location.is_business:
+            return self._lookup_landmark_profile(location, plan, log)
         if self.place_profile_tool is None:
             limitations.append(
                 "Google Maps ratings and reviews are not connected (set GOOGLE_PLACES_API_KEY), so review "
@@ -178,6 +188,31 @@ class LocationResearchAgent:
         )
         return evidence, profile
 
+    def _lookup_landmark_profile(self, location: Location, plan, log) -> tuple[list[Evidence], PlaceProfile | None]:
+        """Google's listing for a pin that is a named place but not a business, on an exact name match only."""
+        if self.place_profile_tool is None or location.is_address:
+            return [], None
+        topic_id = pick_topic([t.topic_id for t in plan.topics])
+        if topic_id is None:
+            return [], None
+        try:
+            profile = self.place_profile_tool.lookup(
+                location.name, location.latitude, location.longitude, location.city or "", exact=True
+            )
+        except ToolExecutionError:
+            return [], None
+        if profile is None:
+            return [], None
+        evidence = profile_to_evidence(
+            profile, topic_id, f"{location.city}, {location.region}", datetime.now(timezone.utc)
+        )
+        log(
+            TraceStage.TOOL_SELECTION,
+            f"Added Google Maps listing for '{profile.name}' ({len(profile.reviews)} review(s) of "
+            f"{profile.review_count or 'unknown'} total) as evidence for '{topic_id}'",
+        )
+        return evidence, profile
+
     def _adopt_business_at_address(self, location: Location, limitations: list[str], log) -> Location:
         """A street address usually means the business standing at it.
 
@@ -195,7 +230,17 @@ class LocationResearchAgent:
         ):
             return location
         try:
-            venues = self.place_profile_tool.venues_at(location.latitude, location.longitude)
+            # Landmarks count as well as shops: the address of Ginkaku-ji is a temple, which Google lists as a tourist
+            # attraction, not a business, and it has the ratings and reviews a tourist question is after. Most popular
+            # first: by distance the nearest "places" at that address were a hand basin and the abbot's quarters, which
+            # are parts of the temple, and the temple itself (18 m away) came after them.
+            venues = self.place_profile_tool.venues_at(
+                location.latitude,
+                location.longitude,
+                radius_m=_ADDRESS_VENUE_RADIUS_M,
+                rank="POPULARITY",
+                businesses_only=False,
+            )
         except ToolExecutionError as exc:
             limitations.append(f"Could not check whether a business stands at this address ({exc}).")
             return location

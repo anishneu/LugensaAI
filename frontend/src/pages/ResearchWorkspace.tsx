@@ -2,8 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useLocation as useRouterLocation } from "react-router-dom";
 import { ResearchApiError, runResearch, searchPlaces } from "../api";
 import { ChatSidebar } from "../components/ChatSidebar";
-import { NearbyCard } from "../components/NearbyCard";
-import { PlaceProfileCard } from "../components/PlaceProfileCard";
+import { PlacePanel } from "../components/place/PlacePanel";
 import { LiveFeedSidebar } from "../components/LiveFeedSidebar";
 import { ResponsePanel } from "../components/ResponsePanel";
 import { SearchHero } from "../components/SearchHero";
@@ -19,9 +18,8 @@ function normalizeKey(rawQuery: string): string {
 }
 
 export function ResearchWorkspace() {
-  // The landing page hands over what was chosen there through router state: an exact place picked from its search
-  // box (opened straight away), or typed text (looked up once, like Enter in the search box here), and possibly a
-  // question that is put in the question box but never run for you.
+  // The landing page hands over a question chosen there through router state; it is put in the question box but never
+  // run for you. (`location` and `submitQuery` are still read, for links that carry a place.)
   const routerLocation = useRouterLocation();
   const handoff = (routerLocation.state as { location?: ActiveLocation; submitQuery?: string; question?: string | null } | null) ?? {};
 
@@ -38,17 +36,24 @@ export function ResearchWorkspace() {
     handleSubmitRawQuery(handoff.submitQuery);
   }, []);
 
+  // Saved questions are loaded when a place opens, and written back only once they have been loaded for that place.
+  // Writing on every render wrote the empty starting list over the saved one whenever effects ran twice (React's dev
+  // mode does), which lost every saved question on a reload.
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
   useEffect(() => {
     if (!location) return;
-    const loaded = loadSessions(normalizeKey(location.rawQuery));
+    const key = normalizeKey(location.rawQuery);
+    const loaded = loadSessions(key);
     setSessions(loaded);
     setActiveSessionId(loaded.length > 0 ? loaded[loaded.length - 1].id : null);
+    setLoadedFor(key);
   }, [location?.rawQuery]);
 
   useEffect(() => {
     if (!location) return;
-    saveSessions(normalizeKey(location.rawQuery), sessions);
-  }, [location?.rawQuery, sessions]);
+    const key = normalizeKey(location.rawQuery);
+    if (loadedFor === key) saveSessions(key, sessions);
+  }, [location?.rawQuery, sessions, loadedFor]);
 
   function selectLocation(next: ActiveLocation) {
     setLocation(next);
@@ -85,6 +90,7 @@ export function ResearchWorkspace() {
               longitude: top.longitude,
               isBusiness: top.is_business,
               isAddress: top.is_address,
+              googlePlaceId: top.google_place_id ?? null,
             }
           : prev,
       );
@@ -139,6 +145,7 @@ export function ResearchWorkspace() {
                 country: response.location.country,
                 isBusiness: response.location.is_business,
                 isAddress: false,
+                googlePlaceId: null, // the pin moved to the place the answer resolved, so the picked result's id no longer applies
                 latitude: response.location.latitude,
                 longitude: response.location.longitude,
               }
@@ -155,7 +162,13 @@ export function ResearchWorkspace() {
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
 
   if (!location) {
-    return <SearchHero query={query} onQueryChange={setQuery} onSelect={selectLocation} onSubmit={handleSubmitRawQuery} />;
+    return <SearchHero
+        query={query}
+        onQueryChange={setQuery}
+        onSelect={selectLocation}
+        onSubmit={handleSubmitRawQuery}
+        pendingQuestion={handoff.question}
+      />;
   }
 
   return (
@@ -179,8 +192,7 @@ export function ResearchWorkspace() {
 
             {/* Centre: the answer. */}
             <main className="min-h-0 min-w-0 pb-8 lg:overflow-y-auto">
-              <PlaceProfileCard location={location} />
-              <NearbyCard location={location} />
+              <PlacePanel location={location} />
               <ResponsePanel session={activeSession} />
             </main>
 

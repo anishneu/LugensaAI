@@ -22,11 +22,12 @@ permissions:
 jobs:
   dependency-review:
     name: Review new dependencies (PRs)
-    if: github.event_name == 'pull_request'
+    # Dependency review needs the dependency graph, which on a private repository is Advanced Security (paid).
+    # Same rule as CodeQL: run when the repo is public, or when the CODE_SCANNING variable is "true".
+    if: ${{ github.event_name == 'pull_request' && (github.event.repository.private == false || vars.CODE_SCANNING == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
     steps:
       - uses: actions/checkout@v4
 
@@ -34,7 +35,8 @@ jobs:
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: high
-          comment-summary-in-pr: on-failure
+          # A comment needs a write token, which Dependabot's PRs never get; the result is in the job summary.
+          comment-summary-in-pr: never
 
   python-audit:
     name: pip-audit (backend)

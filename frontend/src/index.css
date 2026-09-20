@@ -91,3 +91,80 @@ body {
     animation-duration: 2.4s;
   }
 }
+
+/* A scrollable list that shows its bar. The app hides scrollbars everywhere (above), which is right for panels but
+   leaves a list you are meant to scroll with no sign that there is more. The class beats the `*` rules by specificity. */
+.scroll-visible {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 55%, transparent) transparent;
+  -ms-overflow-style: auto;
+}
+
+.scroll-visible::-webkit-scrollbar {
+  display: block;
+  width: 8px;
+  height: 8px;
+}
+
+.scroll-visible::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-muted) 55%, transparent);
+  border-radius: 999px;
+}
+
+.scroll-visible::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Browser-window tabs: rounded tops, and the selected one flows into the panel below it through two concave feet, as in
+   a real browser. The tabs are `.browser-tab`, inside a `.browser-tabs` container that supplies the colors. */
+.browser-tabs {
+  --tab-radius: 10px;
+  --tab-strip: color-mix(in srgb, black 7%, var(--bg));
+  --tab-idle: color-mix(in srgb, black 7%, var(--tab-strip));
+  --tab-hover: color-mix(in srgb, black 3%, var(--tab-strip));
+  --tab-active: var(--bg-alt);
+}
+
+@media (prefers-color-scheme: dark) {
+  .browser-tabs {
+    --tab-strip: color-mix(in srgb, black 30%, var(--bg));
+    --tab-idle: color-mix(in srgb, white 5%, var(--tab-strip));
+    --tab-hover: color-mix(in srgb, white 9%, var(--tab-strip));
+  }
+}
+
+.browser-tab {
+  position: relative;
+  border-radius: var(--tab-radius) var(--tab-radius) 0 0;
+  background: var(--tab-idle);
+}
+
+.browser-tab:hover {
+  background: var(--tab-hover);
+}
+
+.browser-tab[data-selected] {
+  z-index: 1;
+  margin-bottom: -1px; /* covers the panel's top edge, so the tab and the panel read as one piece */
+  background: var(--tab-active);
+}
+
+.browser-tab[data-selected]::before,
+.browser-tab[data-selected]::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  width: var(--tab-radius);
+  height: var(--tab-radius);
+  pointer-events: none;
+}
+
+.browser-tab[data-selected]::before {
+  left: calc(var(--tab-radius) * -1);
+  background: radial-gradient(circle at 0 0, transparent var(--tab-radius), var(--tab-active) calc(var(--tab-radius) + 0.5px));
+}
+
+.browser-tab[data-selected]::after {
+  right: calc(var(--tab-radius) * -1);
+  background: radial-gradient(circle at 100% 0, transparent var(--tab-radius), var(--tab-active) calc(var(--tab-radius) + 0.5px));
+}

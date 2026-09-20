@@ -37,6 +37,7 @@ function placeToOption(place: PlaceCandidate): SearchOption {
       longitude: place.longitude,
       isBusiness: place.is_business,
       isAddress: place.is_address,
+      googlePlaceId: place.google_place_id ?? null,
     }),
   };
 }

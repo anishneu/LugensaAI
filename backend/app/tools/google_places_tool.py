@@ -45,7 +45,7 @@ from datetime import datetime
 import httpx
 
 from app.models.location import Location
-from app.models.place import PlaceCandidate
+from app.models.place import PlaceCandidate, PopularPlace
 from app.models.place_profile import PlaceProfile, PlaceReview
 from app.tools.base import LocationNotFoundError, LocationResolverTool, ToolConfigurationError, ToolExecutionError
 from app.tools.nominatim_tool import slugify
@@ -181,6 +181,8 @@ _SEARCH_FIELD_MASK = ",".join(
         "places.primaryTypeDisplayName",
     ]
 )
+# The popular-places list also needs the rating and its count, which the plain search mask leaves out.
+_POPULAR_FIELD_MASK = _SEARCH_FIELD_MASK + ",places.rating,places.userRatingCount,places.googleMapsUri"
 _NEARBY_URL = "https://places.googleapis.com/v1/places:searchNearby"
 _SEARCH_CACHE_TTL_SECONDS = 10 * 60
 _SEARCH_CACHE: dict[tuple[str, int], tuple[float, list[PlaceCandidate]]] = {}
@@ -208,6 +210,18 @@ _AREA_OR_WAY_TYPES = frozenset(
     {"route", "intersection", "locality", "political", "sublocality", "neighborhood", "postal_code", "postal_town", "country"}
     | {f"administrative_area_level_{n}" for n in range(1, 6)}
 )
+
+
+def _name_tokens(text: str) -> frozenset[str]:
+    return frozenset(t for t in re.split(r"[\W_]+", _fold(text)) if len(t) > 1)
+
+
+def same_place_name(a: str, b: str) -> bool:
+    """Whether two names are the same place's name: the same words, in any order, ignoring case, accents and
+    punctuation ("Ginkaku-ji" and "Ginkaku ji"). One extra word makes it a different place ("Shibuya" is not
+    "Shibuya Station")."""
+    tokens_a, tokens_b = _name_tokens(a), _name_tokens(b)
+    return bool(tokens_a) and tokens_a == tokens_b
 
 
 def is_address_only(types: set[str]) -> bool:
@@ -281,6 +295,7 @@ def _candidate(place: dict) -> PlaceCandidate | None:
         longitude=location["longitude"],
         is_business=is_venue(types),
         is_address=is_address_only(types),
+        google_place_id=place.get("id"),
     )
 
 
@@ -372,6 +387,48 @@ class GooglePlacesTool:
         candidates = [c for c in (_candidate(p) for p in nearby) if c is not None]
         return [c for c in candidates if c.is_business] if businesses_only else candidates
 
+    def popular_places(self, latitude: float, longitude: float, radius_m: float = 600.0, limit: int = 6) -> list[PopularPlace]:
+        """The best-known places around a pin with Google's own rating and review count, most popular first.
+
+        For a pin that is an area or a street corner rather than one place, this is what Google Maps itself
+        would show as "popular here". Only places Google has rated are listed; streets and areas never are."""
+        places = self._post(
+            _NEARBY_URL,
+            {
+                "maxResultCount": 20,
+                "rankPreference": "POPULARITY",
+                "languageCode": "en",
+                "locationRestriction": {
+                    "circle": {"center": {"latitude": latitude, "longitude": longitude}, "radius": radius_m}
+                },
+            },
+            _POPULAR_FIELD_MASK,
+        )
+        found: list[PopularPlace] = []
+        for place in places:
+            types = set(place.get("types") or [])
+            if types & (_AREA_OR_WAY_TYPES | _ADDRESS_MARKERS) and not is_venue(types):
+                continue
+            candidate = _candidate(place)
+            if candidate is None or not isinstance(place.get("rating"), (int, float)):
+                continue
+            count = place.get("userRatingCount")
+            found.append(
+                PopularPlace(
+                    name=candidate.name,
+                    category=candidate.category,
+                    rating=float(place["rating"]),
+                    review_count=count if isinstance(count, int) else None,
+                    distance_m=round(distance_m(latitude, longitude, candidate.latitude, candidate.longitude)),
+                    maps_url=place.get("googleMapsUri"),
+                    latitude=candidate.latitude,
+                    longitude=candidate.longitude,
+                )
+            )
+            if len(found) >= limit:
+                break
+        return found
+
     def venue_named_in(
         self, text: str, latitude: float, longitude: float, radius_m: float = _NAMED_VENUE_RADIUS_M
     ) -> PlaceCandidate | None:
@@ -451,19 +508,28 @@ class GooglePlacesTool:
                 best = (distance, label)
         return best[1] if best else None
 
-    def lookup(self, name: str, latitude: float, longitude: float, area: str = "") -> PlaceProfile | None:
-        cache_key = (name.lower(), round(latitude, 4), round(longitude, 4))
+    def lookup(
+        self, name: str, latitude: float, longitude: float, area: str = "", exact: bool = False
+    ) -> PlaceProfile | None:
+        """The Google listing for a place, or None.
+
+        `exact` is for a pin that is not known to be a business (a temple picked from search, or an area): the listing's
+        name must then be the same as the pin's, word for word. The looser test used for a business ("every word of the
+        name appears") would give the area "Shibuya" the ratings of Shibuya Station."""
+        cache_key = (name.lower(), round(latitude, 4), round(longitude, 4), exact)
         with _CACHE_LOCK:
             cached = _CACHE.get(cache_key)
             if cached and time.monotonic() - cached[0] < _CACHE_TTL_SECONDS:
                 return cached[1]
 
-        profile = self._lookup_uncached(name, latitude, longitude, area)
+        profile = self._lookup_uncached(name, latitude, longitude, area, exact)
         with _CACHE_LOCK:
             _CACHE[cache_key] = (time.monotonic(), profile)
         return profile
 
-    def _lookup_uncached(self, name: str, latitude: float, longitude: float, area: str) -> PlaceProfile | None:
+    def _lookup_uncached(
+        self, name: str, latitude: float, longitude: float, area: str, exact: bool = False
+    ) -> PlaceProfile | None:
         body = {
             "textQuery": f"{name} {area}".strip(),
             "maxResultCount": 5,
@@ -484,7 +550,8 @@ class GooglePlacesTool:
                 continue
             distance = distance_m(latitude, longitude, location["latitude"], location["longitude"])
             display_name = _text_of(place.get("displayName")) or ""
-            if distance <= _MAX_MATCH_DISTANCE_M and _mentions_business(display_name, name):
+            named = same_place_name(display_name, name) if exact else _mentions_business(display_name, name)
+            if distance <= _MAX_MATCH_DISTANCE_M and named:
                 matches.append((distance, place))
         if not matches:
             return None

@@ -36,7 +36,9 @@ _BOILERPLATE_RE = re.compile(
     r"company logo|skip to (?:main )?content|newsletter|sign up|subscribe|cookie|privacy policy|all rights reserved|"
     r"click here|read more|read the full|advertisement|follow (?:us|patch|.{0,30}) on|email (?:it )?to|"
     r"log ?in|share (?:on|this)|get more .{0,40}delivered|more from\b|related (?:articles|stories)|"
-    r"visit us|what'?s on\b|view videos|rumble|now in \d+ communities",
+    r"visit us|what'?s on\b|view videos|rumble|now in \d+ communities|"
+    r"opt out|personal information|do not sell|your privacy|terms of (?:use|service)|accept (?:all )?cookies|"
+    r"by continuing|by using this (?:site|website)",
     re.IGNORECASE,
 )
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?。！？])\s+|(?<=[。！？])")

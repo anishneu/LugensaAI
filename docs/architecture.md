@@ -277,4 +277,70 @@ All eight milestones from the original project plan are implemented, plus later 
   generated caches (`__pycache__`, `.pytest_cache`, `.ruff_cache`, `frontend/dist`, Vite's `.vite` and `.tmp`, and the
   local `backend/data/evidence.db` of past runs), all regenerated on demand and gitignored, and confirmed that no commit on
   any branch carries a `Co-Authored-By` trailer.
+- **Milestone 21:** feedback on the rebuilt interface. (1) *Google Maps content was missing for general questions*:
+  "is it a good place to visit as a tourist?" about Ginkaku-ji returned no Google rating or reviews, while naming the
+  place did. The pin was an address, and then a landmark, neither a business; see `docs/research-workflow.md` for how
+  each kind of pin now gets its Google data, and `backend/README.md` for the measurements behind popularity ranking and
+  exact-name matching. `GET /api/places/popular` lists rated places around a pin that is not one place.
+  (2) *Cluttered*: Google Maps and "Around this pin" were two stacked cards; they are one tabbed panel, the Google tab
+  shows the rating, a clamped summary and two reviews (the rest on request), and the nearby card is a compact grid of
+  categories instead of a scrolling carousel. (3) *Names in another script*: `POST /api/places/translate` and a
+  "Translate to English" button. (4) *Community voices*: Google Maps supplied most of them and came first; they are now
+  filterable by site and mixed across sites by default. (5) *Landing page lag*: blur filters over a moving page were the
+  cause (a sticky `backdrop-blur` header re-blurred every frame over a WebGL map, and a 54 rem element blurred by 140 px);
+  they are now gradients, the backdrop map renders at pixel ratio 1 and is taken out of compositing while off screen, and
+  sections below the fold use `content-visibility`. (6) *Workflows*: see the next milestone.
+- **Milestone 22:** the CodeQL failures, read from the run logs. The analysis scanned every file and then the step
+  after it failed with "Resource not accessible by integration ... get-a-workflow-run". My first explanation (code scanning
+  is a paid feature on a private repo) was a guess made without the logs, and the logs disagreed: the cause on a private
+  repo is a missing `actions: read` permission, now granted, and on Dependabot's pull requests a read-only token that can
+  never upload, so the job skips them. The eight open Dependabot PRs all showed 4 of 9 checks failing, the same four each time, which points at
+  infrastructure and not at their changes: the two CodeQL jobs, and most likely the secret scan (it lacked `pull-requests:
+  read`) and the dependency review (it tried to comment on a PR with a token that cannot, and on a private repo it needs
+  the dependency graph). Only the CodeQL cause is confirmed from a log; the other two are inferred. Dependabot went from weekly to monthly, two open PRs at most, no
+  automatic major bumps (two of the eight were majors: TypeScript 7 and sentence-transformers 6, plus `@types/node` 26 against
+  Node 24). Actions were bumped where the annotations named it (`codeql-action` v4, `checkout` v5); the rest is left to
+  Dependabot's own actions PR.
+- **Milestone 23:** the place panel was a second set of tabs (Google Maps, Around this pin) sitting above the answer's tabs
+  (Overview, Community, Claims, ...) and beside the live feed's (News, Community): three tab strips on one screen. It became two
+  folding boxes drawn as small browser windows, with a chip in each header. The Google box starts with the well-known places
+  around an area; when the answer adopts or names a specific place, that content is replaced by the place's own ratings and
+  reviews, and the panel says so, so the replacement is not missed. The first load of a place's reviews is not flagged, only a
+  replacement. (Superseded in its look by Milestone 24; the replacement indicator carried over.)
+- **Milestone 24:** feedback on the boxes was that the answer's tabs should be *tabs* and the place panel should look like the
+  browser tabs in a reference image. So: the answer's Overview / Community / Claims / Evidence / Details are Tailwind-style
+  underlined tabs (with count badges), and the place panel is two browser-style tabs (rounded tops; the selected one flows
+  into the panel through concave feet, in plain CSS in `index.css`), with a chevron to fold it. "Updated" is now a pulsing dot
+  on the Google Maps tab (visible at any width) plus the line inside; the dot clears when the tab is clicked, the line when
+  dismissed. (Milestone 23's version faded after twelve seconds and was missed; it no longer expires.) The Google tab shows
+  every review Google returns in a list with a visible scrollbar, replacing the "show more" toggles, and the opening hours
+  moved to a small window opened from "Open now" beside the review count. **Map links in Around this pin were wrong in kind,
+  not in coordinates:** the coordinates come straight from OpenStreetMap and are right, but a Google Maps link made of
+  coordinates alone opens a bare pin titled with the numbers. Links are now a search for the place's name (and street)
+  centered on its coordinates, which opens the real listing (checked on a restaurant, a chain shop with several branches, and a
+  Japanese tea house). Bus stops, tram stops and subway entrances keep the exact-coordinate pin: a name search for a bus stop
+  matched an art gallery and a different stop. Landing page: the search box and example places were removed (the app opens on
+  one), the navbar spans the full width so the app button sits at the far right, the map credit control was dropped from the
+  landing backdrop (the footer credits map sources in general terms; the in-app maps keep theirs), the footer carries the
+  copyright line, and the preview under the hero was redrawn to match the current workspace (still placeholder bars, no figures).
+- **Milestone 25:** two findings from a hotel in Erfurt. (1) The map panel's "Open in Google Maps" link was a bare coordinate,
+  which Google opens as a pin titled "50°58'21.9"N 11°01'44.2"E" with no listing; beside the hotel's own listing it looked like
+  a different spot. It was not: the coordinates came from Google's own search result and the two markers coincided (checked by
+  measuring both against neighbouring landmarks). The link was wrong in kind, as the "Around this pin" links had been. A pin
+  picked from a Google result now keeps Google's place id (`PlaceCandidate.google_place_id`) and the link opens that exact
+  listing; other pins use a search for the name or address centered on the coordinates. A name search alone is not enough for
+  hotels: it opens Google's hotel results, with ads, which is why the id is carried. The id is cleared when the answer moves
+  the pin to another place. (2) The translate button was offered only for non-Latin scripts, on the reasoning that a German
+  name is a proper noun; but "Bundespolizeiinspektion Erfurt" and "Neue Marien-Apotheke im Facharztzentrum Angerbrunnen" are
+  as opaque to a visitor as Japanese. Names in any script are now translated where the country isn't English-speaking (60
+  Erfurt names took about 14 s on this laptop, half of them changed), with the original beneath and the machine-translation
+  label; Latin-script street addresses are still left alone, and single capitalised words are skipped after the translator
+  turned the supermarket "REWE" into "REWEB".
+- **Milestone 26:** the landing page's live map behind the hero could come up blank on a refresh or a first visit (a WebGL map
+  draws grey until its tiles arrive, which took ten seconds or more in testing), and it was decoration. It is now a still image,
+  rendered once from OpenFreeMap's style of OpenStreetMap data (a one-off capture; the first attempt came out blank because it
+  read the canvas before the tiles had loaded, the same failure in miniature), 254 KB, so the page has nothing moving or
+  re-drawing. The workspace preview under the hero was cut to the top of the layout with a fade, since showing all of it made it
+  taller than the screen. The search page keeps a live map and now drifts up and down slowly on its own (26 s a sweep, eased
+  at each turn, off for reduced motion) and fades in when its first frame is drawn, so the grey wait is not seen.
 

@@ -267,6 +267,8 @@ def test_search_returns_a_business_with_its_city_region_and_country():
     assert (candidate.city, candidate.region, candidate.country) == ("Kurume", "Fukuoka", "Japan")
     assert candidate.is_business is True
     assert candidate.category == "Seafood restaurant"
+    # Kept so the UI's "open in Google Maps" opens this exact listing, not a search that can land on a results list.
+    assert candidate.google_place_id == "ChIJsuiran"
 
 
 def test_a_plus_code_lists_the_business_standing_on_it_first():
@@ -479,6 +481,71 @@ def test_a_place_the_question_does_not_name_is_not_picked():
     tool = GooglePlacesTool(api_key="k", transport=httpx.MockTransport(handler))
 
     assert tool.venue_named_in("is it a good place to visit?", 53.4873, -2.2430) is None
+
+
+def _rated(name: str, rating, count, types, **extra) -> dict:
+    return {**_ARENA, "id": name, "displayName": {"text": name}, "types": types, "rating": rating, "userRatingCount": count,
+            "googleMapsUri": f"https://maps.google.com/?cid={name}", **extra}
+
+
+def test_popular_places_lists_rated_places_by_popularity_and_skips_streets_and_unrated_ones():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        seen["mask"] = request.headers["X-Goog-FieldMask"]
+        return httpx.Response(
+            200,
+            json={
+                "places": [
+                    _rated("Silver Pavilion", 4.6, 21_004, ["tourist_attraction", "point_of_interest"]),
+                    _rated("Philosopher's Path", None, None, ["park"]),
+                    _rated("Kinkakuji Street", 4.0, 12, ["route"]),
+                    _rated("Cafe Kiln", 4.3, 866, ["cafe", "food"]),
+                ]
+            },
+        )
+
+    tool = GooglePlacesTool(api_key="k", transport=httpx.MockTransport(handler))
+
+    places = tool.popular_places(53.4873, -2.2430, limit=5)
+
+    assert [p.name for p in places] == ["Silver Pavilion", "Cafe Kiln"]
+    assert places[0].rating == 4.6 and places[0].review_count == 21_004 and places[0].maps_url
+    assert seen["body"]["rankPreference"] == "POPULARITY"
+    assert "places.rating" in seen["mask"] and "places.userRatingCount" in seen["mask"]
+
+
+def test_popular_places_respects_its_limit():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"places": [_rated(f"P{i}", 4.0, 10, ["cafe"]) for i in range(10)]})
+
+    tool = GooglePlacesTool(api_key="k", transport=httpx.MockTransport(handler))
+
+    assert len(tool.popular_places(1.0, 1.0, limit=3)) == 3
+
+
+def test_same_place_name_ignores_case_accents_and_punctuation_but_not_an_extra_word():
+    from app.tools.google_places_tool import same_place_name
+
+    assert same_place_name("Ginkaku-ji", "ginkaku ji") and same_place_name("Café Pustekuchen", "Cafe Pustekuchen")
+    assert same_place_name("Taipei 101", "101 Taipei")
+    assert not same_place_name("Shibuya Station", "Shibuya") and not same_place_name("", "")
+
+
+def _listing(name: str) -> dict:
+    return {**_ARENA, "id": name, "displayName": {"text": name}, "location": {"latitude": 35.0270, "longitude": 135.7982}}
+
+
+def test_an_exact_lookup_gives_an_area_no_listing_but_a_landmark_its_own():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"places": [_listing("Shibuya Station"), _listing("Ginkaku-ji")]})
+
+    tool = GooglePlacesTool(api_key="k", transport=httpx.MockTransport(handler))
+
+    assert tool.lookup("Shibuya", 35.0270, 135.7982, "Tokyo", exact=True) is None
+    assert tool.lookup("Shibuya", 35.0270, 135.7982, "Tokyo").name == "Shibuya Station", "the looser test is for a known business"
+    assert tool.lookup("Ginkaku-ji", 35.0270, 135.7982, "Kyoto", exact=True).name == "Ginkaku-ji"
 
 
 def test_the_price_is_googles_real_range_in_the_local_currency_when_it_has_one():

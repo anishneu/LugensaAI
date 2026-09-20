@@ -4,8 +4,10 @@ import type {
   NearbyPlaces,
   PlaceProfile,
   PlaceCandidate,
+  PopularPlace,
   ResearchRequest,
   ResearchResponse,
+  TranslatedTexts,
 } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -90,6 +92,31 @@ export async function fetchPlaceProfile(
   if (city) query.set("city", city);
   const response = await fetch(`${API_BASE_URL}/api/places/profile?${query.toString()}`, { signal });
   if (!response.ok) throw new ResearchApiError(`Profile lookup failed (${response.status})`, response.status);
+  return response.json();
+}
+
+/** Well-known places around a pin with Google's rating and review count. Rejects with a ResearchApiError: 503 means
+ * Google isn't connected on the server. */
+export async function fetchPopularPlaces(latitude: number, longitude: number, signal?: AbortSignal): Promise<PopularPlace[]> {
+  const response = await fetch(`${API_BASE_URL}/api/places/popular?latitude=${latitude}&longitude=${longitude}`, { signal });
+  if (!response.ok) throw new ResearchApiError(`Popular places lookup failed (${response.status})`, response.status);
+  return response.json();
+}
+
+/** Machine translation of place names and addresses to English, in the language of where the pin is. */
+export async function translateTexts(
+  latitude: number,
+  longitude: number,
+  texts: string[],
+  signal?: AbortSignal,
+): Promise<TranslatedTexts> {
+  const response = await fetch(`${API_BASE_URL}/api/places/translate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ latitude, longitude, texts }),
+    signal,
+  });
+  if (!response.ok) throw new ResearchApiError(`Translation failed (${response.status})`, response.status);
   return response.json();
 }
 
