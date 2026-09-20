@@ -1,9 +1,10 @@
 """Small JSON-loading helpers shared by the fixture-backed tools.
 
-All fixture content under `backend/fixtures/` is synthetic test data written
+All fixture content under `backend/tests/fixtures/` is synthetic test data written
 for local development and testing. It does not represent real, current
 information about any real place and must never be treated as such outside
-this project's local dev/test environment.
+this project's test suite. Nothing under `app/` imports this module: the running product never
+serves fixture evidence, claims or places.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.core.config import FIXTURES_ROOT
+FIXTURES_ROOT = Path(__file__).resolve().parent / "fixtures"
 
 
 def load_locations(fixtures_root: Path = FIXTURES_ROOT) -> list[dict]:

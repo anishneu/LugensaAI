@@ -1,11 +1,7 @@
 """Real place search + geocoding via OpenStreetMap Nominatim.
 
-Free, no API key — the missing piece that let location resolution mean only
-"one of two hardcoded demo neighborhoods." `FixtureLocationResolver` still
-handles those two instantly and deterministically; this resolves (and
-searches for) anything else Nominatim knows about — a specific Starbucks
-address, a specific building, any real point of interest — not just a
-neighborhood.
+Free, no API key. Resolves (and searches for) anything Nominatim knows about:
+a neighborhood, a specific address, a building, any mapped point of interest.
 
 Nominatim's usage policy (https://operations.osmfoundation.org/policies/nominatim/)
 requires a descriptive User-Agent and roughly 1 request/second, and asks
@@ -15,10 +11,8 @@ that; `_RateLimiter` enforces the request spacing in-process. A deployment
 with real traffic should move to a paid provider or a self-hosted instance.
 
 Resolving a real place is only half the story: without `TAVILY_API_KEY` set
-too, `FixtureWebSearchTool` has no fixture files for a place outside the two
-demo neighborhoods and will honestly return zero evidence for it. Geocoding
-answers "where is this," not "what does the web say about it" — see
-`backend/README.md`.
+too, nothing is searched and the response says so. Geocoding answers "where is
+this," not "what does the web say about it" — see `backend/README.md`.
 """
 
 from __future__ import annotations
@@ -33,6 +27,7 @@ from app.models.place import PlaceCandidate
 from app.tools.base import LocationNotFoundError, LocationResolverTool, ToolExecutionError
 
 _NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+_NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
 _USER_AGENT = "LugensaAI-LocationResearchAgent/0.1 (educational demo project; not for production traffic)"
 
 
@@ -85,6 +80,25 @@ class NominatimClient:
             response.raise_for_status()
         except httpx.HTTPError as exc:
             raise ToolExecutionError(f"Nominatim search failed for '{query}': {exc}") from exc
+        return response.json()
+
+
+    def reverse(self, latitude: float, longitude: float, language: str = "en", zoom: int = 14) -> dict:
+        """The address of a coordinate, with names in `language` where OpenStreetMap has them."""
+        self._rate_limiter.wait()
+        params = {
+            "lat": latitude,
+            "lon": longitude,
+            "format": "jsonv2",
+            "addressdetails": 1,
+            "zoom": zoom,
+            "accept-language": language,
+        }
+        try:
+            response = self._client.get(_NOMINATIM_REVERSE_URL, params=params)
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise ToolExecutionError(f"Nominatim reverse lookup failed for {latitude},{longitude}: {exc}") from exc
         return response.json()
 
 
@@ -197,11 +211,37 @@ def _address_field(address: dict, *keys: str) -> str | None:
 _BUSINESS_CLASSES = frozenset({"amenity", "shop", "tourism", "leisure", "office", "craft", "healthcare"})
 
 
+# Within those classes, these are places rather than a business people review: a park is
+# `leisure=park`, a viewpoint or monument is `tourism=...`, a mosque is `amenity=place_of_worship`.
+_NOT_A_BUSINESS_TYPES = frozenset(
+    {
+        "park", "garden", "nature_reserve", "playground", "pitch", "common", "attraction", "viewpoint",
+        "artwork", "information", "picnic_site", "camp_site", "place_of_worship", "grave_yard", "toilets",
+        "bench", "parking", "bicycle_parking", "fountain", "shelter", "drinking_water", "school",
+        "university", "college", "kindergarten", "townhall", "police", "fire_station",
+    }
+)
+
+
 def _is_business(result: dict) -> bool:
     # jsonv2 (what we request) calls it "category"; the older json format
     # called the same thing "class". Checking only one silently classified
     # nothing as a business.
-    return (result.get("category") or result.get("class")) in _BUSINESS_CLASSES
+    if (result.get("category") or result.get("class")) not in _BUSINESS_CLASSES:
+        return False
+    return result.get("type") not in _NOT_A_BUSINESS_TYPES
+
+
+# What Nominatim calls a single building or house: an address, not a named place.
+_ADDRESS_TYPES = frozenset({"house", "building", "apartments", "detached", "terrace", "semidetached_house", "yes"})
+
+
+def _is_address(result: dict) -> bool:
+    if _is_business(result):
+        return False
+    return result.get("category") == "building" or result.get("addresstype") in {"house", "building"} or (
+        result.get("type") in _ADDRESS_TYPES and result.get("category") in {"building", "place"}
+    )
 
 
 def _region_of(result: dict, city: str | None) -> str | None:
@@ -246,6 +286,7 @@ def _result_to_location(result: dict, raw_query: str) -> Location:
         longitude=float(result["lon"]),
         raw_query=raw_query,
         is_business=_is_business(result),
+        is_address=_is_address(result),
     )
 
 
@@ -263,6 +304,7 @@ def _result_to_candidate(result: dict) -> PlaceCandidate:
         latitude=float(result["lat"]),
         longitude=float(result["lon"]),
         is_business=_is_business(result),
+        is_address=_is_address(result),
     )
 
 

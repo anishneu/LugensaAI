@@ -28,30 +28,39 @@ Given a location and a question, the agent:
 
 1. Resolves the location.
 2. Plans which research topics are actually relevant to the question (not a fixed checklist).
-3. Retrieves evidence for each topic — from local fixtures by default, or live web search
-   and real community/forum commentary when configured.
+3. Retrieves evidence for each topic from live web search (including community and forum
+   commentary), Wikipedia and Wikivoyage, OpenStreetMap and, optionally, Google Places.
 4. Extracts and verifies claims against that evidence, including a cross-source contradiction
    check.
 5. Synthesizes a cited, hedged answer — never a confident-sounding guess with no source behind
    it — and reports what it couldn't confirm.
 
-Everything above runs **free and offline by default** (fixture-backed tools, rule-based
-planning, local SQLite storage). Two things are opt-in: live web search (`TAVILY_API_KEY`) and
-LLM-backed reasoning through a free local model, `OLLAMA_ENABLED` (needs [Ollama](https://ollama.com)
+Real research needs two things, both free: live web search (`TAVILY_API_KEY`, free tier) and
+LLM-backed reasoning through a local model, `OLLAMA_ENABLED` (needs [Ollama](https://ollama.com)
 installed; nothing leaves your machine, and there is no billed model API anywhere in the project)
-— see [Configuration](#configuration).
+— see [Configuration](#configuration). **Nothing is faked:** with neither set, the app runs but has
+nothing to search, returns no evidence or claims, and says so in every response. It never falls back
+to made-up sample data.
 
 ## Features
 
-- **Any real place, not just two demo neighborhoods** — search resolves any point of interest
-  (a specific business, address, building) via free OpenStreetMap Nominatim, not only the two
-  curated fixture neighborhoods. Picking one exact result from live search is passed straight
+- **Any real place** — search resolves any point of interest (a specific business, address,
+  building, or Google Maps plus code) via Google Places when configured, else free OpenStreetMap
+  Nominatim. Picking one exact result from live search is passed straight
   through to research without being re-resolved as text, so a same-named place nearby can't be
   silently substituted.
 - **Works for places in any language** — search results come back with English names, and
   foreign-language sources are machine-translated to English (free, local, via Argos Translate),
   labeled as translated, with the original one click away. Nearby food, transit, shops, health
   and police come from OpenStreetMap map data, not from an LLM.
+- **Searches in the local language too** — an English query only finds English pages. For a place in
+  a country whose web is written in another language, the agent also searches in that language using
+  the place's native-script name, and matches pages on it. For a restaurant in Kurume, Japan this
+  turned 3-4 sources (before, the English search had returned pages about a *different* hotel in
+  Kyoto) into 10, seven of them Japanese pages about the right restaurant. About 60 countries have a
+  curated language; English-speaking countries are searched in English; see
+  [Working in any country](backend/README.md#working-in-any-country) for exactly what is and isn't
+  covered, and `python -m evaluation.global_coverage` to check it yourself.
 - **Adaptive planning** — a narrow question ("what's the nightlife like?") researches one topic;
   a broad one researches several. Topic selection is keyword-based by default, LLM-based if
   `OLLAMA_ENABLED` is set.
@@ -135,14 +144,14 @@ Nothing below is required — the app is fully functional with none of it set. C
 | `DISABLE_TRANSLATION` | Turns off translation of foreign-language evidence to English | Translation is on when `argostranslate` and `langdetect` are installed (free, local; language packs download on first use) |
 | `DISABLE_SEMANTIC_RETRIEVAL` | Forces keyword-only retrieval | Set to `1` to skip loading the local embedding model — the single biggest startup cost |
 
-Setting `TAVILY_API_KEY` alone collects real evidence but produces no claims — the fixture-based
-claim extractor can't read real page text. Set `OLLAMA_ENABLED` too for live search to actually
-produce claims. See [`docs/research-workflow.md`](docs/research-workflow.md).
+Setting `TAVILY_API_KEY` alone collects real evidence but produces no claims — reading claims out
+of real pages needs a model, and the response says so. Set `OLLAMA_ENABLED` too for live search to
+actually produce claims. See [`docs/research-workflow.md`](docs/research-workflow.md).
 
 ## Project structure
 
 ```
-backend/     LocationResearchAgent, FastAPI app, fixtures, tests, evaluation harness
+backend/     LocationResearchAgent, FastAPI app, tests, evaluation harness
 frontend/    React + TypeScript UI (landing page, map search, chat-driven research workspace)
 docs/        architecture.md, research-workflow.md, evaluation.md
 ```
@@ -156,7 +165,8 @@ cd backend
 pytest
 ```
 
-The suite is free, offline, and deterministic by construction — an autouse fixture forces real
+The suite is free, offline, and deterministic by construction (its invented sample sources live
+only in `backend/tests/fixtures` and are never served by the app; a test enforces that) — an autouse fixture forces real
 API keys and semantic retrieval off during tests regardless of local `.env` configuration, so
 `pytest` never makes a real network call or spends API credits.
 
@@ -200,11 +210,18 @@ business-specific research, OpenStreetMap "around this pin" data, and optional G
 the Milestone status table in [`docs/architecture.md`](docs/architecture.md) for what's opt-in vs.
 free-by-default.
 
-**What it is, honestly:** an LLM-assisted RAG pipeline — retrieve, rerank, ground, generate, verify,
-cite. The model chooses which topics to research and writes the answer; everything else is fixed
-code. It is not an autonomous agent: it never decides what to do next, re-plans, or searches again
-when evidence is thin. [`docs/evaluation.md`](docs/evaluation.md) covers what has and hasn't been
-measured (Baseline A and claim-level metrics are not measured).
+**What it is, honestly:** a RAG pipeline with a small, bounded agent loop. It retrieves live web
+evidence, reranks, grounds, generates and verifies with citations. After the first search pass the
+agent *looks at what it found and decides what to do next*: search again with a query aimed at the
+question, or consult Wikipedia/Wikivoyage, at most twice (`AgentConfig.max_research_rounds`). The model
+makes that choice when one is available; a rule-based judge does otherwise. It is a bounded loop over
+a fixed menu of two tools, not an open-ended autonomous agent: it does not write code, browse
+freely, or plan across questions. Claims written by the model are checked against the words and
+figures of the sources they cite, and overview sentences that no source backs are flagged as the
+model's inference. What that check is and isn't is in [`docs/architecture.md`](docs/architecture.md).
+[`docs/evaluation.md`](docs/evaluation.md) covers what has and hasn't been measured (Baseline A and
+claim-level metrics are not measured; the new loop has been checked on one live question, not
+benchmarked).
 
 ## Documentation
 

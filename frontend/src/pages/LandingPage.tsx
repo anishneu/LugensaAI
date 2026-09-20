@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 
-const EXAMPLE_PLACES = ["Starbucks, Cambridge, MA", "Harvard Square, Cambridge, MA", "Henn na Hotel, Tokyo"];
+const EXAMPLE_PLACES = ["Shibuya, Tokyo", "Le Marais, Paris", "Zamalek, Cairo"];
 
 const STEPS = [
   {
@@ -52,45 +52,30 @@ function Reveal({ children, className }: { children: ReactNode; className?: stri
 const BUTTON =
   "inline-flex items-center gap-2 rounded-md bg-[var(--l-ink)] px-5 py-3 text-[15px] font-semibold text-[var(--l-bg)] transition-opacity hover:opacity-85";
 
-/** A static, clearly labeled sample of what an answer looks like. Not a live
- * query — no numbers or claims here are presented as real measurements. */
-function SampleAnswer() {
+/** What a response contains. Deliberately states nothing about any real place: an earlier version
+ * showed an invented sample answer with real-looking sources, which is exactly what this
+ * project exists not to do. */
+function WhatYouGet() {
+  const parts: [string, string][] = [
+    ["A direct answer", "Written from the sources found, in plain language."],
+    ["Claims, each checked", "Marked supported, contradicted, or insufficient evidence, with the sources behind each."],
+    ["The sources themselves", "With real publication dates when the page has one, and translated pages labeled as translated."],
+    ["What it could not confirm", "Coverage gaps and weak spots are listed, not smoothed over."],
+  ];
   return (
     <figure className="m-0 rounded-lg border border-[var(--l-rule)] bg-[var(--l-card)] p-6 shadow-[0_1px_0_var(--l-rule)]">
-      <div className="mb-4 flex items-center justify-between text-[11px] uppercase tracking-[0.12em] text-[var(--l-muted)]">
-        <span>Sample answer</span>
-        <span>Illustrative, not a live query</span>
-      </div>
-
-      <p className="m-0 text-[13px] text-[var(--l-muted)]">📍 Harvard Square, Cambridge, MA</p>
-      <p className="mt-1 mb-4 font-serif text-xl leading-snug text-[var(--l-ink)]">
-        Would this be a good place for a college student?
-      </p>
-
-      <p className="m-0 text-[15px] leading-relaxed text-[var(--l-ink)]">
-        Reviewers describe the area as walkable, with a dense mix of cafes and bars<sup className="text-[var(--l-accent)]">1</sup>.
-        Rent nearby runs above the city median on both listing sites checked<sup className="text-[var(--l-accent)]">2</sup>,
-        and the Red Line stop is at the square<sup className="text-[var(--l-accent)]">3</sup>.
-      </p>
-
-      <ol className="mt-5 mb-0 flex list-none flex-col gap-2 border-t border-[var(--l-rule)] p-0 pt-4 text-[13px]">
-        {[
-          ["1", "reddit.com/r/cambridgema", "community forum"],
-          ["2", "apartments.com", "listing site"],
-          ["3", "mbta.com", "transit authority"],
-        ].map(([n, domain, kind]) => (
-          <li key={n} className="flex items-baseline gap-2.5">
-            <span className="w-3 text-[var(--l-accent)]">{n}</span>
-            <span className="text-[var(--l-ink)]">{domain}</span>
-            <span className="text-[var(--l-muted)]">· {kind}</span>
+      <figcaption className="mb-4 text-[11px] uppercase tracking-[0.12em] text-[var(--l-muted)]">What you get back</figcaption>
+      <ol className="m-0 flex list-none flex-col gap-4 p-0">
+        {parts.map(([title, body], i) => (
+          <li key={title} className="flex gap-3.5">
+            <span className="w-4 font-serif text-lg leading-tight text-[var(--l-accent)]">{i + 1}</span>
+            <div>
+              <p className="m-0 text-[15px] font-semibold text-[var(--l-ink)]">{title}</p>
+              <p className="m-0 mt-0.5 text-[13.5px] leading-relaxed text-[var(--l-muted)]">{body}</p>
+            </div>
           </li>
         ))}
       </ol>
-
-      <p className="mt-4 mb-0 rounded-md bg-[var(--l-bg)] px-3 py-2 text-[12.5px] leading-relaxed text-[var(--l-muted)]">
-        <strong className="font-semibold text-[var(--l-ink)]">Not confirmed:</strong> noise levels late at night. No
-        source checked covered it.
-      </p>
     </figure>
   );
 }
@@ -125,8 +110,8 @@ export function LandingPage() {
               Ask about any place. Get an answer you can check.
             </h1>
             <p className="mt-6 mb-0 max-w-[34rem] text-[17px] leading-relaxed text-[var(--l-muted)]">
-              Lugensa researches a neighborhood, a business, or an address across the open web, in any language,
-              then answers your question with a source next to every claim, and tells you what it couldn't confirm.
+              Lugensa researches a neighborhood, a business, or an address across the open web, in dozens of
+              languages, then answers your question with a source next to every claim, and tells you what it couldn't confirm.
             </p>
 
             <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3">
@@ -158,7 +143,7 @@ export function LandingPage() {
             </p>
           </div>
 
-          <SampleAnswer />
+          <WhatYouGet />
         </section>
 
         <section id="how-it-works" className="border-t border-[var(--l-rule)]">

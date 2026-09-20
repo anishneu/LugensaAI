@@ -8,11 +8,19 @@ topic mention always outranks a persona-bundle topic.
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 
 from app.models.location import Location
 from app.models.plan import Priority, ResearchPlan, ResearchTopic
 from app.planning.topics import FALLBACK_TOPIC_BUNDLE, PERSONA_DEFINITIONS, TOPIC_DEFINITIONS, TopicDefinition
+
+
+def mentions(text: str, keywords: tuple[str, ...]) -> bool:
+    """Whole-word match. Substring matching read "Barcelona" as `bar` (nightlife),
+    "Busan" as `bus` (transportation) and "Florentine" as `rent` (housing), so any
+    question naming a real place could research the wrong thing."""
+    return any(re.search(rf"(?<!\w){re.escape(keyword)}(?!\w)", text) for keyword in keywords)
 
 
 class ResearchPlanner(ABC):
@@ -28,11 +36,11 @@ class KeywordResearchPlanner(ResearchPlanner):
         topic_priority: dict[str, Priority] = {}
 
         for topic_id, definition in TOPIC_DEFINITIONS.items():
-            if any(keyword in normalized for keyword in definition.keywords):
+            if mentions(normalized, definition.keywords):
                 topic_priority[topic_id] = Priority.HIGH
 
         for persona in PERSONA_DEFINITIONS.values():
-            if any(keyword in normalized for keyword in persona.trigger_keywords):
+            if mentions(normalized, persona.trigger_keywords):
                 intents.append(persona.persona_id)
                 for topic_id in persona.topic_bundle:
                     topic_priority.setdefault(topic_id, Priority.MEDIUM)

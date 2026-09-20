@@ -60,7 +60,7 @@ def profile_to_evidence(
                 evidence_id=f"google:{profile.place_id}:summary",
                 source_title=f"Google Maps listing for {profile.name}",
                 text=headline,
-                metadata={"provider": "google_places", "is_fixture": "false"},
+                metadata={"provider": "google_places"},
                 **base,
             )
         )
@@ -73,13 +73,13 @@ def profile_to_evidence(
                 evidence_id=f"google:{profile.place_id}:reviewsummary",
                 source_title=f"Google Maps summary of {count}reviews of {profile.name}",
                 text=f"Google's own summary of its {count}reviews ({disclosure}): {profile.review_summary}",
-                metadata={"provider": "google_places", "is_fixture": "false", "generated_by": disclosure},
+                metadata={"provider": "google_places", "generated_by": disclosure},
                 **base,
             )
         )
 
     for index, review in enumerate(profile.reviews):
-        metadata = {"provider": "google_places", "is_fixture": "false"}
+        metadata = {"provider": "google_places"}
         if review.original_text and review.original_language:
             metadata[META_LANGUAGE] = review.original_language
             metadata[META_ORIGINAL_TEXT] = review.original_text

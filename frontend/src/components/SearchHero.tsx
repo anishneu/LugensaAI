@@ -1,22 +1,35 @@
+import { useState } from "react";
 import { MapContainer, TileLayer } from "react-leaflet";
-import type { ActiveLocation, LocationSuggestion } from "../types";
+import type { ActiveLocation } from "../types";
 import { LocationSearchInput } from "./LocationSearchInput";
 
-const DEFAULT_CENTER: [number, number] = [42.38, -71.115]; // Cambridge/Somerville, MA — where the demo data lives
+// A decorative street-map backdrop, a different world city each visit. It carries no data and implies
+// no particular place: the app is not about any one city.
+const BACKDROP_CITIES: [number, number][] = [
+  [35.6595, 139.7005], // Tokyo
+  [48.8534, 2.3488], // Paris
+  [30.0444, 31.2357], // Cairo
+  [-1.2921, 36.8219], // Nairobi
+  [-23.5505, -46.6333], // Sao Paulo
+  [-33.8688, 151.2093], // Sydney
+  [41.0082, 28.9784], // Istanbul
+  [19.076, 72.8777], // Mumbai
+  [52.52, 13.405], // Berlin
+];
 
 interface SearchHeroProps {
   query: string;
   onQueryChange: (value: string) => void;
-  suggestions: LocationSuggestion[];
   onSelect: (location: ActiveLocation) => void;
   onSubmit: (text: string) => void;
 }
 
-export function SearchHero({ query, onQueryChange, suggestions, onSelect, onSubmit }: SearchHeroProps) {
+export function SearchHero({ query, onQueryChange, onSelect, onSubmit }: SearchHeroProps) {
+  const [backdrop] = useState(() => BACKDROP_CITIES[Math.floor(Math.random() * BACKDROP_CITIES.length)]);
   return (
     <div className="search-hero">
       <MapContainer
-        center={DEFAULT_CENTER}
+        center={backdrop}
         zoom={13}
         zoomControl={false}
         scrollWheelZoom={false}
@@ -31,16 +44,15 @@ export function SearchHero({ query, onQueryChange, suggestions, onSelect, onSubm
       <div className="search-hero-content">
         <h1>Where should the agent investigate?</h1>
         <p>
-          Any real place — a neighborhood, a specific Starbucks, an address. Harvard Square and Davis Square have
-          the richest demo data, but search finds real businesses everywhere.
+          Any real place, anywhere in the world: a neighborhood, a specific restaurant, an address, or a Google
+          Maps plus code.
         </p>
         <LocationSearchInput
           value={query}
           onChange={onQueryChange}
-          suggestions={suggestions}
           onSelect={onSelect}
           onSubmit={onSubmit}
-          placeholder="Try “Starbucks, Cambridge MA”…"
+          placeholder="Try “Shibuya, Tokyo” or “Le Marais, Paris”…"
           autoFocus
         />
       </div>

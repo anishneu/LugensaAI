@@ -12,5 +12,6 @@ export const SOURCE_TYPE_ICON: Record<SourceType, string> = {
   community_forum: "💬",
   academic: "🎓",
   blog: "📝",
+  reference: "📖",
   other: "🌐",
 };

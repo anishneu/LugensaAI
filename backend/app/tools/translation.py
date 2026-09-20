@@ -24,7 +24,9 @@ from __future__ import annotations
 
 import threading
 import time
+import re
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from functools import lru_cache
 
 from app.models.evidence import Evidence
@@ -38,9 +40,16 @@ _MIN_DETECTABLE_CHARS = 20
 _MIN_DETECTION_CONFIDENCE = 0.90
 _RETRY_FAILED_PACK_AFTER_SECONDS = 300
 _CACHE_SIZE = 2048
+# Measured on a laptop CPU, Argos translates at roughly 11 ms per character (a 1,200-character snippet
+# takes ~13 s), and the model prompts only ever read 400-600 characters of a source. Translating more
+# than the leading part is wasted time, so cap the input. The full original stays in the metadata.
+_MAX_TRANSLATE_CHARS = 700
+_SENTENCE_END_RE = re.compile(r"[.!?。！？\n]")
 
-# langdetect distinguishes Chinese variants; Argos ships one Chinese pack.
-_CODE_ALIASES = {"zh-cn": "zh", "zh-tw": "zh"}
+# langdetect and Argos name some languages differently. langdetect separates the Chinese variants
+# (Argos: "zh" simplified, "zt" traditional) and says "no" where Argos says "nb" (Norwegian Bokmal).
+# Without the second alias a Norwegian page was detected but never translated.
+_CODE_ALIASES = {"zh-cn": "zh", "zh-tw": "zt", "no": "nb"}
 
 
 class Translator(ABC):
@@ -149,7 +158,21 @@ def default_translator() -> Translator:
     return ArgosTranslator()
 
 
-def translate_evidence(items: list[Evidence], translator: Translator, max_translations: int = 20) -> None:
+def _leading(text: str, limit: int) -> str:
+    """The first `limit` characters, cut back to a sentence end when there is one."""
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    ends = [m.end() for m in _SENTENCE_END_RE.finditer(cut)]
+    return cut[: ends[-1]] if ends and ends[-1] > limit // 2 else cut
+
+
+def translate_evidence(
+    items: list[Evidence],
+    translator: Translator,
+    max_translations: int = 20,
+    should_translate: Callable[[Evidence], bool] | None = None,
+) -> None:
     """Translate foreign-language items to English in place.
 
     Sets `metadata["language"]` on every item whose language could be
@@ -157,6 +180,11 @@ def translate_evidence(items: list[Evidence], translator: Translator, max_transl
     / `original_text`; items that couldn't be translated (over the cap, or the
     translator was unavailable) keep their text and carry only the language,
     which the UI reads as "not translated".
+
+    `should_translate` lets the caller skip items that are not worth the CPU time (measured at ~11 ms per
+    character): the search tool passes a check that the page actually mentions the place, made on the
+    original text using the place's native-script name, so a page about something else is never translated.
+    Only the leading ~700 characters are translated.
     """
     translated = 0
     for item in items:
@@ -167,7 +195,10 @@ def translate_evidence(items: list[Evidence], translator: Translator, max_transl
         if language == "en" or translated >= max_translations:
             continue
 
-        new_text = translator.translate_to_english(item.text, language)
+        if should_translate is not None and not should_translate(item):
+            continue
+
+        new_text = translator.translate_to_english(_leading(item.text, _MAX_TRANSLATE_CHARS), language)
         if not new_text:
             continue
         new_title = translator.translate_to_english(item.source_title, language)

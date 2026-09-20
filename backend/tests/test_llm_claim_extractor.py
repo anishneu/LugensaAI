@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 
 from app.models.evidence import Evidence, SourceType
 from app.models.plan import ResearchPlan
-from app.synthesis.claim_extractor import FixtureClaimExtractor
 from app.synthesis.llm_claim_extractor import LLMClaimExtractor
 from tests.llm_doubles import ScriptedLLMService
 
@@ -58,20 +57,22 @@ def test_drops_claim_with_no_valid_evidence_ids_and_falls_back():
     response = json.dumps(
         {"claims": [{"topic_id": "housing", "text": "Rent is high.", "supporting_evidence_ids": ["totally-fake"]}]}
     )
-    extractor = LLMClaimExtractor(ScriptedLLMService([response]), fallback=FixtureClaimExtractor())
+    extractor = LLMClaimExtractor(ScriptedLLMService([response]))
 
     result = extractor.extract(evidence, _plan())
 
     assert any("LLM-based claim extraction failed" in note for note in result.notes)
+    assert result.claims == [], "a failed extraction must never produce claims"
 
 
 def test_falls_back_on_llm_error():
     evidence = [_evidence("e1", "housing")]
-    extractor = LLMClaimExtractor(ScriptedLLMService(raise_error=True), fallback=FixtureClaimExtractor())
+    extractor = LLMClaimExtractor(ScriptedLLMService(raise_error=True))
 
     result = extractor.extract(evidence, _plan())
 
     assert any("LLM-based claim extraction failed" in note for note in result.notes)
+    assert result.claims == [], "a failed extraction must never produce claims"
 
 
 def test_no_evidence_returns_empty_without_calling_llm():
@@ -132,8 +133,9 @@ def test_does_not_recover_grounding_for_a_claim_unrelated_to_any_evidence():
             ]
         }
     )
-    extractor = LLMClaimExtractor(ScriptedLLMService([response]), fallback=FixtureClaimExtractor())
+    extractor = LLMClaimExtractor(ScriptedLLMService([response]))
 
     result = extractor.extract(evidence, _plan())
 
     assert any("LLM-based claim extraction failed" in note for note in result.notes)
+    assert result.claims == [], "a failed extraction must never produce claims"

@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { searchPlaces } from "../api";
-import type { ActiveLocation, LocationSuggestion, PlaceCandidate } from "../types";
+import type { ActiveLocation, PlaceCandidate } from "../types";
 
 interface LocationSearchInputProps {
   value: string;
   onChange: (value: string) => void;
-  suggestions: LocationSuggestion[];
   onSelect: (location: ActiveLocation) => void;
   onSubmit: (text: string) => void;
   placeholder?: string;
@@ -15,45 +14,14 @@ interface LocationSearchInputProps {
 
 interface SearchOption {
   key: string;
-  kind: "known" | "live";
   label: string;
   sublabel: string;
   toActiveLocation: () => ActiveLocation;
 }
 
-function matchesFixture(suggestion: LocationSuggestion, query: string): boolean {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  return (
-    suggestion.name.toLowerCase().includes(q) ||
-    (suggestion.city ?? "").toLowerCase().includes(q) ||
-    suggestion.aliases.some((alias) => alias.toLowerCase().includes(q))
-  );
-}
-
-function fixtureToOption(suggestion: LocationSuggestion): SearchOption {
-  return {
-    key: `fixture:${suggestion.raw_query}`,
-    kind: "known",
-    label: suggestion.name,
-    sublabel: [suggestion.city, suggestion.region].filter(Boolean).join(", "),
-    toActiveLocation: () => ({
-      rawQuery: suggestion.raw_query,
-      displayName: `${suggestion.name}${suggestion.city ? `, ${suggestion.city}` : ""}`,
-      city: suggestion.city,
-      region: suggestion.region,
-      country: suggestion.country,
-      latitude: suggestion.latitude,
-      longitude: suggestion.longitude,
-      isBusiness: false,
-    }),
-  };
-}
-
 function placeToOption(place: PlaceCandidate): SearchOption {
   return {
     key: `place:${place.display_name}:${place.latitude}:${place.longitude}`,
-    kind: "live",
     label: place.name,
     sublabel: place.display_name.split(",").slice(1, 4).join(",").trim(),
     toActiveLocation: () => ({
@@ -65,6 +33,7 @@ function placeToOption(place: PlaceCandidate): SearchOption {
       latitude: place.latitude,
       longitude: place.longitude,
       isBusiness: place.is_business,
+      isAddress: place.is_address,
     }),
   };
 }
@@ -72,7 +41,6 @@ function placeToOption(place: PlaceCandidate): SearchOption {
 export function LocationSearchInput({
   value,
   onChange,
-  suggestions,
   onSelect,
   onSubmit,
   placeholder,
@@ -106,11 +74,7 @@ export function LocationSearchInput({
     };
   }, [value]);
 
-  const options = useMemo<SearchOption[]>(() => {
-    const fixtureOptions = suggestions.filter((s) => matchesFixture(s, value)).map(fixtureToOption);
-    const liveOptions = liveResults.map(placeToOption);
-    return [...fixtureOptions, ...liveOptions].slice(0, 8);
-  }, [suggestions, liveResults, value]);
+  const options = useMemo<SearchOption[]>(() => liveResults.map(placeToOption).slice(0, 8), [liveResults]);
 
   function selectOption(option: SearchOption) {
     onSelect(option.toActiveLocation());
@@ -171,7 +135,7 @@ export function LocationSearchInput({
                 onClick={() => selectOption(option)}
               >
                 <span className="suggestion-pin" aria-hidden="true">
-                  {option.kind === "known" ? "📍" : "🔎"}
+                  🔎
                 </span>
                 <span>
                   <strong>{option.label}</strong>

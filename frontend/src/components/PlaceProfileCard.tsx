@@ -149,7 +149,7 @@ export function PlaceProfileCard({ location }: { location: ActiveLocation }) {
                   <summary className="cursor-pointer">
                     Translated from {languageNames.of(review.original_language) ?? review.original_language} — show original
                   </summary>
-                  <p className="m-0 mt-1" lang={review.original_language}>
+                  <p className="m-0 mt-1" lang={review.original_language} dir="auto">
                     {review.original_text}
                   </p>
                 </details>

@@ -2,7 +2,7 @@
 
 ```
 INPUT (raw location string, question)
-  -> LOCATION RESOLUTION        FixtureLocationResolver.resolve()
+  -> LOCATION RESOLUTION        Google Places, then OpenStreetMap Nominatim
   -> QUESTION UNDERSTANDING     folded into planning: intent detection
   -> RESEARCH PLANNING          ResearchPlanner.plan() -> ResearchPlan
                                  (KeywordResearchPlanner, or LLMResearchPlanner if
@@ -13,7 +13,7 @@ INPUT (raw location string, question)
        EVIDENCE PROCESSING      filter by relevance threshold, cap per topic,
                                 PageRetrievalTool.retrieve_full_text(), enrich_evidence()
   -> COVERAGE CHECK             which planned topics ended up with zero evidence
-  -> CLAIM EXTRACTION           ClaimExtractor.extract() (Fixture- or LLM-based)
+  -> CLAIM EXTRACTION           ClaimExtractor.extract() (LLM-based; none without a model)
   -> CLAIM VERIFICATION         EvidenceBasedClaimVerifier.verify()   <- always deterministic
   -> SYNTHESIS                  Synthesizer.synthesize() (Template- or LLM-based)
   -> FINAL RESPONSE             ResearchResponse, including the full research_trace
@@ -52,7 +52,7 @@ Setting `OLLAMA_ENABLED` swaps three components for LLM-backed versions
   keyword match), but can only select from the fixed topic taxonomy in `app/planning/topics.py`
   — it cannot invent a topic, its queries, or its completion criteria.
 - `LLMClaimExtractor` — extracts real claims from evidence passages instead of relying on
-  fixture-annotated `claim_text`. Every `supporting_evidence_ids` it returns is checked against
+  pre-written claims. Every `supporting_evidence_ids` it returns is checked against
   the evidence actually given to it; ids that don't correspond to real evidence are dropped, and
   a claim left with none is dropped entirely (`app/synthesis/llm_claim_extractor.py`).
 - `LLMSynthesizer` — drafts the summary/recommendation prose, but only from claims that have
@@ -70,7 +70,7 @@ the first place, which is exactly the failure mode `ClaimVerifier` exists to pre
 standing contradiction-detection caveat in code for both synthesizers, so an LLM that omits an
 inconvenient limitation cannot make it disappear from the response.
 
-Every LLM-backed component falls back to its Milestone 1 rule-based/fixture-based counterpart
+Every LLM-backed component falls back to its rule-based or empty counterpart
 on any failure — a malformed JSON response, a rejected recommendation, a network error, no valid
 topics/claims — and records why in the response's `limitations`, rather than crashing the run
 or silently degrading without saying so. See `tests/test_llm_planner.py`,
@@ -90,9 +90,9 @@ coarse, honest heuristic keyed on domain (`.gov` → `local_government`, `reddit
 `community_forum`, etc.) that defaults to `SourceType.OTHER` rather than guessing wrong.
 
 **The important interaction: live search alone produces evidence without claims.**
-`FixtureClaimExtractor` only knows how to read the `claim_text` metadata curated fixture
-documents carry — real Tavily results don't have that field, so with `TAVILY_API_KEY` set but
-not `OLLAMA_ENABLED`, a run collects real evidence that never becomes a claim. This is not a
+Reading a claim out of a real page needs a model, so with `TAVILY_API_KEY` set but
+not `OLLAMA_ENABLED`, a run collects real evidence that never becomes a claim
+(`UnavailableClaimExtractor` says so). This is not a
 bug being papered over: `deterministic_limitations()` reports it explicitly as *"Evidence was
 found for planned topic 'x' but no claims could be extracted from it"* — distinct from *"No
 evidence was found"* — so real, gathered evidence with no claim is never confused with a
@@ -119,21 +119,46 @@ terminate. When the budget runs out mid-topic, that topic is skipped and a
 results. `AgentConfig.max_evidence_per_topic` and `min_relevance_score` bound how much
 evidence a single topic can contribute and how weak a match can still be accepted.
 
-Without live search, fixtures are static and there is no broadened second search that would
-surface different results if a topic comes back empty — the loop still records this explicitly
-(`ADDITIONAL_RESEARCH` trace stage, `"nothing further to fetch in this run"`) rather than
-pretending a retry happened. With `TavilyWebSearchTool` (Milestone 3), a broadened retry could
-plausibly return something new, but the loop still does not attempt one yet — each topic gets
-exactly one search call; a retry-with-broadened-query is a real future improvement, not
-something this milestone silently claims to do.
+## The decide-and-act loop
 
-## Claim extraction without an LLM: an honest placeholder
+The first pass is fixed: plan topics, search each once, score, keep what clears the relevance bar.
+What happens next is a decision. `app/agents/reflection.py` defines a `Reflector` that receives the
+question, what evidence exists per planned topic, and the queries already tried, and returns either
+"enough" or up to `max_actions_per_round` actions from a fixed menu:
 
-Without an API key, `FixtureClaimExtractor` does not perform free-text claim extraction. Each
-fixture document is pre-annotated with the claim it was written to support
-(`metadata["claim_text"]`), and the extractor groups evidence that shares a claim within a
-topic — which is how two independent fixture sources end up corroborating a single claim in
-`tests/test_agent_end_to_end.py`. This is a stand-in for what `LLMClaimExtractor` (Milestone 2,
-above) produces from real page text, and is called out explicitly in code and in
-`backend/README.md` so it's never mistaken for real NLP. `LLMClaimExtractor` also falls back to
-this fixture-based extractor if the LLM call fails.
+- `web_search` — search again with a new query. The first pass used fixed per-topic templates
+  that never contain the user's question; the follow-up is built from it.
+- `wikimedia` — Wikipedia articles near the pin and the Wikivoyage guide for the town
+  (`app/tools/wiki_tool.py`), for visiting/nearby questions or when web search found nothing.
+
+With an LLM enabled, `LLMReflector` makes the choice; anything it proposes outside the menu, for an
+unknown topic, or repeating a tried query is discarded, and if the call fails or returns garbage
+`RuleBasedReflector` decides instead and the limitation says so. The *agent* executes the actions,
+so the model can pick and phrase but cannot run anything itself. Results pass through the same
+relevance filter and budget as the first pass. The loop runs at most `max_research_rounds` (default
+2) times and stops early when the reflector says enough or `max_tool_calls` is spent, so it always
+terminates. Every decision is a trace step (`ADDITIONAL_RESEARCH`), including "enough".
+
+The loop is only wired when live search is on: with no search configured there is nothing to search again.
+documents. Without it the run is the single fixed pass.
+
+## Places outside the English-speaking world
+
+Before the first search, `LocaleResolver` reverse-geocodes the pin to find the country and looks up the
+country's main written language (only languages the free translator can read back are listed). For
+such a place the plan gains one query per top topic in that language, built around the place's
+native-script name (`ResearchTopic.local_queries`). `TavilyWebSearchTool` runs it alongside the English
+query and merges the results by URL; the retrievers still score only the English queries, because
+they score English text. Pages are accepted on the native name as well as the English one. For an
+English-speaking place, or one whose language can't be translated, nothing changes and the trace says
+why (`RESEARCH_PLANNING`). Any failure in the lookup is a limitation, never an error.
+
+## Claim extraction without an LLM
+
+Without a model there is no claim extraction: `UnavailableClaimExtractor` returns no claims and adds
+a note that a model is needed, and the response still lists the sources it found. There used to be a
+`FixtureClaimExtractor` that returned pre-written claims attached to invented fixture documents, and
+`LLMClaimExtractor` fell back to it on failure. It was removed from the product because it let
+invented statements pass as research; it survives only in `tests/fixture_tools.py`, where it drives
+the end-to-end tests. When `LLMClaimExtractor` fails it now produces no claims and says so.
+

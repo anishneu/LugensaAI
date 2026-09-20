@@ -17,7 +17,7 @@ import time
 from app.core.config import TAVILY_API_KEY_ENV_VAR
 from app.models.plan import Priority, ResearchTopic
 from app.tools.base import LocationNotFoundError, ToolExecutionError
-from app.tools.fixture_tools import FixtureLocationResolver
+from app.tools.nominatim_tool import NominatimLocationResolverTool
 from app.tools.tavily_tools import TavilyWebSearchTool
 from evaluation.benchmark import BenchmarkCase
 from evaluation.metrics import RunMetrics
@@ -27,7 +27,7 @@ def run_baseline_b(case: BenchmarkCase) -> RunMetrics:
     import os
 
     start = time.perf_counter()
-    resolver = FixtureLocationResolver()
+    resolver = NominatimLocationResolverTool()
 
     try:
         location = resolver.resolve(case.location)

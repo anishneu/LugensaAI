@@ -7,12 +7,11 @@ gates it the same way it gates the Milestone 2 LLM components).
 Tavily's `include_raw_content=True` returns full extracted page text in the
 same search call, so `TavilyPageRetrievalTool` doesn't make a second network
 request per result — it just reads from a cache populated by the search
-call for the same run, sharing the same conceptual two-step
-search-then-retrieve interface as the fixture tools without paying for a
-second real HTTP request per source.
+call for the same run, keeping the search-then-retrieve interface without
+paying for a second real HTTP request per source.
 
-Real web results don't arrive pre-labeled with a clean `source_type` the
-way curated fixtures do. `_classify_source_type()` is a coarse, honest
+Real web results don't arrive pre-labeled with a clean `source_type`.
+`_classify_source_type()` is a coarse, honest
 best-effort heuristic based on the domain — not a real classifier — and
 defaults to `SourceType.OTHER` rather than guessing a specific wrong type.
 
@@ -35,11 +34,9 @@ that silently swaps in a bad result to avoid looking empty:
   position — Tavily does not guarantee a given image depicts that specific
   result, so this is best-effort, not a claim of exact attribution.
 
-Important limitation this milestone does not fix: `FixtureClaimExtractor`
-cannot produce claims from real evidence text (it only knows how to read
-fixture-annotated `claim_text` metadata). Live search evidence needs
-`LLMClaimExtractor` (Milestone 2) to actually turn into claims — see
-`backend/README.md`.
+Live search evidence only turns into claims when a language model is configured
+(`LLMClaimExtractor`); without one the response shows the sources and says no
+claims were extracted — see `backend/README.md`.
 """
 
 from __future__ import annotations
@@ -54,12 +51,22 @@ from app.models.evidence import Evidence, SourceType
 from app.models.location import Location
 from app.models.plan import ResearchTopic
 from app.tools.base import PageRetrievalTool, ToolConfigurationError, ToolExecutionError, WebSearchTool
-from app.tools.translation import Translator, translate_evidence
+from app.tools.translation import META_ORIGINAL_TEXT, META_ORIGINAL_TITLE, Translator, translate_evidence
 
-_GOV_TLDS = (".gov",)
+# Government and university sites are not just `.gov` / `.edu`: Japan uses go.jp and lg.jp (local
+# government), the UK gov.uk and ac.uk, France gouv.fr, Mexico gob.mx, Korea go.kr, India nic.in and
+# gov.in, Australia gov.au and edu.au, Brazil gov.br. Classifying only the US ones left every other
+# country's official sources scored as "other" and weighted at 0.4 instead of 0.9.
+_GOV_TLDS = (".gov", "europa.eu", "un.org", "who.int", "worldbank.org")
 _EDU_TLDS = (".edu",)
+_GOV_SLD_RE = re.compile(r"(?:^|\.)(?:gov|gob|gouv|govt|go|gv|gc|lg|nic|gub|gouv)\.[a-z]{2}$")
+_EDU_SLD_RE = re.compile(r"(?:^|\.)(?:edu|ac)\.[a-z]{2}$")
 _FORUM_DOMAINS = ("reddit.com", "quora.com", "nextdoor.com")
-_REVIEW_DOMAINS = ("yelp.com", "tripadvisor.com", "zillow.com", "apartments.com", "google.com/maps")
+_REVIEW_DOMAINS = (
+    "yelp.com", "tripadvisor.", "zillow.com", "apartments.com", "google.com/maps", "tabelog.com", "retty.me",
+    "gurunavi.com", "hotpepper.jp", "booking.com", "agoda.com", "trip.com", "zomato.com", "foursquare.com",
+    "opentable.com", "thefork.", "dianping.com", "naver.com/", "kakao.com", "wongnai.com", "map.yahoo.co.jp",
+)
 _BLOG_DOMAINS = ("medium.com", "substack.com", "blogspot.com")
 
 _MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
@@ -158,6 +165,8 @@ _NON_ACTIVITY_URL_PATTERNS = ("jobs.", "careers.", "/jobs/", "/job/", "/careers/
 _MIN_USABLE_SNIPPET_LENGTH = 40
 _MAX_DISPLAY_LENGTH = 1200
 _MAX_FULL_TEXT_LENGTH = 3000
+# Translation runs on the CPU and is slow (see app/tools/translation.py), so cap it per search call.
+_MAX_TRANSLATIONS_PER_SEARCH = 6
 
 
 _CJK_RE = re.compile(r"[぀-ヿ㐀-䶿一-鿿가-힯]")
@@ -244,6 +253,8 @@ def _is_relevant_to_location(item_text: str, location: Location) -> bool:
     needles = [location.name.lower()]
     if location.city:
         needles.append(location.city.lower())
+    # Native-script names: a page that survived translation may still spell the place its own way.
+    needles += [n.lower() for n in (location.local_name, location.local_area) if n]
     return any(needle in haystack for needle in needles if needle)
 
 
@@ -296,8 +307,19 @@ def _mentions_place_context(text: str, location: Location) -> bool:
     anchors = [a for a in (location.city, location.region) if a] or [a for a in (location.country,) if a]
     if not anchors:
         return True
+    # The city as its own people write it ("久留米市"): no spaces in that script, so a plain substring test.
+    if location.local_area and location.local_area in text:
+        return True
     words = set(_name_words(text))
     return any(all(w in words for w in _name_words(anchor)) for anchor in anchors)
+
+
+def _is_about_business(text: str, location: Location) -> bool:
+    """`_mentions_business` for the English name, or the native-script name ("翠藍") that a local
+    page uses even after translation renders it differently."""
+    if _mentions_business(text, location.name):
+        return True
+    return bool(location.local_name) and location.local_name in text
 
 
 def _region_label(location: Location) -> str:
@@ -425,6 +447,11 @@ def _is_relevant_to_community_voice(title: str, body: str, location: Location, s
 
     if len(name.split()) > 1 and _mentions_whole_word(haystack, name):
         return True
+    # Native-script names have no word boundaries, so match them as plain substrings.
+    if location.local_name and location.local_name.lower() in haystack:
+        return True
+    if location.local_area and location.local_area.lower() in haystack:
+        return True
 
     city = _region_anchor(location)
     if not city:
@@ -443,9 +470,9 @@ def _is_relevant_to_community_voice(title: str, body: str, location: Location, s
 
 def _classify_source_type(url: str) -> SourceType:
     domain = urlparse(url).netloc.lower().removeprefix("www.")
-    if domain.endswith(_GOV_TLDS):
+    if domain.endswith(_GOV_TLDS) or _GOV_SLD_RE.search(domain):
         return SourceType.LOCAL_GOVERNMENT
-    if domain.endswith(_EDU_TLDS):
+    if domain.endswith(_EDU_TLDS) or _EDU_SLD_RE.search(domain):
         return SourceType.ACADEMIC
     if any(d in domain for d in _FORUM_DOMAINS):
         return SourceType.COMMUNITY_FORUM
@@ -540,7 +567,7 @@ def _build_candidates(
                 location_scope=f"{location.city}, {location.region}",
                 text=snippet,
                 topic=topic_id,
-                metadata={"provider": "tavily", "is_fixture": "false"},
+                metadata={"provider": "tavily"},
                 image_url=_extract_image_url(images[index]) if index < len(images) else None,
             )
         )
@@ -574,29 +601,68 @@ class TavilyWebSearchTool(WebSearchTool):
             ) from exc
         self._client = TavilyClient(api_key=api_key)
 
+    def _worth_translating(self, location: Location):
+        """A predicate for `translate_evidence`, or None to translate everything (up to the cap).
+
+        With the place's native-script names known, a foreign page is worth translating only if it
+        mentions the place, its city, or the English name, checked on the original text. Without native
+        names nothing can be checked before translating, so nothing is skipped.
+        """
+        if not (location.local_name or location.local_area):
+            return None
+        needles = [n.lower() for n in (location.name, location.city, location.local_name, location.local_area) if n]
+
+        def worth(item: Evidence) -> bool:
+            haystack = f"{item.source_title} {item.text} {item.source_url} {self.raw_content_cache.get(item.source_url, '')}".lower()
+            return any(needle in haystack for needle in needles)
+
+        return worth
+
     def search(self, location: Location, topic: ResearchTopic) -> list[Evidence]:
         location_label = f"{location.name}, {location.city}, {location.region}".strip(", ")
         query = topic.search_queries[0] if topic.search_queries else f"{location_label} {topic.topic_id}"
+        # The English query plus, for a place in a non-English-speaking country, one in its own language.
+        queries = [query, *topic.local_queries[:1]]
 
-        try:
-            response = self._client.search(
-                query=query,
-                max_results=self._max_results,
-                include_raw_content=True,
-                include_images=True,
-            )
-        except Exception as exc:  # noqa: BLE001 - the Tavily SDK's own exception types aren't guaranteed
-            raise ToolExecutionError(f"Tavily search failed for query '{query}': {exc}") from exc
-
-        results = response.get("results", []) if isinstance(response, dict) else []
-        images = response.get("images", []) if isinstance(response, dict) else []
+        results: list = []
+        images: list = []
+        seen_urls: set[str] = set()
+        failures: list[str] = []
+        for text in queries:
+            try:
+                response = self._client.search(
+                    query=text,
+                    max_results=self._max_results,
+                    include_raw_content=True,
+                    include_images=True,
+                )
+            except Exception as exc:  # noqa: BLE001 - the Tavily SDK's own exception types aren't guaranteed
+                failures.append(f"Tavily search failed for query '{text}': {exc}")
+                continue
+            if not isinstance(response, dict):
+                continue
+            for result in response.get("results", []):
+                url = result.get("url") if isinstance(result, dict) else None
+                if url and url in seen_urls:
+                    continue
+                if url:
+                    seen_urls.add(url)
+                results.append(result)
+            images.extend(response.get("images", []))
+        if failures and len(failures) == len(queries):
+            raise ToolExecutionError(failures[0])
 
         candidates = _build_candidates(location, topic.topic_id, results, images, self.raw_content_cache)
         if self._translator is not None:
             # Before the relevance filters below: a Japanese page about the
             # place doesn't spell its name the way the English query does,
             # and would otherwise be judged off-topic on words it never used.
-            translate_evidence(candidates, self._translator)
+            translate_evidence(
+                candidates,
+                self._translator,
+                max_translations=_MAX_TRANSLATIONS_PER_SEARCH,
+                should_translate=self._worth_translating(location),
+            )
         if location.is_business:
             # One specific business: a page either mentions it or it isn't
             # evidence about it. No soft fallback here — unlike an area, where
@@ -605,12 +671,23 @@ class TavilyWebSearchTool(WebSearchTool):
             # "nothing found" beats them.
             about_this_business = []
             for c in candidates:
-                haystack = f"{c.source_title} {c.text} {c.source_url} {self.raw_content_cache.get(c.source_url, '')}"
-                if _mentions_business(haystack, location.name) and _mentions_place_context(haystack, location):
+                haystack = (
+                    f"{c.source_title} {c.text} {c.source_url} {self.raw_content_cache.get(c.source_url, '')} "
+                    f"{c.metadata.get(META_ORIGINAL_TITLE, '')} {c.metadata.get(META_ORIGINAL_TEXT, '')}"
+                )
+                if _is_about_business(haystack, location) and _mentions_place_context(haystack, location):
                     about_this_business.append(c)
             return about_this_business
 
-        relevant = [c for c in candidates if _is_relevant_to_location(f"{c.source_title} {c.text}", location)]
+        relevant = [
+            c
+            for c in candidates
+            if _is_relevant_to_location(
+                f"{c.source_title} {c.text} {c.metadata.get(META_ORIGINAL_TITLE, '')} "
+                f"{c.metadata.get(META_ORIGINAL_TEXT, '')}",
+                location,
+            )
+        ]
 
         # Soft filter: an empty topic with an honest coverage-gap limitation
         # is more honest than quietly keeping off-topic results to avoid it,
@@ -634,7 +711,12 @@ class TavilyWebSearchTool(WebSearchTool):
             c
             for c in result
             if c.source_type not in (SourceType.COMMUNITY_FORUM, SourceType.REVIEW_AGGREGATOR)
-            or _is_relevant_to_community_voice(c.source_title, c.text, location, f"{c.source_url} {c.publisher or ''}")
+            or _is_relevant_to_community_voice(
+                c.source_title,
+                f"{c.text} {c.metadata.get(META_ORIGINAL_TEXT, '')}",
+                location,
+                f"{c.source_url} {c.publisher or ''}",
+            )
         ]
 
 
@@ -742,7 +824,7 @@ class TavilyLiveFeedTool:
         if self._translator is not None:
             # Newest first, so if there are more foreign items than the
             # translation cap, it's the oldest that stay untranslated.
-            translate_evidence(dated, self._translator)
+            translate_evidence(dated, self._translator, max_translations=_MAX_TRANSLATIONS_PER_SEARCH)
 
         # Unlike per-topic research search, there's no verified pipeline
         # downstream to catch an overly loose match, so the location filter

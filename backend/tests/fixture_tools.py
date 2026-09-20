@@ -1,15 +1,21 @@
+"""Test-only stand-ins backed by invented fixture documents (see tests/fixtures).
+
+None of this is imported by `app/`. The product never serves fixture evidence, claims or places.
+"""
+
 from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.core.config import FIXTURES_ROOT
+from app.models.claim import Claim
 from app.models.evidence import Evidence, SourceType
 from app.models.location import Location
-from app.models.plan import ResearchTopic
+from app.models.plan import ResearchPlan, ResearchTopic
+from app.synthesis.claim_extractor import ClaimExtractor, ExtractionResult
 from app.tools.base import LocationNotFoundError, LocationResolverTool, PageRetrievalTool, WebSearchTool
-from app.tools.fixture_loader import iter_all_documents, load_locations, load_topic_documents
+from tests.fixture_loader import FIXTURES_ROOT, iter_all_documents, load_locations, load_topic_documents
 
 
 def _normalize(text: str) -> str:
@@ -81,7 +87,7 @@ class FixtureWebSearchTool(WebSearchTool):
                     location_scope=doc.get("location_scope", f"{location.city}, {location.region}"),
                     text=doc["snippet"],
                     topic=topic.topic_id,
-                    metadata={"claim_text": doc["claim_text"], "is_fixture": "true"},
+                    metadata={"claim_text": doc["claim_text"]},
                 )
             )
         return evidence
@@ -101,3 +107,43 @@ class FixturePageRetrievalTool(PageRetrievalTool):
 
     def retrieve_full_text(self, source_url: str) -> str | None:
         return self._index.get(source_url)
+
+
+class FixtureClaimExtractor(ClaimExtractor):
+    """Groups fixture evidence by the pre-written `claim_text` each document carries.
+
+    Only meaningful for fixture documents, which were written to support a specific claim. It cannot
+    read a real page, which is why the product has no such extractor.
+    """
+
+    def extract(self, evidence: list[Evidence], plan: ResearchPlan) -> ExtractionResult:
+        groups: dict[tuple[str, str], list[Evidence]] = {}
+        for item in evidence:
+            claim_text = item.metadata.get("claim_text")
+            if not claim_text:
+                continue
+            groups.setdefault((item.topic, claim_text), []).append(item)
+
+        claims = [
+            Claim(
+                claim_id=f"claim-{index:03d}",
+                text=claim_text,
+                claim_type=topic_id,
+                supporting_evidence_ids=[item.evidence_id for item in items],
+            )
+            for index, ((topic_id, claim_text), items) in enumerate(groups.items())
+        ]
+        return ExtractionResult(claims=claims)
+
+
+def fixture_agent(**kwargs):
+    """The default agent, wired to the fixture places, sources and claims instead of live services."""
+    from app.agents.factory import build_default_agent
+
+    agent = build_default_agent(**kwargs)
+    agent.location_resolver = FixtureLocationResolver()
+    agent.web_search_tool = FixtureWebSearchTool()
+    agent.page_retrieval_tool = FixturePageRetrievalTool()
+    if not hasattr(agent.claim_extractor, "_llm"):
+        agent.claim_extractor = FixtureClaimExtractor()
+    return agent

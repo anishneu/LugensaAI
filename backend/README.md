@@ -1,17 +1,16 @@
 # Backend — LocationResearchAgent
 
-The research pipeline described in [`docs/architecture.md`](../docs/architecture.md). By
-default it runs fully free and mostly offline: fixture-backed tools, rule-based planning,
-keyword retrieval, local SQLite storage. Setting `OLLAMA_ENABLED` and/or `TAVILY_API_KEY` opts
-into LLM-backed reasoning (a free local model) and live web search respectively (independent of
-each other); having `sentence-transformers` installed opts into hybrid semantic retrieval
-automatically. See below for all of these.
+The research pipeline described in [`docs/architecture.md`](../docs/architecture.md). It ships
+no sample data. `TAVILY_API_KEY` turns on live web search and `OLLAMA_ENABLED` turns on LLM-backed
+reasoning (a free local model), independently of each other; with neither, the pipeline has nothing
+to search and every response says so. Having `sentence-transformers` installed opts into hybrid
+semantic retrieval automatically. Storage is a local SQLite file. See below for all of these.
 
 ## What this does and doesn't do
 
-**Does:** resolve a location — either of the two curated fixture neighborhoods instantly, or any
-other real point of interest via live geocoding (`NominatimLocationResolverTool`, free, opt-out
-via `DISABLE_LIVE_GEOCODING=1`) — decompose a question into research topics (adaptively — a
+**Does:** resolve a location — any real point of interest, via Google Places when configured and
+otherwise live geocoding (`NominatimLocationResolverTool`, free, opt-out via
+`DISABLE_LIVE_GEOCODING=1`) — decompose a question into research topics (adaptively — a
 nightlife-only question does not trigger housing research), retrieve and score evidence
 (lexically, and semantically if available), extract claims and link them to the evidence that
 supports them, verify those claims (including a coarse cross-source contradiction check), and
@@ -20,14 +19,12 @@ details, not just a claims list — with a full execution trace. Claim verificat
 fixed, deterministic step — never LLM-backed, and it never moves in the pipeline — regardless of
 which other components are in use (see `docs/research-workflow.md`).
 
-**Doesn't:** a second, broadened search attempt when a per-topic research search comes back
-empty — it stays as originally queried, and the gap is recorded in `limitations` rather than
-silently retried. (The independent live feed is a different, deliberately regional query from the
-start — see below — not a fallback triggered by an empty result.)
-
-**Fixture data is synthetic.** Everything under `fixtures/` was written for this project to test
-the pipeline. It does not describe real, current conditions at Harvard Square or Davis Square and
-must not be treated as such outside local development.
+**Doesn't:** act open-endedly. After the first search it may search again or consult Wikipedia and
+Wikivoyage, but only twice and only from that fixed menu (see `docs/research-workflow.md`); it does
+not write code or browse freely. And it doesn't invent data: **the product ships no sample places,
+sources or claims.** Invented documents used to exist for two US neighborhoods and were served as if
+they were research when no keys were set; they now live only in `tests/fixtures`, are never imported
+by `app/`, and a test enforces that. With no search configured a response has no evidence and says why.
 
 ## Overview synthesis: evidence in, reasoning, an answer out
 
@@ -145,7 +142,7 @@ cp .env.example .env
 ```
 
 **`OLLAMA_ENABLED`** — opts into `LLMResearchPlanner`, `LLMClaimExtractor` and `LLMSynthesizer` in
-place of the rule-based/fixture-based defaults, using a model running on this machine through
+place of the rule-based planner and the no-claims extractor, using a model running on this machine through
 [Ollama](https://ollama.com). No API key, no per-token billing, and nothing leaves the machine. The
 project has no billed model API by design.
 
@@ -216,10 +213,11 @@ Hosted free tiers were considered and not adopted: Groq's free tier, for example
 100K tokens/day on its 70B model (about ten questions), and sends the research to a third party.
 
 **`TAVILY_API_KEY`** — opts into real web search + page retrieval
-(`TavilyWebSearchTool`/`TavilyPageRetrievalTool`) in place of the fixture tools. Tavily has a free
-tier; heavier usage is billed by Tavily. **Setting this alone collects real evidence but produces
-no claims** — `FixtureClaimExtractor` can't read real page text, so set `OLLAMA_ENABLED` too if
-you want live search to actually produce claims. See
+(`TavilyWebSearchTool`/`TavilyPageRetrievalTool`); without it nothing is searched and every
+response says so. Tavily has a free tier (1,000 credits a month); heavier usage is billed by Tavily.
+**Setting this alone collects real evidence but produces no claims** — reading claims out of real
+page text needs a model, so set `OLLAMA_ENABLED` too if you want live search to actually produce
+claims. See
 `docs/research-workflow.md`'s "Live search" section for what this looks like in practice (verified
 against the real API).
 
@@ -260,24 +258,24 @@ app/
   models/       Pydantic schemas shared by every layer (incl. PlaceCandidate for live POI search)
   core/         config (incl. .env loading), LLMService + OllamaLLMService,
                 shared LLM JSON parsing
-  tools/        LocationResolver / WebSearch / PageRetrieval interfaces + fixture, Tavily, and
-                Nominatim (POI geocoding/search, TavilyLiveFeedTool) implementations, plus
-                FallbackLocationResolver (composite.py)
+  tools/        LocationResolver / WebSearch / PageRetrieval interfaces + Tavily, Google Places,
+                Nominatim, Overpass, Wikimedia, translation and locale implementations, plus
+                FallbackLocationResolver (composite.py) and "unconfigured" stand-ins that return
+                nothing and say why (unconfigured.py)
   planning/     topic taxonomy + KeywordResearchPlanner + LLMResearchPlanner
   retrieval/    EvidenceRetriever interface + keyword, semantic, and hybrid implementations
   evidence/     EvidenceRepository (in-memory, SQLite) + evidence enrichment (quality/recency)
-  synthesis/    claim extraction (fixture- or LLM-based, with deterministic grounding recovery for
-                the LLM path) + answer synthesis (template- or LLM-based, from claims *and* raw
+  synthesis/    claim extraction (LLM-based, with deterministic grounding recovery; none without a
+                model) + answer synthesis (template- or LLM-based, from claims *and* raw
                 evidence — see "Overview synthesis" below)
   verification/ checks every claim against the evidence store before it can be marked "supported",
                 plus a deterministic cross-claim contradiction check (always non-LLM)
   agents/       LocationResearchAgent — orchestrates the bounded lifecycle, plus the default-agent
-                factory (auto-selects rule-based/fixture vs. LLM-backed/live components per API key)
+                factory (auto-selects components per API key)
   api/          FastAPI routes, incl. /api/places/search (live POI autocomplete) and
                 /api/live-feed (independent, region-scoped recent activity)
-fixtures/       synthetic locations + source documents, keyed by location slug and topic id
 evaluation/     the benchmark from docs/evaluation.md, actually runnable (`run_benchmark.py`)
-tests/          pytest suite: planner, retrieval (keyword/semantic/hybrid), evidence repository
+tests/          pytest suite (with invented fixtures in tests/fixtures, never served by the app): planner, retrieval (keyword/semantic/hybrid), evidence repository
                 (in-memory/SQLite), verification (incl. contradiction), agent end-to-end, API,
                 and the LLM-backed and Tavily components (against fakes, never live)
 ```
@@ -353,8 +351,109 @@ file); the reviews fields are in a paid tier with a monthly free allowance, so c
 pricing. One lookup per place is cached for 30 minutes. A result is used only if it is within
 400 m of the pin and carries the business's name words. Google's API returns at most five reviews
 per place, so the rating reflects all of them and the quotes only some; the UI says so.
-`app/tools/google_places_tool.py` is written against Google's documented response shape and is
-covered by mocked tests, but has not been run against the live API from this repo. Google's terms
+`app/tools/google_places_tool.py` is covered by mocked tests and has been run against the live API
+(a Tokyo cafe and a restaurant in Kurume: rating, review count, price, hours and Google's review
+summary came back correctly). The auto-created "Maps Platform demo" key returned the rating, count
+and summary but never `reviews` or `photos` (not even for the Eiffel Tower). A key from your own
+project with billing enabled returns up to five real, dated reviews and ten photos per place (photos
+are not used yet); the code handles both cases.
+Google's terms
 restrict storing its content, and reviews are written to the local per-run evidence database, so
 clear `backend/data/evidence.db` if that matters for your use.
+
+**Finding places with Google.** With the key set, Google also *finds* the place, ahead of
+OpenStreetMap. OpenStreetMap has no listing for most small businesses and can't read plus codes
+(the "8JG8+44 Kurume" that Google Maps gives you when you share a spot); without Google, that
+search dropped a pin on the generic city area, treated it as a neighbourhood rather than a
+business, and never asked Google for the rating. `GooglePlacesTool.search_places` (used by
+`GET /api/places/search` and by the research request's text resolver) fixes that, and for a plus
+code it also looks up the business standing on the point. Searches ask only for the cheap
+identifying fields and are cached for 10 minutes. One limit: Google ranks a bare name by relevance,
+not by your intent, so "Suiran Kurume" returns a Kyoto hotel; add the prefecture ("Suiran Kurume
+Fukuoka") or paste the plus code.
+
+### Wikipedia and Wikivoyage, and the follow-up research loop (free)
+
+`app/tools/wiki_tool.py` reads Wikipedia articles within 3 km of the pin and the Wikivoyage guide for
+the surrounding town, cut to the passage that matches the question. It needs no key and the content
+is CC BY-SA 4.0, so every item is attributed to its source and licence. It is what a "is this worth
+visiting?" question needs and reviews don't give. Wikimedia blocks clients that send no contact
+details, so requests carry the repository URL in the User-Agent; set `WIKIMEDIA_CONTACT` to your
+fork's URL.
+
+The agent chooses when to use it. After the first search pass it reflects on what it found and may
+search again with a query built from the question or consult Wikimedia, at most
+`AgentConfig.max_research_rounds` (2) times. See `docs/research-workflow.md`. On a live test this
+added about a minute and a half to a run and surfaced a town's official tourism page the first pass
+had missed.
+
+**What "supported" means.** A claim the model wrote is `supported` only if its cited source is
+relevant *and* at least half of its content words and every figure in it appear in that source. Overview
+sentences that no single source backs are listed in the limitations as the model's own inference.
+Both are lexical checks, not natural-language inference: they reject a faithful paraphrase that
+shares few words, but cannot accept a statement whose words and figures aren't in the source.
+
+### Working in any country
+
+The project was first built and tested on two US neighborhoods. Checking it against 15 places worldwide
+(`python -m evaluation.global_coverage`, which anyone can re-run) found real defects, fixed since:
+
+| Found | Fix |
+|---|---|
+| English queries only reach English pages: 14 of 15 places returned English-only sources, and a restaurant in Kurume, Japan got five pages about a hotel in Kyoto | Also search in the place's own language, and match pages on its native-script name (`app/tools/locale.py`, `app/planning/local_queries.py`) |
+| Topic keywords matched as substrings: "Barcelona" planned *nightlife* (`bar`), "Busan" planned *transportation* (`bus`) | Whole-word matching |
+| Topics assumed a US college student (housing, campus) | Added attractions, climate, local customs and healthcare, plus visitor and newcomer personas |
+| Islands, beaches and parks were researched as if they were cafes ("Victoria Island" returned nothing) | Google's `establishment` type no longer means "business" |
+| "Sukhumvit, Bangkok" resolved 158 km from Bangkok | Search again around the locality the user typed |
+| Only `.gov` / `.edu` counted as official (`go.jp`, `gov.uk`, `gouv.fr`, `gob.mx`, `ac.uk` scored as "other") | Global government and university domains |
+| The overlap and figure checks ignored non-Latin scripts and numerals | Unicode-aware |
+| Arabic and Hebrew rendered left-to-right | `dir="auto"` |
+| The public Overpass server failed for 6 of 15 places, each after a long wait | Shorter timeout, three mirrors, one retry |
+
+**How local-language search works.** From the pin, a reverse geocode gives the country, and a curated
+table (`PRIMARY_LANGUAGE`) gives its main written language. The place's name and its city's name in
+that language come from OpenStreetMap (an area) or Google Places (a business). One query per top topic
+is then written in that language (by the model if there is one, else just the native name and city),
+searched alongside the English one, and the results go through the same translation and relevance
+filters as everything else. Pages are matched on the native name too, so a Japanese page about
+"翠藍" is accepted even though the English name "Suiran" appears nowhere in it.
+
+**Translation is the slow part.** The free translator (Argos) runs on the CPU at about 11 ms per
+character. So it translates only pages that mention the place (checked on the original text), at
+most 6 per search and only their first 700 characters; the full original is kept and shown on request.
+
+**Measured effect** (`python -m evaluation.global_coverage`, 16 places, before and after these fixes):
+
+| | Before | After |
+|---|---|---|
+| Pin within tolerance of the true location | 14 of 15 (Bangkok 158 km off) | 16 of 16 (Bangkok 8.8 km, on the road, inside the city) |
+| Places returning any non-English web source | 1 of 15 | 7 of 16 |
+| Areas researched as if they were a business | 3 | 0 |
+| "Around this pin" unavailable (public Overpass server) | 6 of 15 | 4 of 16 |
+
+Full runs on real questions (local model, all sources live): a restaurant in Kurume 328 s, a Tokyo
+district 299 s, a Cairo district 278 s, a Paris district 254 s, and an English-speaking beach 135-196
+s. All are inside the 20-minute limit; the local-language runs are slower because of translation. The
+Kurume restaurant went from 3-4 sources to 10 (seven Japanese pages about the right restaurant, with a
+real price and dishes), and the check that every figure in a claim appears in its source rejected
+one claim that had quoted three numbers from nowhere.
+
+Two limits this exposed. Without a model, only places whose native name differs from the English one
+(non-Latin scripts) get a local query, because writing "sécurité" or "Sicherheit" needs a model;
+with one, French, German, Spanish and the rest are covered. And an ambiguous name can pull in the
+wrong subject: in Arabic "Zamalek" is also a football club, whose news reached the evidence list
+(not the claims).
+
+**What "any country" does and does not mean here**
+
+- Countries where English is the everyday web language (US, UK, Australia, India, Nigeria, Kenya,
+  Singapore, ...) are searched in English only, which works.
+- About 60 countries have a curated language. Languages the free translator has no pack for (for
+  example Amharic, Tamil, Telugu, Georgian, Nepali, Burmese, Khmer) get English-only search: a page
+  we can't translate couldn't pass the relevance or wording checks anyway. Coverage there is thinner
+  and the answer says so in its limitations.
+- OpenStreetMap and Google coverage varies: dense in Europe, Japan and the big cities, sparser in
+  rural areas and parts of Africa and Central Asia. An empty result is reported, not invented.
+- Machine translation is imperfect and every translated item is labeled with its original one click away.
+- This is a probe over 16 places and a handful of full runs, not a benchmark of answer quality.
 

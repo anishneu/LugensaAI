@@ -5,7 +5,7 @@ import os
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.agents.factory import build_default_agent
+from app.agents.factory import build_default_agent, build_location_resolver
 from app.core.config import (
     GOOGLE_PLACES_API_KEY_ENV_VAR,
     OLLAMA_MODEL,
@@ -25,11 +25,8 @@ from app.models.place_profile import PlaceProfile
 from app.models.response import ResearchResponse
 from app.retrieval.semantic_retriever import is_model_warm
 from app.tools.base import LocationNotFoundError, LocationResolverTool, ToolExecutionError
-from app.tools.composite import FallbackLocationResolver
-from app.tools.fixture_loader import load_locations
-from app.tools.fixture_tools import FixtureLocationResolver
-from app.tools.google_places_tool import GooglePlacesTool
-from app.tools.nominatim_tool import NominatimLocationResolverTool, NominatimPlaceSearchTool, slugify
+from app.tools.google_places_tool import GooglePlacesTool, distance_m
+from app.tools.nominatim_tool import NominatimPlaceSearchTool, slugify
 from app.tools.overpass_tool import OverpassNearbyTool
 from app.tools.tavily_tools import TavilyLiveFeedTool
 from app.tools.translation import default_translator
@@ -48,7 +45,7 @@ class Capabilities(BaseModel):
     run is likely to take as a result.
 
     The estimate exists because run time varies by orders of magnitude with
-    configuration — a fixture-only run finishes in seconds, while CPU-only
+    configuration — a run with no model finishes in seconds, while CPU-only
     local inference takes minutes — so a single hardcoded number in the UI
     would be wrong nearly always. These are rough observed ranges for
     orientation, not predictions: the UI shows them next to a live elapsed
@@ -81,7 +78,7 @@ def capabilities() -> Capabilities:
         provider, model, low, high = "none", None, 5, 25
 
     if not search_enabled():
-        # Fixture-only: no network in the research path at all.
+        # No live search: nothing is fetched, so a run is quick (and says it found nothing).
         low, high = (1, 5) if provider == "none" else (low, high)
 
     # The embedding model is read off disk once per process. That load is
@@ -118,6 +115,7 @@ class PlaceReference(BaseModel):
     region: str | None = None
     country: str | None = None
     is_business: bool = False
+    is_address: bool = False
 
     def resolve(self, resolver: LocationResolverTool) -> Location:
         if self.latitude is not None and self.longitude is not None:
@@ -131,29 +129,21 @@ class PlaceReference(BaseModel):
                 longitude=self.longitude,
                 raw_query=self.location,
                 is_business=self.is_business,
+                is_address=self.is_address,
             )
         return resolver.resolve(self.location)
 
 
+def _google_places_tool() -> GooglePlacesTool | None:
+    return GooglePlacesTool(api_key=os.environ.get(GOOGLE_PLACES_API_KEY_ENV_VAR)) if place_profile_enabled() else None
+
+
 def _default_location_resolver() -> LocationResolverTool:
-    if geocoding_enabled():
-        return FallbackLocationResolver(FixtureLocationResolver(), NominatimLocationResolverTool())
-    return FixtureLocationResolver()
+    return build_location_resolver(_google_places_tool(), geocoding_enabled())
 
 
 class ResearchRequest(PlaceReference):
     question: str
-
-
-class LocationSuggestion(BaseModel):
-    name: str
-    city: str | None
-    region: str | None
-    country: str | None
-    raw_query: str
-    aliases: list[str]
-    latitude: float | None
-    longitude: float | None
 
 
 @router.post("/research", response_model=ResearchResponse)
@@ -166,29 +156,6 @@ def research(request: ResearchRequest) -> ResearchResponse:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.get("/locations", response_model=list[LocationSuggestion])
-def list_locations() -> list[LocationSuggestion]:
-    """Known, resolvable locations — for search-box autocomplete.
-
-    Backed by the same `fixtures/locations.json` `FixtureLocationResolver` uses,
-    so a suggestion picked from here is always guaranteed to resolve.
-    """
-    entries = load_locations()
-    return [
-        LocationSuggestion(
-            name=entry["name"],
-            city=entry.get("city"),
-            region=entry.get("region"),
-            country=entry.get("country"),
-            raw_query=f"{entry['name']}, {entry.get('city', '')}, {entry.get('region', '')}".strip(", "),
-            aliases=entry["aliases"],
-            latitude=entry.get("latitude"),
-            longitude=entry.get("longitude"),
-        )
-        for entry in entries
-    ]
-
-
 @router.get("/places/search", response_model=list[PlaceCandidate])
 def search_places(q: str = "") -> list[PlaceCandidate]:
     """Live point-of-interest search — any real place, not just the two demo
@@ -196,17 +163,34 @@ def search_places(q: str = "") -> list[PlaceCandidate]:
     OpenStreetMap's Nominatim has indexed.
 
     Returns an empty list (not an error) if live geocoding is disabled
-    (`DISABLE_LIVE_GEOCODING=1`) or the query is too short — the frontend
-    autocomplete falls back to the static `/locations` fixture list either way.
+    (`DISABLE_LIVE_GEOCODING=1`) and Google isn't configured, or the query is too short.
     """
-    if not geocoding_enabled() or len(q.strip()) < 3:
+    if len(q.strip()) < 3:
         return []
-    try:
-        return NominatimPlaceSearchTool().search_places(q)
-    except ToolExecutionError:
-        # A flaky/unreachable geocoder shouldn't break autocomplete — the
-        # user just sees fewer suggestions this keystroke, not an error.
-        return []
+
+    candidates: list[PlaceCandidate] = []
+    google = _google_places_tool()
+    if google is not None:
+        # Google first: it knows businesses and plus codes that OpenStreetMap
+        # doesn't, and its coordinates are the ones Google Maps itself shows.
+        try:
+            candidates = google.search_places(q)
+        except ToolExecutionError:
+            candidates = []  # fall through to OpenStreetMap
+    if geocoding_enabled():
+        try:
+            osm = NominatimPlaceSearchTool().search_places(q)
+        except ToolExecutionError:
+            # A flaky/unreachable geocoder shouldn't break autocomplete — the
+            # user just sees fewer suggestions this keystroke, not an error.
+            osm = []
+        # Drop OSM entries that are the same spot Google already listed.
+        candidates += [
+            place
+            for place in osm
+            if not any(distance_m(place.latitude, place.longitude, c.latitude, c.longitude) < 150 for c in candidates)
+        ]
+    return candidates[:8]
 
 
 @router.get("/places/nearby", response_model=NearbyPlaces)

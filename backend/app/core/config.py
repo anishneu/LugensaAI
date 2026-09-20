@@ -6,7 +6,6 @@ from pathlib import Path
 from pydantic import BaseModel
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
-FIXTURES_ROOT = BACKEND_ROOT / "fixtures"
 
 # Load backend/.env (gitignored) into the environment, if present, before any
 # of the env-var reads below. Explicit path so this works regardless of the
@@ -30,6 +29,11 @@ class AgentConfig(BaseModel):
     max_evidence_per_topic: int = 4
     min_relevance_score: float = 0.25
     stale_evidence_days: int = 730
+    # After the first search pass the agent may look at what it found and decide
+    # to search again or consult another source. Each round is one such decision;
+    # both limits keep the loop bounded (and inside the per-question time budget).
+    max_research_rounds: int = 2
+    max_actions_per_round: int = 2
 
 
 # --- LLM configuration (Milestone 2) -----------------------------------
@@ -80,10 +84,9 @@ def llm_enabled() -> bool:
 
 # --- Search configuration (Milestone 3) ---------------------------------
 #
-# Nothing calls the Tavily API unless TAVILY_API_KEY is set. Without it,
-# `build_default_agent()` uses the free, fixture-backed Milestone 1 tools
-# exclusively. Tavily's free tier covers light usage; beyond that it is a
-# paid service billed by Tavily, not something this project controls.
+# Nothing calls the Tavily API unless TAVILY_API_KEY is set. Without it nothing is searched, and
+# every response says so. Tavily's free tier (1,000 credits a month) covers light usage; beyond that it
+# is a paid service billed by Tavily, not something this project controls.
 TAVILY_API_KEY_ENV_VAR = "TAVILY_API_KEY"
 TAVILY_MAX_RESULTS = int(os.environ.get("TAVILY_MAX_RESULTS", "4"))
 
@@ -156,3 +159,9 @@ SEMANTIC_MODEL_NAME = os.environ.get("SEMANTIC_MODEL_NAME", "sentence-transforme
 # so the suite never makes a real network call — see tests/conftest.py).
 def geocoding_enabled() -> bool:
     return not bool(os.environ.get("DISABLE_LIVE_GEOCODING"))
+
+
+# Wikipedia/Wikivoyage (app/tools/wiki_tool.py): free, no key. Wikimedia blocks
+# clients that don't identify themselves with contact details, so this is sent
+# in the User-Agent. Override it if you fork the project.
+WIKIMEDIA_CONTACT = os.environ.get("WIKIMEDIA_CONTACT", "https://github.com/anishneu/agentic-ai-location-web")

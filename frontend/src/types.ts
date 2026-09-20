@@ -18,6 +18,7 @@ export type SourceType =
   | "community_forum"
   | "academic"
   | "blog"
+  | "reference"
   | "other";
 
 export interface Evidence {
@@ -95,6 +96,7 @@ export interface ResearchRequest {
   region?: string | null;
   country?: string | null;
   is_business?: boolean;
+  is_address?: boolean;
 }
 
 /** What the backend has switched on, and roughly how long a run takes as a
@@ -111,17 +113,6 @@ export interface Capabilities {
   first_run_warmup: boolean;
 }
 
-export interface LocationSuggestion {
-  name: string;
-  city: string | null;
-  region: string | null;
-  country: string | null;
-  raw_query: string;
-  aliases: string[];
-  latitude: number | null;
-  longitude: number | null;
-}
-
 /** A real point-of-interest candidate from a live search (e.g. one specific
  * Starbucks among several) — see GET /api/places/search. */
 export interface PlaceCandidate {
@@ -134,6 +125,7 @@ export interface PlaceCandidate {
   latitude: number;
   longitude: number;
   is_business: boolean;
+  is_address: boolean;
 }
 
 /** The location currently being researched in the workspace. May start out
@@ -148,6 +140,8 @@ export interface ActiveLocation {
   latitude: number | null;
   longitude: number | null;
   isBusiness: boolean;
+  /** A street address or building rather than a named place; the backend looks for a business at it. */
+  isAddress: boolean;
 }
 
 /** One asked-and-answered question, kept in the session's chat history. */

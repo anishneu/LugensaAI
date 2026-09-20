@@ -134,3 +134,58 @@ def test_live_feed_translates_foreign_items(harvard_square):
     assert len(feed) == 1
     assert feed[0].metadata[META_ORIGINAL_TEXT] == _JAPANESE_TEXT
     assert feed[0].text.startswith("Tokyo Bay")
+
+
+# ---- translation is CPU-bound (~11 ms/char measured), so it must be spent only where it matters
+
+
+class _CountingTranslator(FakeTranslator):
+    def __init__(self) -> None:
+        super().__init__()
+        self.translated_inputs: list[str] = []
+
+    def translate_to_english(self, text, source_language):
+        self.translated_inputs.append(text)
+        return "translated"
+
+
+def _foreign_item(n: int, text: str | None = None):
+    from datetime import datetime, timezone
+
+    from app.models.evidence import Evidence, SourceType
+
+    return Evidence(
+        evidence_id=f"e{n}", source_url=f"https://example.jp/{n}", source_title="日本語のタイトルです。テスト用",
+        source_type=SourceType.OTHER, retrieved_at=datetime.now(timezone.utc), location_scope="x",
+        text=text or ("これは日本語の長い文章です。" * 10), topic="food",
+    )
+
+
+def test_only_the_leading_part_of_a_long_passage_is_translated_but_the_whole_original_is_kept():
+    translator = _CountingTranslator()
+    item = _foreign_item(1, "これは日本語の文章です。" * 200)
+
+    translate_evidence([item], translator)
+
+    body = translator.translated_inputs[0]
+    assert len(body) <= 700 and body.endswith("。")  # cut back to a sentence end
+    assert item.metadata["original_text"] == "これは日本語の文章です。" * 200
+
+
+def test_items_the_caller_rejects_are_never_translated():
+    translator = _CountingTranslator()
+    items = [_foreign_item(1), _foreign_item(2)]
+
+    translate_evidence(items, translator, should_translate=lambda item: item.evidence_id == "e2")
+
+    assert len(translator.translated_inputs) == 2  # e2's text and its title; e1 was skipped entirely
+    assert "original_text" not in items[0].metadata and "original_text" in items[1].metadata
+
+
+def test_the_translation_cap_is_respected():
+    translator = _CountingTranslator()
+    items = [_foreign_item(n) for n in range(5)]
+
+    translate_evidence(items, translator, max_translations=2)
+
+    assert sum("original_text" in i.metadata for i in items) == 2

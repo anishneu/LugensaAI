@@ -121,6 +121,56 @@ TOPIC_DEFINITIONS: dict[str, TopicDefinition] = {
             completion_criteria="At least one community-forum or review-aggregator source with a real excerpt.",
         ),
         TopicDefinition(
+            topic_id="attractions",
+            keywords=(
+                "attractions", "sights", "sightseeing", "things to do", "landmarks", "museum", "museums",
+                "tourist", "tourists", "tourism", "visit", "visiting", "visitor", "visitors", "travel",
+                "traveler", "traveller", "trip", "itinerary", "worth seeing", "worth visiting", "beach", "hike",
+            ),
+            reason_template="The question is about visiting {location}, so what there is to see and do matters.",
+            query_templates=("{location} top attractions things to do travel guide",),
+            business_query_templates=('"{name}" {area} visiting tips what to expect tourists',),
+            preferred_source_types=("news", "blog", "review_aggregator"),
+            expected_evidence="Notable sights, activities, and what a visitor would realistically do there.",
+            completion_criteria="At least one source describing sights or activities at or near this place.",
+        ),
+        TopicDefinition(
+            topic_id="climate",
+            keywords=(
+                "weather", "climate", "season", "seasons", "best time", "rain", "rainy", "monsoon", "snow",
+                "temperature", "humid", "hot", "cold", "winter", "summer",
+            ),
+            reason_template="Weather and season affect when and whether {location} is pleasant to visit or live in.",
+            query_templates=("{location} climate weather best time to visit",),
+            preferred_source_types=("news", "blog", "academic"),
+            expected_evidence="Typical weather by season and the best or worst times of year.",
+            completion_criteria="At least one source describing the climate or seasons.",
+        ),
+        TopicDefinition(
+            topic_id="culture_customs",
+            keywords=(
+                "culture", "customs", "etiquette", "language", "tipping", "dress code", "scam", "scams",
+                "local norms", "religion", "religious", "foreigner", "foreigners", "english speaking",
+            ),
+            reason_template="Local customs, language and common pitfalls shape what a visitor or newcomer to {location} should expect.",
+            query_templates=("{location} local customs etiquette language tips for foreigners scams",),
+            preferred_source_types=("blog", "news", "community_forum"),
+            expected_evidence="Language spoken, etiquette, tipping, dress norms, and common tourist scams.",
+            completion_criteria="At least one source describing local customs or practical cultural tips.",
+        ),
+        TopicDefinition(
+            topic_id="healthcare",
+            keywords=(
+                "hospital", "hospitals", "healthcare", "health care", "doctor", "doctors", "clinic", "clinics",
+                "pharmacy", "medical", "vaccine", "vaccination", "insurance", "emergency",
+            ),
+            reason_template="Access to medical care matters for anyone staying in or moving to {location}.",
+            query_templates=("{location} hospitals healthcare for foreigners pharmacy emergency",),
+            preferred_source_types=("local_government", "news", "blog"),
+            expected_evidence="Nearby hospitals or clinics, whether English is spoken, and how emergencies are handled.",
+            completion_criteria="At least one source describing healthcare access.",
+        ),
+        TopicDefinition(
             topic_id="nearby_amenities",
             keywords=(
                 "restroom",
@@ -161,6 +211,19 @@ PERSONA_DEFINITIONS: dict[str, PersonaDefinition] = {
                 "community_sentiment",
             ),
         ),
+        PersonaDefinition(
+            persona_id="tourist",
+            trigger_keywords=("tourist", "tourists", "visitor", "visitors", "traveler", "traveller", "vacation", "holiday"),
+            topic_bundle=("attractions", "safety", "transportation", "food", "culture_customs", "climate"),
+        ),
+        PersonaDefinition(
+            persona_id="newcomer",
+            trigger_keywords=("expat", "expats", "relocate", "relocating", "move to", "moving to", "live in", "living in"),
+            topic_bundle=(
+                "housing", "cost_of_living", "safety", "healthcare", "transportation", "culture_customs",
+                "community_sentiment",
+            ),
+        ),
     ]
 }
 
@@ -168,4 +231,6 @@ PERSONA_DEFINITIONS: dict[str, PersonaDefinition] = {
 # resident/visitor commentary (including recent safety complaints) is
 # treated as baseline-relevant to any location question, not an optional
 # extra — see TopicDefinition("community_sentiment") above.
-FALLBACK_TOPIC_BUNDLE: tuple[str, ...] = ("housing", "transportation", "safety", "community_sentiment")
+# Not "housing": a general question about a place (anywhere in the world) is as likely to be from a
+# visitor as from someone moving there.
+FALLBACK_TOPIC_BUNDLE: tuple[str, ...] = ("attractions", "safety", "transportation", "community_sentiment")

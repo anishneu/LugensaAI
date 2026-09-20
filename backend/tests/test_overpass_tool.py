@@ -53,9 +53,28 @@ def test_empty_area_returns_no_groups_rather_than_an_error():
     assert _tool({"elements": []}).nearby(_LAT, _LON).groups == []
 
 
-def test_server_failure_is_a_tool_error():
+def test_server_failure_is_a_tool_error(monkeypatch):
+    slept = []
+    monkeypatch.setattr("app.tools.overpass_tool.time.sleep", slept.append)
+
     with pytest.raises(ToolExecutionError):
         _tool({}, status_code=504).nearby(_LAT, _LON)
+
+    assert slept, "the primary server should be retried once after a pause"
+
+
+def test_tries_every_mirror_and_then_the_primary_once_more(monkeypatch):
+    monkeypatch.setattr("app.tools.overpass_tool.time.sleep", lambda s: None)
+    hosts = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        hosts.append(request.url.host)
+        return httpx.Response(504, json={})
+
+    with pytest.raises(ToolExecutionError):
+        OverpassNearbyTool(transport=httpx.MockTransport(handler)).nearby(_LAT + 1, _LON + 1)
+
+    assert hosts[0] == hosts[-1] == "overpass-api.de" and len(set(hosts)) == 3 and len(hosts) == 4
 
 
 def test_distance_is_zero_for_the_same_point():

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation as useRouterLocation } from "react-router-dom";
-import { fetchLocationSuggestions, ResearchApiError, runResearch, searchPlaces } from "../api";
+import { ResearchApiError, runResearch, searchPlaces } from "../api";
 import { ChatSidebar } from "../components/ChatSidebar";
 import { NearbyCard } from "../components/NearbyCard";
 import { PlaceProfileCard } from "../components/PlaceProfileCard";
@@ -9,7 +9,7 @@ import { ResponsePanel } from "../components/ResponsePanel";
 import { SearchHero } from "../components/SearchHero";
 import { WorkspaceHeader } from "../components/WorkspaceHeader";
 import { loadSessions, saveSessions } from "../storage";
-import type { ActiveLocation, LocationSuggestion, QuerySession } from "../types";
+import type { ActiveLocation, QuerySession } from "../types";
 import "./ResearchWorkspace.css";
 
 function normalizeKey(rawQuery: string): string {
@@ -23,17 +23,10 @@ export function ResearchWorkspace() {
   const routerLocation = useRouterLocation();
   const seedQuery = (routerLocation.state as { seedQuery?: string } | null)?.seedQuery ?? "";
 
-  const [suggestions, setSuggestions] = useState<LocationSuggestion[]>([]);
   const [query, setQuery] = useState(seedQuery);
   const [location, setLocation] = useState<ActiveLocation | null>(null);
   const [sessions, setSessions] = useState<QuerySession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchLocationSuggestions()
-      .then(setSuggestions)
-      .catch(() => setSuggestions([])); // Autocomplete is a convenience, not required for the app to work.
-  }, []);
 
   useEffect(() => {
     if (!location) return;
@@ -62,6 +55,7 @@ export function ResearchWorkspace() {
       latitude: null,
       longitude: null,
       isBusiness: false,
+      isAddress: false,
     });
 
     // Geocode right away so the map shows the right place immediately, rather
@@ -80,6 +74,7 @@ export function ResearchWorkspace() {
               latitude: top.latitude,
               longitude: top.longitude,
               isBusiness: top.is_business,
+              isAddress: top.is_address,
             }
           : prev,
       );
@@ -111,6 +106,7 @@ export function ResearchWorkspace() {
         location: location.rawQuery,
         question,
         is_business: location.isBusiness,
+        is_address: location.isAddress,
         latitude: location.latitude,
         longitude: location.longitude,
         city: location.city,
@@ -119,7 +115,10 @@ export function ResearchWorkspace() {
       });
       setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, status: "done", response } : s)));
 
-      if (location.latitude == null && response.location.latitude != null) {
+      // Refine the location from the answer when it was unresolved, or when the backend matched a street
+      // address to the business standing at it (so the Google card and the header show that business).
+      const matchedBusiness = response.location.is_business && !location.isBusiness;
+      if ((location.latitude == null && response.location.latitude != null) || matchedBusiness) {
         setLocation((prev) =>
           prev
             ? {
@@ -129,6 +128,7 @@ export function ResearchWorkspace() {
                 region: response.location.region,
                 country: response.location.country,
                 isBusiness: response.location.is_business,
+                isAddress: false,
                 latitude: response.location.latitude,
                 longitude: response.location.longitude,
               }
@@ -147,7 +147,6 @@ export function ResearchWorkspace() {
       <SearchHero
         query={query}
         onQueryChange={setQuery}
-        suggestions={suggestions}
         onSelect={selectLocation}
         onSubmit={handleSubmitRawQuery}
       />

@@ -5,9 +5,9 @@ import type { QuerySession } from "../types";
 import { relativeTimeFrom } from "../textUtils";
 
 const SUGGESTED_QUESTIONS = [
-  "Would this be a good place for a college student?",
-  "What's the nightlife like around here?",
-  "Is it walkable and safe at night?",
+  "Is it a good place to visit as a tourist?",
+  "What are the customer reviews and the food like?",
+  "Is it safe, and easy to get around?",
 ];
 
 interface ChatSidebarProps {

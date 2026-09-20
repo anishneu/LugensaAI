@@ -1,10 +1,8 @@
 """Provider-independent tool interfaces.
 
-Concrete implementations in `fixture_tools.py` read from local JSON fixtures
-so Milestone 1 runs with no network access and no API keys. A later
-milestone can add e.g. a Tavily-backed WebSearchTool or a geocoding-backed
-LocationResolverTool that implement these same interfaces, and the agent's
-orchestration code will not need to change.
+The agent depends only on these interfaces (Tavily, Google Places and OpenStreetMap implement them
+in app/tools/), so a provider can be swapped without touching the orchestration code. The
+"unconfigured" implementations in app/tools/unconfigured.py return nothing and say so.
 """
 
 from __future__ import annotations

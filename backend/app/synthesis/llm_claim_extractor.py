@@ -1,9 +1,7 @@
-"""LLM-backed claim extraction (Milestone 2).
+"""LLM-backed claim extraction.
 
-Milestone 1's `FixtureClaimExtractor` only works because every fixture
-document is pre-annotated with the claim it supports. `LLMClaimExtractor`
-does the real thing: it reads each evidence item's actual extracted text and
-asks the LLM to propose discrete, checkable claims.
+`LLMClaimExtractor` reads each evidence item's actual extracted text and asks the LLM to propose
+discrete, checkable claims.
 
 The critical safeguard is that the LLM is never trusted to report which
 evidence supports a claim. The LLM is asked to cite the evidence id and
@@ -26,15 +24,14 @@ citation from silently becoming a "supported" claim later in
 
 from __future__ import annotations
 
-import re
-
 from app.core.llm_json import parse_json_object
 from app.core.llm_service import LLMService, LLMServiceError
 from app.models.claim import Claim
 from app.models.evidence import Evidence
 from app.models.plan import ResearchPlan
 from app.synthesis.excerpt import best_excerpt, query_terms
-from app.synthesis.claim_extractor import ClaimExtractor, ExtractionResult, FixtureClaimExtractor
+from app.synthesis.claim_extractor import ClaimExtractor, ExtractionResult, UnavailableClaimExtractor
+from app.verification.support import content_tokens
 
 _SYSTEM_PROMPT = (
     "You extract discrete, checkable factual or clearly-labeled-subjective claims from research "
@@ -64,14 +61,6 @@ _RESPONSE_SHAPE = (
     '"text": "<one-sentence claim>", "supporting_evidence_ids": ["<evidence id>", ...]}, ...]}'
 )
 
-_TOKEN_RE = re.compile(r"[a-z0-9']+")
-_STOPWORDS = {
-    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being", "to", "of", "in", "on",
-    "at", "for", "with", "and", "or", "but", "this", "that", "these", "those", "it", "its", "as",
-    "by", "from", "has", "have", "had", "not", "no", "than", "then", "there", "their", "they",
-    "you", "your", "near", "around", "about", "which", "what", "who", "will", "would", "can",
-    "could", "may", "might", "if", "so", "such", "also", "more", "most", "some", "any", "all",
-}
 # High bar, deliberately: this is a text-similarity fallback standing in for
 # an exact id citation, so it should only fire when a claim is unmistakably
 # a close paraphrase of one specific evidence item, not merely on the same
@@ -80,24 +69,20 @@ _MIN_GROUNDING_OVERLAP = 0.6
 _MIN_GROUNDING_SHARED_TOKENS = 3
 
 
-def _content_tokens(text: str) -> set[str]:
-    return {t for t in _TOKEN_RE.findall(text.lower()) if t not in _STOPWORDS and len(t) > 2}
-
-
 def _best_matching_evidence(claim_text: str, evidence: list[Evidence]) -> Evidence | None:
     """Find the evidence item whose own text best supports `claim_text`,
     purely by lexical overlap — no LLM involved. Used only when the LLM's
     self-reported evidence id/topic didn't validate directly, so a claim can
     still be grounded (and correctly attributed to its real topic) as long
     as its wording is a genuine, verifiable extract of some real passage."""
-    claim_tokens = _content_tokens(claim_text)
+    claim_tokens = content_tokens(claim_text)
     if len(claim_tokens) < _MIN_GROUNDING_SHARED_TOKENS:
         return None
 
     best_evidence: Evidence | None = None
     best_overlap = 0
     for item in evidence:
-        doc_tokens = _content_tokens(f"{item.source_title} {item.text}")
+        doc_tokens = content_tokens(f"{item.source_title} {item.text}")
         shared = len(claim_tokens & doc_tokens)
         if shared > best_overlap:
             best_overlap = shared
@@ -145,7 +130,7 @@ def _format_evidence_by_topic(evidence: list[Evidence], question: str = "") -> t
 class LLMClaimExtractor(ClaimExtractor):
     def __init__(self, llm: LLMService, fallback: ClaimExtractor | None = None) -> None:
         self._llm = llm
-        self._fallback = fallback or FixtureClaimExtractor()
+        self._fallback = fallback or UnavailableClaimExtractor("No claims could be extracted.")
 
     def extract(self, evidence: list[Evidence], plan: ResearchPlan) -> ExtractionResult:
         if not evidence:
@@ -156,7 +141,7 @@ class LLMClaimExtractor(ClaimExtractor):
         except (LLMServiceError, ValueError) as exc:
             fallback_result = self._fallback.extract(evidence, plan)
             fallback_result.notes.append(
-                f"LLM-based claim extraction failed ({exc}); fell back to fixture-based extraction."
+                f"LLM-based claim extraction failed ({exc}); no claims were extracted from the evidence."
             )
             return fallback_result
 
@@ -215,6 +200,7 @@ class LLMClaimExtractor(ClaimExtractor):
                     text=str(text),
                     claim_type=str(resolved_topic_id),
                     supporting_evidence_ids=valid_ids,
+                    check_wording=True,
                 )
             )
 

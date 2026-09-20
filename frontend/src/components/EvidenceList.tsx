@@ -72,12 +72,12 @@ function TopicGroup({ topic, items, sortMode }: { topic: string; items: Evidence
                   )}
                   {item.recency_days != null && <span className="recency">{item.recency_days}d old</span>}
                 </div>
-                <a href={item.source_url} target="_blank" rel="noreferrer" className="evidence-title">
+                <a href={item.source_url} target="_blank" rel="noreferrer" className="evidence-title" dir="auto">
                   {item.source_title}
                 </a>
                 {item.publisher && <div className="evidence-publisher">{item.publisher}</div>}
                 <TranslationNote item={item} />
-                <p className="evidence-text">{cleanDisplayText(item.text)}</p>
+                <p className="evidence-text" dir="auto">{cleanDisplayText(item.text)}</p>
                 <a href={item.source_url} target="_blank" rel="noreferrer" className="evidence-source-link">
                   Read full source →
                 </a>

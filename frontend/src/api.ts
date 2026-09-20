@@ -1,7 +1,6 @@
 import type {
   Capabilities,
   Evidence,
-  LocationSuggestion,
   NearbyPlaces,
   PlaceProfile,
   PlaceCandidate,
@@ -51,18 +50,9 @@ export async function runResearch(request: ResearchRequest): Promise<ResearchRes
   return response.json();
 }
 
-export async function fetchLocationSuggestions(): Promise<LocationSuggestion[]> {
-  const response = await fetch(`${API_BASE_URL}/api/locations`);
-  if (!response.ok) {
-    throw new ResearchApiError(`Could not load location suggestions (${response.status})`, response.status);
-  }
-  return response.json();
-}
-
-/** Live point-of-interest search (e.g. every Starbucks near "Cambridge, MA") —
- * any real place, not just the two demo neighborhoods. Returns an empty
- * array (never throws) on failure — autocomplete should degrade quietly to
- * the static suggestions rather than surface an error banner. */
+/** Live place search (Google when configured, else OpenStreetMap): any real
+ * place, anywhere. Returns an empty array (never throws) on failure, so
+ * autocomplete degrades quietly instead of surfacing an error banner. */
 export async function searchPlaces(query: string, signal?: AbortSignal): Promise<PlaceCandidate[]> {
   if (query.trim().length < 3) return [];
   try {

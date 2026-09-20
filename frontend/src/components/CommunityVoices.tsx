@@ -68,7 +68,7 @@ export function CommunityVoices({ evidence }: CommunityVoicesProps) {
                     </span>
                   </div>
                   <TranslationNote item={item} />
-                  <p className="voice-text">“{cleanDisplayText(item.text)}”</p>
+                  <p className="voice-text" dir="auto">“{cleanDisplayText(item.text)}”</p>
                   {item.published_at && (
                     <div className="voice-posted">🕒 Posted {absoluteTimeFrom(item.published_at)}</div>
                   )}

@@ -22,12 +22,17 @@ import httpx
 from app.models.nearby import NearbyGroup, NearbyItem, NearbyPlaces
 from app.tools.base import ToolExecutionError
 
-# The main public server sheds load with 429/504 fairly often; a second
-# independent mirror serves the same data, so try it before giving up.
+# The main public server sheds load with 429/504 fairly often, and measured against 15 places it
+# failed on 6 (each after a long wait) when hit back to back, yet answered in ~6 s a minute later.
+# So: independent mirrors, a short per-attempt timeout, and one retry of the primary after a pause.
+# Two other mirrors that were once popular (overpass.openstreetmap.fr, maps.mail.ru) now refuse
+# or time out for this query and were dropped after testing.
 _OVERPASS_URLS = (
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
 )
+_RETRY_PRIMARY_AFTER_SECONDS = 2.0
 _CACHE_TTL_SECONDS = 10 * 60
 _CACHE: dict[tuple[float, float, int], tuple[float, NearbyPlaces]] = {}
 _CACHE_LOCK = threading.Lock()
@@ -74,7 +79,7 @@ def _classify(tags: dict) -> tuple[str, str] | None:
 class OverpassNearbyTool:
     """`transport` is exposed purely so tests can inject `httpx.MockTransport`."""
 
-    def __init__(self, transport: httpx.BaseTransport | None = None, timeout: float = 35.0) -> None:
+    def __init__(self, transport: httpx.BaseTransport | None = None, timeout: float = 15.0) -> None:
         self._client = httpx.Client(transport=transport, timeout=timeout, headers={"User-Agent": _USER_AGENT})
 
     def nearby(self, latitude: float, longitude: float, radius_m: int = 600) -> NearbyPlaces:
@@ -91,7 +96,9 @@ class OverpassNearbyTool:
 
     def _fetch_elements(self, query: str) -> list[dict]:
         last_error: Exception | None = None
-        for url in _OVERPASS_URLS:
+        for attempt, url in enumerate((*_OVERPASS_URLS, _OVERPASS_URLS[0])):
+            if attempt == len(_OVERPASS_URLS):
+                time.sleep(_RETRY_PRIMARY_AFTER_SECONDS)  # last resort: the primary again, once it has cooled
             try:
                 response = self._client.post(url, data={"data": query})
                 response.raise_for_status()

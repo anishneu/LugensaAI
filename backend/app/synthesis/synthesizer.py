@@ -11,13 +11,12 @@ both synthesizers via `deterministic_limitations()` below, so an LLM
 omitting an inconvenient caveat can never make it disappear from the
 response.
 
-`topics_with_evidence` exists because evidence and claims are no longer
-guaranteed to line up 1:1 once real tools are in play (Milestone 3):
-`FixtureClaimExtractor` can't produce a claim from real web page text, so a
-topic can have evidence but zero claims. Without this, that would render as
+`topics_with_evidence` exists because evidence and claims don't line up 1:1:
+a topic can have evidence but zero claims (no model configured, or none of the
+proposed claims survived verification). Without this, that would render as
 "no evidence was found," which is false — evidence was found, it just
 didn't turn into a claim. When not provided, it defaults to the claims'
-own topics, preserving Milestone 1's behavior where the two always matched.
+own topics.
 """
 
 from __future__ import annotations

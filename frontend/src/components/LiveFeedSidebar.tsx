@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchLiveFeed, ResearchApiError } from "../api";
+import { fetchCapabilities, fetchLiveFeed, ResearchApiError } from "../api";
 import { absoluteTimeFrom, cleanDisplayText, formatFeedTimestamp, relativeTimeFrom } from "../textUtils";
 import { TranslationNote } from "./TranslationNote";
 import { SOURCE_TYPE_ICON } from "../sourceTypeIcon";
@@ -47,6 +47,9 @@ export function LiveFeedSidebar({ location }: LiveFeedSidebarProps) {
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const [page, setPage] = useState(1);
+  // Whether the backend has live search at all. An empty feed means two different things: no key, or
+  // simply nothing published about this place in the last 7 days (normal for a village).
+  const [liveSearch, setLiveSearch] = useState<boolean | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const load = useCallback(() => {
@@ -83,6 +86,10 @@ export function LiveFeedSidebar({ location }: LiveFeedSidebarProps) {
   }, [location.rawQuery, location.latitude, location.longitude, location.city, location.region, location.country]);
 
   useEffect(() => {
+    fetchCapabilities().then((caps) => setLiveSearch(caps ? caps.live_search : null));
+  }, []);
+
+  useEffect(() => {
     load();
     const interval = window.setInterval(load, AUTO_REFRESH_MS);
     return () => {
@@ -117,7 +124,9 @@ export function LiveFeedSidebar({ location }: LiveFeedSidebarProps) {
 
       {!error && unavailable && !loading && (
         <p className="empty-note">
-          No live feed available — this needs a Tavily API key configured on the backend (`TAVILY_API_KEY`).
+          {liveSearch === false
+            ? "No live feed available — this needs a Tavily API key configured on the backend (`TAVILY_API_KEY`)."
+            : `Nothing was published about ${regionLabel(location)} in the last 7 days. Small places often have no local news; this is not an error.`}
         </p>
       )}
 
@@ -137,8 +146,8 @@ export function LiveFeedSidebar({ location }: LiveFeedSidebarProps) {
                     </span>
                   </div>
                   <TranslationNote item={item} inline />
-                  <div className="feed-item-title">{item.source_title}</div>
-                  <p className="feed-item-snippet">{cleanDisplayText(item.text)}</p>
+                  <div className="feed-item-title" dir="auto">{item.source_title}</div>
+                  <p className="feed-item-snippet" dir="auto">{cleanDisplayText(item.text)}</p>
                   <div className="feed-item-footer">
                     <span className="feed-item-location">📍 {item.location_scope}</span>
                     {item.publisher && <span className="feed-item-publisher">{item.publisher}</span>}

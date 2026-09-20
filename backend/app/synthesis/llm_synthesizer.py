@@ -162,6 +162,9 @@ def _contains_absolute_phrase(*texts: str) -> bool:
 
 
 class LLMSynthesizer(Synthesizer):
+    # The agent checks free-written prose against the sources (see verification/support.py).
+    writes_free_text = True
+
     def __init__(self, llm: LLMService, fallback: Synthesizer | None = None) -> None:
         self._llm = llm
         self._fallback = fallback or TemplateSynthesizer()

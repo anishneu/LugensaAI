@@ -11,9 +11,8 @@ class FallbackLocationResolver(LocationResolverTool):
     """Tries `primary` first; only calls `fallback` if that raises
     `LocationNotFoundError`.
 
-    Used to keep the two demo neighborhoods resolving instantly and
-    deterministically (no network) via `FixtureLocationResolver`, while any
-    other real place falls through to live geocoding.
+    Used to try Google first (it knows businesses and plus codes) and fall
+    through to OpenStreetMap when Google has nothing or isn't configured.
     """
 
     def __init__(self, primary: LocationResolverTool, fallback: LocationResolverTool) -> None:

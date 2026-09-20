@@ -14,6 +14,7 @@ class SourceType(StrEnum):
     COMMUNITY_FORUM = "community_forum"
     ACADEMIC = "academic"
     BLOG = "blog"
+    REFERENCE = "reference"  # encyclopedia / travel guide (Wikipedia, Wikivoyage)
     OTHER = "other"
 
 

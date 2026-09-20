@@ -25,6 +25,12 @@ def _isolated_test_environment(monkeypatch, tmp_path):
     monkeypatch.setenv("DISABLE_LIVE_GEOCODING", "1")
     monkeypatch.setenv("DISABLE_TRANSLATION", "1")
     monkeypatch.setenv("EVIDENCE_DB_PATH", str(tmp_path / "evidence.db"))
+    # Module-level caches would otherwise carry one test's mocked Google answer
+    # into the next test that asks the same question.
+    from app.tools import google_places_tool
+
+    google_places_tool._CACHE.clear()
+    google_places_tool._SEARCH_CACHE.clear()
 
 
 @pytest.fixture

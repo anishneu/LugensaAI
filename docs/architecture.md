@@ -25,21 +25,22 @@ app/agents/       LocationResearchAgent (orchestration) + factory wiring
 app/api/          FastAPI route
 ```
 
-Each layer that could swap in a real (paid, networked, LLM-backed, or just heavier) implementation
-is an abstract interface with a free, deterministic default alongside it:
+Each layer that could swap in a real (networked, LLM-backed, or just heavier) implementation is an
+abstract interface. Where a service isn't configured the default returns nothing and says so; it is
+never a stand-in that invents data:
 
-| Interface | Free / deterministic default | Alternative implementation |
+| Interface | Default when nothing is configured | Real implementation |
 |---|---|---|
-| `LocationResolverTool` | `FixtureLocationResolver` (alias lookup in `fixtures/locations.json`) | `NominatimLocationResolverTool` — real geocoding for any point of interest via free OpenStreetMap Nominatim, wrapped in `FallbackLocationResolver` so the two demo neighborhoods still resolve instantly from fixtures (opt-out via `DISABLE_LIVE_GEOCODING=1`) |
-| `WebSearchTool` | `FixtureWebSearchTool` (reads `fixtures/sources/<slug>/<topic>.json`) | `TavilyWebSearchTool` — real search via the Tavily API (opt-in via `TAVILY_API_KEY`) |
-| `PageRetrievalTool` | `FixturePageRetrievalTool` (full-text lookup from the same fixtures) | `TavilyPageRetrievalTool` — reads full text Tavily already returned during search |
+| `LocationResolverTool` | `UnconfiguredLocationResolver` (says geocoding is off) | `GooglePlacesLocationResolver` when `GOOGLE_PLACES_API_KEY` is set, then `NominatimLocationResolverTool` (free OpenStreetMap; opt-out via `DISABLE_LIVE_GEOCODING=1`), chained by `FallbackLocationResolver` (`build_location_resolver`) |
+| `WebSearchTool` | `UnconfiguredWebSearchTool` (returns nothing; the response says search isn't configured) | `TavilyWebSearchTool` — real search via the Tavily API (opt-in via `TAVILY_API_KEY`) |
+| `PageRetrievalTool` | `UnconfiguredPageRetrievalTool` (returns nothing) | `TavilyPageRetrievalTool` — reads full text Tavily already returned during search |
 | `ResearchPlanner` | `KeywordResearchPlanner` (rule-based keyword → topic mapping) | `LLMResearchPlanner` — chooses from the fixed topic taxonomy via the LLM (opt-in via `OLLAMA_ENABLED`) |
 | `EvidenceRetriever` | `KeywordEvidenceRetriever` (lexical term-overlap scoring) | `HybridEvidenceRetriever` (keyword + `SemanticEvidenceRetriever`, local `sentence-transformers`; auto-enabled if installed, opt-out via `DISABLE_SEMANTIC_RETRIEVAL=1`) |
 | `EvidenceRepository` | `InMemoryEvidenceRepository` (per-run, not persisted) | `SQLiteEvidenceRepository` — durable, per-run-scoped local file, the actual default in `build_default_agent()` |
-| `ClaimExtractor` | `FixtureClaimExtractor` (reads a pre-annotated `claim_text` per fixture doc) | `LLMClaimExtractor` — extracts from real evidence text (opt-in via `OLLAMA_ENABLED`). Grounding is enforced independently of the LLM's self-report: a cited evidence id/topic is checked against the real evidence given, and if that citation doesn't validate, `_best_matching_evidence()` recovers grounding by lexical overlap between the claim's own wording and the real evidence text — a claim is kept only if one of those two checks passes, never on the LLM's say-so alone |
+| `ClaimExtractor` | `UnavailableClaimExtractor` (no claims; says a model is needed) | `LLMClaimExtractor` — extracts from real evidence text (opt-in via `OLLAMA_ENABLED`). Grounding is enforced independently of the LLM's self-report: a cited evidence id/topic is checked against the real evidence given, and if that citation doesn't validate, `_best_matching_evidence()` recovers grounding by lexical overlap between the claim's own wording and the real evidence text — a claim is kept only if one of those two checks passes, never on the LLM's say-so alone |
 | `ClaimVerifier` | `EvidenceBasedClaimVerifier` — relevance/recency checks, always; a second deterministic pass flags same-topic contradictions via a coarse antonym heuristic (never LLM-backed) | — (no alternative implementation; see "Provenance and honesty" below for why) |
 | `Synthesizer` | `TemplateSynthesizer` — renders verified claims into prose via templates; for a topic with evidence but no claim, quotes the single most relevant *and* credible excerpt (blending relevance with a source-type quality score) rather than reporting only a gap | `LLMSynthesizer` — sees both verified claims and the full raw evidence (grouped by topic, labeled by source type/publisher/date), so it can answer the actual question from real evidence even when claim extraction found little; rejects absolute language, including absolute safety claims like "no crime has ever happened here" (opt-in via `OLLAMA_ENABLED`) |
-| `LLMService` | `FakeLLMService` (deterministic; used only in tests) | `OllamaLLMService` (opt-in via `OLLAMA_ENABLED`, free and local). It is the only real implementation; the interface stays provider-independent, so another can be added without touching the pipeline |
+| `LLMService` | — (none: without a model the LLM-backed components are simply not used) | `OllamaLLMService` (opt-in via `OLLAMA_ENABLED`, free and local). It is the only real implementation; the interface stays provider-independent, so another can be added without touching the pipeline |
 
 `app/agents/factory.py` is the one place that wires concrete implementations together;
 everything else — including `LocationResearchAgent` itself — depends only on the interfaces,
@@ -73,7 +74,7 @@ an LLM is in the loop — `ClaimVerifier` is never LLM-backed and never moves in
 order (see `docs/research-workflow.md`). Its contradiction check is a real but deliberately
 coarse keyword-antonym heuristic (`app/verification/contradiction.py`), documented as exactly
 that rather than oversold as full natural-language understanding. Remaining known gaps
-(fixture-only data unless live search is enabled, no real geocoding) are surfaced in every
+(no evidence at all unless live search is configured, no claims without a model) are surfaced in every
 response's `limitations` field rather than hidden.
 
 ## Milestone status
@@ -81,7 +82,9 @@ response's `limitations` field rather than hidden.
 All eight milestones from the original project plan are implemented, plus later additions
 (9 onward, below); what's opt-in vs. free by default is summarized in the interface table above.
 
-- **Milestone 1:** fixture-backed, fully deterministic pipeline. No API key, no network.
+- **Milestone 1:** the deterministic pipeline, first built and tested against invented fixture
+  documents for two neighborhoods. Those fixtures have since been moved out of the product (see the
+  last milestone below).
 - **Milestone 2:** LLM-backed planning, claim extraction, and synthesis — opt-in via the free
   local `OLLAMA_ENABLED`, falling back to its Milestone 1 counterpart on failure.
 - **Milestone 3:** live web search + page retrieval via Tavily — opt-in via `TAVILY_API_KEY`,
@@ -152,6 +155,11 @@ All eight milestones from the original project plan are implemented, plus later 
   characters, usually navigation. Checked live against Google, `reviews` came back absent for a
   busy place on both endpoints while `reviewSummary` came back fine, so the summary is kept and
   labeled as Google's own AI text.
+  A user-reported miss (a restaurant in Kurume pasted as a plus code) showed the deeper problem:
+  the place was being *found* by OpenStreetMap, which lacks the business and can't read plus codes,
+  so it was never flagged as a business and Google was never asked. `GooglePlacesTool.search_places`
+  and `GooglePlacesLocationResolver` now resolve places first when the key is set, with OpenStreetMap
+  as fallback; the same question then returned Google's 3.9 stars from 384 reviews plus a Tabelog page.
 - **Milestone 13:** the dependency and pipeline cleanup. The Anthropic provider and the Firecrawl
   integration were removed: neither was exercised (no key was ever used for the first; the second
   fired on 0 of 14 measured pages and returned neither cleaner text nor dates), and a billed model
@@ -161,6 +169,46 @@ All eight milestones from the original project plan are implemented, plus later 
   mixture-of-experts model, ~3B active parameters) with thinking mode off and Ollama's integrated-GPU
   backend on: measured at 192 s for a business question and 259 s for a neighbourhood question,
   against 15+ minutes for the same model on CPU only. `backend/README.md` has the full timing table
-  and how each number was obtained. The pipeline is still a fixed sequence with an LLM at three steps, not
-  an autonomous agent: nothing decides what to do next, re-plans, or searches again when evidence is
-  thin.
+  and how each number was obtained.
+- **Milestone 14:** an audit of whether the agent and the RAG were doing what the project claims found
+  four gaps, all now addressed. (1) *The agent didn't decide anything*: a fixed sequence; the
+  `ADDITIONAL_RESEARCH` trace stage only logged. It now has a bounded reflect-then-act loop over two
+  tools (`app/agents/reflection.py`; see `docs/research-workflow.md`). (2) *Retrieval never saw the
+  question*: the search used one fixed template query per topic; follow-up queries are now built from
+  the question. (3) *"Supported" meant less than it sounded*: a model-written claim that cited a real
+  evidence id was marked supported without anyone checking its wording, so a real citation could
+  vouch for an invented sentence. The verifier now also requires the claim's content words (at least
+  half) and every figure in it to appear in the sources it cites (`app/verification/support.py`).
+  (4) *The overview was unchecked prose*: sentences that no single source backs are now listed in the
+  limitations as the model's own inference. Both checks are lexical, not natural-language inference:
+  they can reject a faithful paraphrase that shares few words, but cannot accept a statement whose
+  words and figures aren't in the source. Added `WikiContextTool` (free, CC BY-SA) as the second
+  tool. Checked live on one question (an 82-94 s run became 193 s, the extra time being two short
+  model decisions plus a second search, and it found the town's official tourism page the first pass
+  missed); not yet benchmarked.
+- **Milestone 15:** worldwide coverage. The system had only been exercised on two US neighborhoods, so
+  it was probed against 15 places on every inhabited continent (`evaluation/global_coverage.py`, which
+  anyone can re-run) and the defects fixed: English-only search (14 of 15 places returned only English
+  sources) now supplemented by local-language search on the place's native-script name
+  (`app/tools/locale.py`, `app/planning/local_queries.py`); substring keyword matching that planned
+  *nightlife* for "Barcelona"; a topic set built around a US college student (added attractions,
+  climate, customs, healthcare, and visitor and newcomer personas); islands and beaches treated as
+  businesses; a pin 158 km off for "Sukhumvit, Bangkok"; official sources recognised only as `.gov` /
+  `.edu`; Latin-only text and digit handling in the verification checks; right-to-left rendering; and
+  an Overpass server that failed for 6 of 15 places. Local-language search exposed a real cost: the
+  free translator takes ~11 ms per character on a laptop CPU, which made one live run exceed 25
+  minutes, so translation is now limited to pages that mention the place (checked on the original
+  text), 6 per search, and their first 700 characters. Live runs on four places finished in 135-330 s.
+  Known limits, stated in the README: languages the translator has no pack for get English-only search;
+  an ambiguous name (in Arabic "Zamalek" is also a football club) can surface irrelevant pages, which
+  the claim checks then mostly exclude; not a benchmark of answer quality.
+- **Milestone 16:** removing invented data from the product. An audit found that on an install with no
+  keys, asking about Harvard Square returned 12 fabricated sources (`.example.net` URLs, publisher
+  "(fixture)") and 8 claims marked *supported*, with a confident summary and no warning, and that the
+  landing page showed a made-up sample answer citing real domains that were never checked. Both are
+  gone: the fixture documents, their tools and the `/api/locations` demo-places endpoint moved to
+  `tests/` (nothing under `app/` may reference them; a test enforces that), unconfigured tools return
+  nothing and say so, `LLMClaimExtractor` no longer falls back to canned claims, and the landing page
+  describes what a response contains without asserting anything about a place. Also removed the unused
+  `FakeLLMService`, and merged two duplicate copies of the resolver-chain builder.
+

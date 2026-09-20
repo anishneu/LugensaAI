@@ -1,39 +1,22 @@
 """Wires up the default agent: concrete implementations behind the
 provider-independent interfaces.
 
-With no API keys and no optional packages installed, this returns the exact
-Milestone 1 agent: fixture-backed tools, rule-based planning, fixture-
-annotated claim extraction, template-based synthesis, keyword-only
-retrieval, in-process evidence storage backed by a local SQLite file. Zero
-network calls, zero API cost.
+Nothing here is a stand-in for real data. With no keys set, the agent has no way to search or to
+read a page, and every response says so in its limitations rather than serving invented sources:
 
-Setting `OLLAMA_ENABLED` (free, local, needs Ollama installed — see
-backend/README.md) swaps the planner, claim extractor, and synthesizer for
-their LLM-backed Milestone 2 counterparts. Setting `TAVILY_API_KEY` swaps the
-web search and page retrieval tools for their live Milestone 3 counterparts.
-Either can be set independently, but real search without the LLM option means
-evidence is collected without being turned into claims —
-`FixtureClaimExtractor` can't extract from real page text (see
-backend/README.md) — so `build_default_agent()` logs nothing special for
-that combination, it's just an honest, documented limitation rather than
-something the factory tries to paper over. Having `sentence-transformers`
-installed enables hybrid (keyword + semantic) retrieval automatically
-(Milestone 4); `DISABLE_SEMANTIC_RETRIEVAL=1` forces keyword-only regardless.
+- `TAVILY_API_KEY` turns on live web search and page retrieval.
+- `OLLAMA_ENABLED` (free, local, needs Ollama installed; see backend/README.md) turns on the LLM
+  planner, claim extractor, synthesizer, research reflection and local-language query writer.
+  Without it the planner is rule-based and no claims are extracted, since claims can't be read out
+  of real pages without a model.
+- `GOOGLE_PLACES_API_KEY` adds Google as the first place resolver and a rating/summary card.
+- Geocoding (OpenStreetMap), translation and semantic retrieval are on by default when their
+  packages are installed, and off with `DISABLE_LIVE_GEOCODING`, `DISABLE_TRANSLATION` and
+  `DISABLE_SEMANTIC_RETRIEVAL`.
 
-Every LLM-backed component falls back to its Milestone 1 equivalent on any
-failure, so a flaky API call degrades a run rather than crashing it. This is
-the one place that knows about concrete implementations; the API layer and
-most tests depend only on this factory (or inject their own implementations
-directly for isolated unit tests).
-
-Location resolution defaults to `FallbackLocationResolver`: the two demo
-neighborhoods still resolve instantly via `FixtureLocationResolver` (no
-network), and anything else — a specific address, a specific business —
-falls through to live geocoding via OpenStreetMap Nominatim (free, no key,
-`DISABLE_LIVE_GEOCODING=1` to force fixture-only). Resolving a real place
-this way still needs `TAVILY_API_KEY` to actually find evidence about it —
-`FixtureWebSearchTool` has no fixture files for anywhere but the two demo
-neighborhoods.
+Every LLM-backed component falls back to a rule-based or empty result on any failure, and says so, so
+a flaky call degrades a run rather than crashing it. This is the one place that knows about concrete
+implementations; the API layer depends only on this factory, and unit tests inject their own.
 """
 
 from __future__ import annotations
@@ -42,6 +25,7 @@ import os
 import uuid
 from pathlib import Path
 
+from app.agents.reflection import LLMReflector, Reflector, RuleBasedReflector
 from app.agents.location_research_agent import LocationResearchAgent
 from app.core.config import (
     TAVILY_API_KEY_ENV_VAR,
@@ -65,18 +49,37 @@ from app.retrieval.base import EvidenceRetriever
 from app.retrieval.hybrid_retriever import HybridEvidenceRetriever
 from app.retrieval.keyword_retriever import KeywordEvidenceRetriever
 from app.retrieval.semantic_retriever import SemanticEvidenceRetriever
-from app.synthesis.claim_extractor import ClaimExtractor, FixtureClaimExtractor
+from app.synthesis.claim_extractor import ClaimExtractor, UnavailableClaimExtractor
 from app.synthesis.llm_claim_extractor import LLMClaimExtractor
 from app.synthesis.llm_synthesizer import LLMSynthesizer
 from app.synthesis.synthesizer import Synthesizer, TemplateSynthesizer
 from app.tools.base import LocationResolverTool, PageRetrievalTool, WebSearchTool
 from app.tools.composite import FallbackLocationResolver
-from app.tools.google_places_tool import GooglePlacesTool
-from app.tools.fixture_tools import FixtureLocationResolver, FixturePageRetrievalTool, FixtureWebSearchTool
+from app.tools.google_places_tool import GooglePlacesLocationResolver, GooglePlacesTool
+from app.tools.unconfigured import UnconfiguredLocationResolver, UnconfiguredPageRetrievalTool, UnconfiguredWebSearchTool
 from app.tools.nominatim_tool import NominatimLocationResolverTool
 from app.tools.tavily_tools import TavilyPageRetrievalTool, TavilyWebSearchTool
 from app.tools.translation import default_translator
+from app.tools.wiki_tool import WikiContextTool
+from app.tools.locale import LocaleResolver
+from app.planning.local_queries import LLMLocalQueryWriter, LocalQueryWriter, RuleBasedLocalQueryWriter
 from app.verification.verifier import EvidenceBasedClaimVerifier
+
+
+def build_location_resolver(google: GooglePlacesTool | None, use_live_geocoding: bool) -> LocationResolverTool:
+    """Google first when configured (it knows businesses and plus codes that OpenStreetMap doesn't), then
+    OpenStreetMap. With neither, a resolver that says why it can't resolve."""
+    live: list[LocationResolverTool] = []
+    if google is not None:
+        live.append(GooglePlacesLocationResolver(google))
+    if use_live_geocoding:
+        live.append(NominatimLocationResolverTool())
+    if not live:
+        return UnconfiguredLocationResolver()
+    chain = live[-1]
+    for resolver in reversed(live[:-1]):
+        chain = FallbackLocationResolver(resolver, chain)
+    return chain
 
 
 def build_default_agent(
@@ -111,12 +114,22 @@ def build_default_agent(
     if use_llm:
         llm: LLMService = OllamaLLMService()
         planner = LLMResearchPlanner(llm, fallback=KeywordResearchPlanner())
-        claim_extractor = LLMClaimExtractor(llm, fallback=FixtureClaimExtractor())
+        claim_extractor = LLMClaimExtractor(llm)
         synthesizer = LLMSynthesizer(llm, fallback=TemplateSynthesizer())
     else:
         planner = KeywordResearchPlanner()
-        claim_extractor = FixtureClaimExtractor()
+        claim_extractor = UnavailableClaimExtractor(
+            "No language model is configured (set OLLAMA_ENABLED=1), so no claims were extracted from the "
+            "evidence found; only the sources themselves are shown."
+        )
         synthesizer = TemplateSynthesizer()
+
+    # The research loop only makes sense against live sources: with no search configured there is
+    # nothing to search again. The model decides what to do next when there is one; otherwise a
+    # rule-based judge does.
+    reflector: Reflector | None = None
+    if use_live_search:
+        reflector = LLMReflector(llm, fallback=RuleBasedReflector()) if use_llm else RuleBasedReflector()
 
     web_search_tool: WebSearchTool
     page_retrieval_tool: PageRetrievalTool
@@ -130,8 +143,8 @@ def build_default_agent(
         web_search_tool = tavily_search
         page_retrieval_tool = TavilyPageRetrievalTool(tavily_search.raw_content_cache)
     else:
-        web_search_tool = FixtureWebSearchTool()
-        page_retrieval_tool = FixturePageRetrievalTool()
+        web_search_tool = UnconfiguredWebSearchTool()
+        page_retrieval_tool = UnconfiguredPageRetrievalTool()
 
     retriever: EvidenceRetriever
     if use_semantic_retrieval:
@@ -143,11 +156,19 @@ def build_default_agent(
         db_path=db_path or evidence_db_path(), run_id=str(uuid.uuid4())
     )
 
-    location_resolver: LocationResolverTool
-    if use_live_geocoding:
-        location_resolver = FallbackLocationResolver(FixtureLocationResolver(), NominatimLocationResolverTool())
-    else:
-        location_resolver = FixtureLocationResolver()
+    place_profile_tool = (
+        GooglePlacesTool(api_key=os.environ.get(GOOGLE_PLACES_API_KEY_ENV_VAR)) if place_profile_enabled() else None
+    )
+
+    location_resolver = build_location_resolver(place_profile_tool, use_live_geocoding)
+
+    # Local-language search needs live search (there is nothing to search otherwise), the free translator
+    # (the results must be readable) and reverse geocoding.
+    locale_resolver: LocaleResolver | None = None
+    local_query_writer: LocalQueryWriter | None = None
+    if use_live_search and use_live_geocoding and translation_enabled():
+        locale_resolver = LocaleResolver(google=place_profile_tool)
+        local_query_writer = LLMLocalQueryWriter(llm) if use_llm else RuleBasedLocalQueryWriter()
 
     return LocationResearchAgent(
         location_resolver=location_resolver,
@@ -160,7 +181,9 @@ def build_default_agent(
         verifier=EvidenceBasedClaimVerifier(),
         synthesizer=synthesizer,
         config=config,
-        place_profile_tool=(
-            GooglePlacesTool(api_key=os.environ.get(GOOGLE_PLACES_API_KEY_ENV_VAR)) if place_profile_enabled() else None
-        ),
+        place_profile_tool=place_profile_tool,
+        reflector=reflector,
+        wiki_tool=WikiContextTool() if (use_live_search and use_live_geocoding) else None,
+        locale_resolver=locale_resolver,
+        local_query_writer=local_query_writer,
     )

@@ -8,7 +8,7 @@ below makes a real network call.
 from app.agents.factory import build_default_agent
 from app.api.routes import capabilities
 from app.core.llm_service import OllamaLLMService
-from app.synthesis.claim_extractor import FixtureClaimExtractor
+from app.synthesis.claim_extractor import UnavailableClaimExtractor
 
 
 def test_ollama_is_used_when_the_llm_path_is_on():
@@ -17,10 +17,11 @@ def test_ollama_is_used_when_the_llm_path_is_on():
     assert isinstance(agent.claim_extractor._llm, OllamaLLMService)
 
 
-def test_no_llm_falls_back_to_the_rule_based_components():
+def test_no_llm_means_no_claims_and_says_why():
     agent = build_default_agent(use_llm=False)
 
-    assert isinstance(agent.claim_extractor, FixtureClaimExtractor)
+    assert isinstance(agent.claim_extractor, UnavailableClaimExtractor)
+    assert "OLLAMA_ENABLED" in agent.claim_extractor.extract([], None).notes[0]
 
 
 def test_capabilities_report_ollama_only_when_enabled(monkeypatch):

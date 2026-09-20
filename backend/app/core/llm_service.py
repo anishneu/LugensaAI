@@ -9,11 +9,8 @@ by the LLM-backed planner, claim extractor, and synthesizer in
 - `OllamaLLMService` — free and local, used when `OLLAMA_ENABLED` is set
   (see `app/core/config.py` and `app/agents/factory.py`).
 
-By default (not set) the pipeline still runs entirely on the free,
-deterministic Milestone 1 path.
-
-`FakeLLMService` is a deterministic stand-in used only in tests. It is never
-used for real research output.
+When it is not set the pipeline still runs on its rule-based components, and
+says in each response which steps were skipped for lack of a model.
 """
 
 from __future__ import annotations
@@ -51,13 +48,6 @@ class LLMService(ABC):
         Raises LLMServiceError on any failure (network, auth, rate limit).
         """
         raise NotImplementedError
-
-
-class FakeLLMService(LLMService):
-    """Deterministic stand-in for tests. Never used for real research output."""
-
-    def complete(self, system_prompt: str, user_prompt: str) -> str:
-        return f"[fake-llm-response system_len={len(system_prompt)} user_len={len(user_prompt)}]"
 
 
 class OllamaLLMService(LLMService):

@@ -204,3 +204,257 @@ def test_agent_says_so_when_google_maps_is_not_connected_for_a_business():
 
     assert any("GOOGLE_PLACES_API_KEY" in lim for lim in response.limitations)
     assert any("thin" in lim for lim in response.limitations)
+
+
+# ---- resolving places through Google (businesses and plus codes) ----
+
+from app.tools.base import LocationNotFoundError  # noqa: E402
+from app.tools.google_places_tool import (  # noqa: E402
+    _SEARCH_CACHE,
+    GooglePlacesLocationResolver,
+    looks_like_plus_code,
+)
+
+_SUIRAN = {
+    "id": "ChIJsuiran",
+    "displayName": {"text": "Suiran", "languageCode": "en"},
+    "formattedAddress": "Iida-1279-3 Zendojimachi, Kurume, Fukuoka 839-0824, Japan",
+    "addressComponents": [
+        {"longText": "Kurume", "types": ["locality", "political"]},
+        {"longText": "Fukuoka", "types": ["administrative_area_level_1", "political"]},
+        {"longText": "Japan", "types": ["country", "political"]},
+    ],
+    "location": {"latitude": 33.32532, "longitude": 130.61537},
+    "types": ["seafood_restaurant", "restaurant", "food", "point_of_interest", "establishment"],
+    "primaryTypeDisplayName": {"text": "Seafood restaurant", "languageCode": "en"},
+}
+_PLUS_CODE_POINT = {
+    "id": "plus",
+    "displayName": {"text": "8JG8+44"},
+    "formattedAddress": "8JG8+44 Kurume, Fukuoka, Japan",
+    "location": {"latitude": 33.32531, "longitude": 130.61531},
+    "types": ["plus_code"],
+}
+
+
+@pytest.fixture(autouse=True)
+def _clear_search_cache():
+    _SEARCH_CACHE.clear()
+
+
+def _routed(routes: dict[str, dict]) -> GooglePlacesTool:
+    def handler(request: httpx.Request) -> httpx.Response:
+        for suffix, payload in routes.items():
+            if str(request.url).endswith(suffix):
+                return httpx.Response(200, json=payload)
+        return httpx.Response(404, json={})
+
+    return GooglePlacesTool(api_key="k", transport=httpx.MockTransport(handler))
+
+
+def test_recognises_pasted_plus_codes_but_not_ordinary_queries():
+    assert looks_like_plus_code("8JG8+44 Kurume")
+    assert looks_like_plus_code("8jg8+44")
+    assert looks_like_plus_code("8Q7XMJ8G+Q7")
+    assert not looks_like_plus_code("Suiran Kurume")
+    assert not looks_like_plus_code("Cafe 7+8 Tokyo")
+
+
+def test_search_returns_a_business_with_its_city_region_and_country():
+    (candidate,) = _routed({":searchText": {"places": [_SUIRAN]}}).search_places("Suiran Kurume Fukuoka")
+
+    assert candidate.name == "Suiran"
+    assert (candidate.city, candidate.region, candidate.country) == ("Kurume", "Fukuoka", "Japan")
+    assert candidate.is_business is True
+    assert candidate.category == "Seafood restaurant"
+
+
+def test_a_plus_code_lists_the_business_standing_on_it_first():
+    tool = _routed({":searchText": {"places": [_PLUS_CODE_POINT]}, ":searchNearby": {"places": [_SUIRAN]}})
+
+    candidates = tool.search_places("8JG8+44 Kurume")
+
+    assert [c.name for c in candidates] == ["Suiran", "8JG8+44"]
+    assert candidates[0].is_business and not candidates[1].is_business
+
+
+def test_a_plus_code_with_no_business_on_it_stays_a_plain_point():
+    tool = _routed({":searchText": {"places": [_PLUS_CODE_POINT]}, ":searchNearby": {"places": []}})
+
+    assert [c.name for c in tool.search_places("8JG8+44 Kurume")] == ["8JG8+44"]
+
+
+def test_repeated_searches_are_cached_so_they_bill_once():
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(200, json={"places": [_SUIRAN]})
+
+    tool = GooglePlacesTool(api_key="k", transport=httpx.MockTransport(handler))
+    tool.search_places("Suiran Kurume Fukuoka")
+    tool.search_places("suiran kurume fukuoka")
+
+    assert len(calls) == 1
+
+
+def test_search_asks_only_for_the_cheap_identifying_fields():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["mask"] = request.headers["X-Goog-FieldMask"]
+        return httpx.Response(200, json={"places": []})
+
+    GooglePlacesTool(api_key="k", transport=httpx.MockTransport(handler)).search_places("Suiran Kurume")
+
+    assert "places.location" in seen["mask"]
+    assert "places.reviews" not in seen["mask"] and "places.rating" not in seen["mask"]
+
+
+def test_resolver_builds_a_business_location_from_the_top_result():
+    location = GooglePlacesLocationResolver(_routed({":searchText": {"places": [_SUIRAN]}})).resolve("Suiran Kurume Fukuoka")
+
+    assert (location.name, location.city, location.is_business) == ("Suiran", "Kurume", True)
+    assert (location.latitude, location.longitude) == (33.32532, 130.61537)
+
+
+def test_resolver_reports_not_found_for_no_results_and_for_a_google_error():
+    with pytest.raises(LocationNotFoundError):
+        GooglePlacesLocationResolver(_routed({":searchText": {"places": []}})).resolve("zzzz nowhere")
+    failing = GooglePlacesTool(api_key="k", transport=httpx.MockTransport(lambda r: httpx.Response(403, json={})))
+    with pytest.raises(LocationNotFoundError):
+        GooglePlacesLocationResolver(failing).resolve("Suiran")
+
+
+# ---- places that are not businesses, and locality-aware ranking (found testing 15 places worldwide)
+
+from app.tools.google_places_tool import _prefer_locality, is_venue  # noqa: E402
+
+
+def test_islands_beaches_parks_and_monuments_are_places_not_businesses():
+    """Google tags all of these `establishment`; researching them as a cafe finds nothing."""
+    assert not is_venue({"island", "natural_feature", "establishment"})  # Victoria Island, Lagos
+    assert not is_venue({"beach", "natural_feature", "establishment"})  # Bondi Beach
+    assert not is_venue({"park", "tourist_attraction", "point_of_interest", "establishment"})  # Central Park
+    assert not is_venue({"historical_landmark", "monument", "point_of_interest", "establishment"})  # Eiffel Tower
+    assert not is_venue({"locality", "political"})
+    assert is_venue({"seafood_restaurant", "restaurant", "food", "point_of_interest", "establishment"})
+    assert is_venue({"hotel", "lodging", "point_of_interest", "establishment"})
+
+
+def _candidate_at(name: str, address: str):
+    from app.models.place import PlaceCandidate
+
+    return PlaceCandidate(name=name, display_name=f"{name}, {address}", category="x", latitude=0, longitude=0)
+
+
+def test_results_in_the_locality_the_user_typed_are_ranked_first_but_none_are_dropped():
+    road = _candidate_at("Sukhumvit Road", "Chonburi, Thailand")
+    district = _candidate_at("Sukhumvit", "Khlong Toei, Bangkok, Thailand")
+
+    ranked = _prefer_locality([road, district], "Sukhumvit, Bangkok")
+
+    assert ranked == [district, road]
+
+
+def test_locality_ranking_ignores_accents_and_single_segment_queries():
+    a = _candidate_at("Vila Madalena", "Sao Paulo, Brazil")
+    b = _candidate_at("Vila Madalena", "Curitiba, Brazil")
+
+    assert _prefer_locality([b, a], "Vila Madalena, São Paulo") == [a, b]
+    assert _prefer_locality([b, a], "Vila Madalena") == [b, a]
+
+
+def test_searches_again_around_the_typed_locality_when_google_returns_something_far_away():
+    """'Sukhumvit, Bangkok' first returned a road 158 km from Bangkok and nothing else."""
+    seen = []
+    far = {"id": "far", "displayName": {"text": "Sukhumvit Road"}, "formattedAddress": "Rayong, Thailand",
+           "location": {"latitude": 12.78, "longitude": 101.65}, "types": ["route"]}
+    near = {"id": "near", "displayName": {"text": "Sukhumvit Road"}, "formattedAddress": "Khlong Toei, Bangkok, Thailand",
+            "location": {"latitude": 13.725, "longitude": 100.578}, "types": ["route"]}
+    bangkok = {"id": "bkk", "displayName": {"text": "Bangkok"}, "formattedAddress": "Bangkok, Thailand",
+               "location": {"latitude": 13.756, "longitude": 100.502}, "types": ["locality"]}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        seen.append(body)
+        if "locationBias" in body:
+            return httpx.Response(200, json={"places": [near]})
+        return httpx.Response(200, json={"places": [bangkok] if body["textQuery"] == "Bangkok" else [far]})
+
+    candidates = GooglePlacesTool(api_key="k", transport=httpx.MockTransport(handler)).search_places("Sukhumvit, Bangkok")
+
+    assert candidates[0].latitude == 13.725
+    biased = next(b for b in seen if "locationBias" in b)
+    assert biased["textQuery"] == "Sukhumvit"
+    assert biased["locationBias"]["circle"]["center"] == {"latitude": 13.756, "longitude": 100.502}
+
+
+def test_no_extra_calls_when_the_first_result_is_already_in_the_typed_locality():
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(200, json={"places": [_SUIRAN]})
+
+    GooglePlacesTool(api_key="k", transport=httpx.MockTransport(handler)).search_places("Suiran, Kurume")
+
+    assert len(calls) == 1
+
+
+# ---- a business standing at a street address (the cafe at 'Unterer Graben 11')
+
+_CAFE = {
+    "id": "cafe1",
+    "displayName": {"text": "Café Pustekuchen"},
+    "formattedAddress": "Unterer Graben 11, 36456 Barchfeld-Immelborn, Germany",
+    "location": {"latitude": 50.80061, "longitude": 10.30015},
+    "types": ["cafe", "food", "point_of_interest", "establishment"],
+}
+_PARK = {**_CAFE, "id": "park", "displayName": {"text": "Town Park"}, "types": ["park", "point_of_interest", "establishment"]}
+
+
+def test_a_street_address_and_a_bare_plus_code_are_addresses_not_places():
+    from app.tools.google_places_tool import is_address_only
+
+    assert is_address_only({"premise", "street_address"})
+    assert is_address_only({"plus_code"})
+    assert not is_address_only({"cafe", "food", "point_of_interest", "establishment"})
+    assert not is_address_only({"locality", "political"})
+
+
+def test_venues_at_a_point_lists_businesses_nearest_first_and_skips_parks():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"places": [_PARK, _CAFE]})
+
+    venues = GooglePlacesTool(api_key="k", transport=httpx.MockTransport(handler)).venues_at(50.80061, 10.30015)
+
+    assert [v.name for v in venues] == ["Café Pustekuchen"]
+    assert seen["body"]["locationRestriction"]["circle"]["radius"] == 40.0
+    assert seen["body"]["rankPreference"] == "DISTANCE"
+
+
+def test_the_price_is_googles_real_range_in_the_local_currency_when_it_has_one():
+    """Google Maps shows '€10–20' for a cafe in Germany; '$$' would read as dollars."""
+    from app.tools.google_places_tool import _price_text
+
+    euro = {"priceLevel": "PRICE_LEVEL_MODERATE", "priceRange": {"startPrice": {"currencyCode": "EUR", "units": "10"}, "endPrice": {"currencyCode": "EUR", "units": "20"}}}
+    yen = {"priceRange": {"startPrice": {"currencyCode": "JPY", "units": "1000"}, "endPrice": {"currencyCode": "JPY", "units": "2000"}}}
+    open_ended = {"priceRange": {"startPrice": {"currencyCode": "EUR", "units": "50"}}}
+
+    assert _price_text(euro) == "€10–20"
+    assert _price_text(yen) == "¥1000–2000"
+    assert _price_text(open_ended) == "€50+"
+    assert _price_text({"priceLevel": "PRICE_LEVEL_MODERATE"}) == "$$"  # no range: fall back to the level
+    assert _price_text({}) is None
+
+
+def test_a_street_address_is_not_repeated_in_its_own_display_name():
+    from app.tools.google_places_tool import _display_name
+
+    assert _display_name("Unterer Graben 11", "Unterer Graben 11, 36456 Barchfeld-Immelborn, Germany") == "Unterer Graben 11, 36456 Barchfeld-Immelborn, Germany"
+    assert _display_name("Café Pustekuchen", "Unterer Graben 11, 36456 Barchfeld-Immelborn") == "Café Pustekuchen, Unterer Graben 11, 36456 Barchfeld-Immelborn"
+    assert _display_name("Suiran", None) == "Suiran"

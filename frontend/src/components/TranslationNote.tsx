@@ -45,7 +45,7 @@ export function TranslationNote({ item, inline = false }: { item: Evidence; inli
   return (
     <details className="my-1.5 text-xs">
       <summary className="cursor-pointer list-none">{badge} <span className="text-[var(--text-muted)] underline">show original</span></summary>
-      <p className="m-0 mt-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg)] p-2 text-[var(--text-muted)]" lang={language}>
+      <p className="m-0 mt-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg)] p-2 text-[var(--text-muted)]" lang={language} dir="auto">
         {item.metadata.original_title && <strong className="block text-[var(--text)]">{item.metadata.original_title}</strong>}
         {original}
       </p>

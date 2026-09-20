@@ -26,17 +26,17 @@ npm run dev -- --port 3000
 
 Opens on `http://localhost:3000`. It expects the backend running on `http://localhost:8000`
 (see [`../backend/README.md`](../backend/README.md)); override with a `VITE_API_BASE_URL` env
-var if yours is elsewhere. The backend's CORS config (`app/main.py`) allows `localhost:3000` — a
+var if yours is elsewhere. The backend's CORS config (`app/main.py`) allows ports 3000 (used here) and 5173 (Vite's default) on `localhost` — a
 local-dev setting, not a production policy.
 
 ## Pages
 
-- **Landing (`/`)** — the entry point: a sample answer (clearly labeled illustrative, not a live
-  query), the five pipeline steps, and what the app will and won't do. No fabricated social proof
+- **Landing (`/`)** — the entry point: what a response contains (it states nothing about any real
+  place; an invented sample answer was removed), the five pipeline steps, and what the app will and won't do. No fabricated social proof
   (testimonials, user counts, logos).
 - **Workspace (`/app`)** — everything else:
-  - A map-based **search** (`LocationSearchInput`) that merges the two curated demo neighborhoods
-    with live point-of-interest results from `GET /api/places/search` (debounced 350ms, min 3
+  - A map-based **search** (`LocationSearchInput`) showing live place results from
+    `GET /api/places/search` (debounced 350ms, min 3
     characters) — any real business or address, not just a neighborhood. Picking one exact result
     passes its coordinates straight through on every subsequent question, so the backend never
     has to re-resolve the name as text (see `../backend/README.md`'s POI section for why that
@@ -80,9 +80,9 @@ local-dev setting, not a production policy.
 
 ## What you'll see
 
-- With no API keys set on the backend: fixture-only results for Harvard Square / Davis Square,
-  fast and deterministic; live POI search and the live feed are both still available (they only
-  need free Nominatim / `TAVILY_API_KEY` respectively, not an LLM key).
+- With no API keys set on the backend: no evidence and no claims, with a limitation saying live
+  search isn't configured (there is no built-in sample data); place search works through free
+  Nominatim, and the live feed needs `TAVILY_API_KEY`.
 - With `TAVILY_API_KEY` set: real web evidence and a real live feed. The Overview can still
   produce a real, evidence-grounded answer without an LLM key (`TemplateSynthesizer` quotes the
   most relevant, credible excerpt per topic), but claim extraction from real page text needs an

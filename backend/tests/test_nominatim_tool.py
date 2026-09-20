@@ -3,7 +3,7 @@ import pytest
 
 from app.tools.base import LocationNotFoundError, ToolExecutionError
 from app.tools.composite import FallbackLocationResolver
-from app.tools.fixture_tools import FixtureLocationResolver
+from tests.fixture_tools import FixtureLocationResolver
 from app.tools.nominatim_tool import (
     NominatimClient,
     NominatimLocationResolverTool,
@@ -278,3 +278,24 @@ def test_business_is_detected_from_the_jsonv2_category_field():
     craft.pop("class")
 
     assert NominatimPlaceSearchTool(client=_client_returning([craft])).search_places("sr")[0].is_business is True
+
+
+def test_parks_viewpoints_and_places_of_worship_are_not_businesses():
+    from app.tools.nominatim_tool import _is_business
+
+    assert not _is_business({"category": "leisure", "type": "park"})
+    assert not _is_business({"category": "tourism", "type": "viewpoint"})
+    assert not _is_business({"category": "amenity", "type": "place_of_worship"})
+    assert _is_business({"category": "amenity", "type": "cafe"})
+    assert _is_business({"category": "tourism", "type": "hotel"})
+
+
+def test_a_building_is_an_address_but_a_business_or_an_area_is_not():
+    """'Unterer Graben 11' comes back as a bare building, with a cafe standing in it."""
+    from app.tools.nominatim_tool import _is_address
+
+    assert _is_address({"category": "building", "type": "yes", "addresstype": "building"})
+    assert _is_address({"category": "place", "type": "house", "addresstype": "house"})
+    assert not _is_address({"category": "amenity", "type": "cafe", "addresstype": "amenity"})
+    assert not _is_address({"category": "boundary", "type": "administrative", "addresstype": "suburb"})
+    assert not _is_address({"category": "highway", "type": "residential", "addresstype": "road"})

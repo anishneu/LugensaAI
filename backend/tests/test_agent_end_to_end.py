@@ -1,6 +1,6 @@
 import pytest
 
-from app.agents.factory import build_default_agent
+from tests.fixture_tools import fixture_agent
 from app.core.config import AgentConfig
 from app.models.claim import ClaimStatus
 from app.models.trace import TraceStage
@@ -8,7 +8,7 @@ from app.tools.base import LocationNotFoundError
 
 
 def test_harvard_square_college_student_full_pipeline():
-    agent = build_default_agent()
+    agent = fixture_agent()
 
     response = agent.run("Harvard Square, Cambridge, MA", "Would this be a good place for a college student?")
 
@@ -64,7 +64,7 @@ def test_harvard_square_college_student_full_pipeline():
 
 
 def test_nightlife_question_only_researches_nightlife():
-    agent = build_default_agent()
+    agent = fixture_agent()
 
     response = agent.run("Harvard Square, Cambridge, MA", "What's the nightlife like around here?")
 
@@ -74,7 +74,7 @@ def test_nightlife_question_only_researches_nightlife():
 
 
 def test_unknown_location_raises():
-    agent = build_default_agent()
+    agent = fixture_agent()
 
     with pytest.raises(LocationNotFoundError):
         agent.run("Nowhereville, XX", "Would this be a good place for a college student?")
@@ -83,7 +83,7 @@ def test_unknown_location_raises():
 def test_evidence_repository_is_closed_even_when_location_resolution_fails():
     """Regression test: a SQLite-backed repository leaked an open connection on
     this path, which crashed later temp-directory cleanup on Windows."""
-    agent = build_default_agent()
+    agent = fixture_agent()
     closed = {"called": False}
     original_close = agent.evidence_repository.close
     agent.evidence_repository.close = lambda: (closed.__setitem__("called", True), original_close())[1]
@@ -95,7 +95,7 @@ def test_evidence_repository_is_closed_even_when_location_resolution_fails():
 
 
 def test_davis_square_reports_coverage_gaps_honestly():
-    agent = build_default_agent()
+    agent = fixture_agent()
 
     response = agent.run("Davis Square, Somerville, MA", "Would this be a good place for a college student?")
 
@@ -110,7 +110,7 @@ def test_davis_square_reports_coverage_gaps_honestly():
 
 def test_tool_call_budget_is_enforced():
     tight_config = AgentConfig(max_tool_calls=2)
-    agent = build_default_agent(config=tight_config)
+    agent = fixture_agent(config=tight_config)
 
     response = agent.run("Harvard Square, Cambridge, MA", "Would this be a good place for a college student?")
 
