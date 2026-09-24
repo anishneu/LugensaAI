@@ -17,7 +17,7 @@ python-dotenv>=1.2.3,<2.0
 # Optional: the app runs fine without it (keyword-only retrieval); omit this
 # line from your install if you want to skip the download entirely and set
 # DISABLE_SEMANTIC_RETRIEVAL=1.
-sentence-transformers>=6.0.1,<7.0
+sentence-transformers>=6.1.0,<7.0
 # A security floor, not a feature: transformers 4.x has known advisories fixed only in 5.x, and
 # sentence-transformers 3.x/4.x would pin it to 4.x. Verified with this project's semantic retriever.
 transformers>=5.10,<6.0
