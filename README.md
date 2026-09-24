@@ -4,7 +4,7 @@
 
 ### Every claim about a place, traced to its source
 
-[![CI](https://github.com/anishneu/agentic-ai-location-web/actions/workflows/ci.yml/badge.svg)](https://github.com/anishneu/agentic-ai-location-web/actions/workflows/ci.yml)
+[![CI](https://github.com/anishneu/LugensaAI/actions/workflows/ci.yml/badge.svg)](https://github.com/anishneu/LugensaAI/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Status](https://img.shields.io/badge/status-in--progress-orange)
 ![Cost](https://img.shields.io/badge/runs-free%20%2F%20local-brightgreen)
@@ -497,7 +497,7 @@ actually produce claims. See [`docs/research-workflow.md`](docs/research-workflo
 ## Project structure
 
 ```
-agentic-ai-location-web/
+LugensaAI/
 ├── backend/
 │   ├── app/
 │   │   ├── agents/        LocationResearchAgent, the reflector (decide-and-act loop), factory.py (the one place that wires parts together)

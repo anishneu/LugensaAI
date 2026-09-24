@@ -187,4 +187,4 @@ def name_variants_enabled() -> bool:
 # Wikipedia/Wikivoyage (app/tools/wiki_tool.py): free, no key. Wikimedia blocks
 # clients that don't identify themselves with contact details, so this is sent
 # in the User-Agent. Override it if you fork the project.
-WIKIMEDIA_CONTACT = os.environ.get("WIKIMEDIA_CONTACT", "https://github.com/anishneu/agentic-ai-location-web")
+WIKIMEDIA_CONTACT = os.environ.get("WIKIMEDIA_CONTACT", "https://github.com/anishneu/LugensaAI")
