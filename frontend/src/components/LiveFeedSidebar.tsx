@@ -43,9 +43,9 @@ function groupLabel(iso: string, nowMs: number): string {
 /** A small red dot that blinks: the feed is live. Steady, not blinking, for anyone who has asked for reduced motion. */
 function LiveDot() {
   return (
-    <span className="relative flex h-2.5 w-2.5 flex-shrink-0" role="img" aria-label="Live">
+    <span className="relative flex h-1.5 w-1.5 flex-shrink-0" role="img" aria-label="Live">
       <span className="absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-70 motion-safe:animate-ping" />
-      <span className="live-blink relative inline-flex h-2.5 w-2.5 rounded-full bg-red-500" />
+      <span className="live-blink relative inline-flex h-1.5 w-1.5 rounded-full bg-red-500" />
     </span>
   );
 }

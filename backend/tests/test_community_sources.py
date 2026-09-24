@@ -33,7 +33,7 @@ def _place(**kw) -> Location:
 def test_regional_forums_are_listed_by_country_and_looked_up_case_insensitively():
     assert regional_domains("tw")[:5] == ["ptt.cc", "dcard.tw", "mobile01.com", "pixnet.net", "ipeen.com.tw"]
     assert regional_domains("TW")[0] == "ptt.cc" and regional_domains(None) == [] and regional_domains("zz") == []
-    assert "reddit.com" in GLOBAL_COMMUNITY_DOMAINS and "quora.com" in GLOBAL_COMMUNITY_DOMAINS
+    assert {"reddit.com", "quora.com"} <= set(GLOBAL_COMMUNITY_DOMAINS)  # exact entries of a list, not a URL substring
 
 
 def test_no_domain_is_listed_twice_and_every_country_code_is_lowercase_alpha2():

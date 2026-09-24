@@ -119,7 +119,9 @@ _US_STATE_NAMES = frozenset(
     }
 )
 _US_COUNTRY_NAMES = frozenset({"us", "usa", "u.s.", "u.s.a.", "united states", "united states of america"})
-_TRAILING_ZIP_RE = re.compile(r"\s*\d{5}(?:-\d{4})?$")
+# No leading `\s*`: with it the pattern is retried from every space of a long run of spaces (quadratic time on a hostile
+# query), and the caller strips the whitespace left behind anyway.
+_TRAILING_ZIP_RE = re.compile(r"\d{5}(?:-\d{4})?$")
 
 
 def _detect_country_code(query: str) -> str | None:

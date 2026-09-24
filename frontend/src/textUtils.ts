@@ -1,12 +1,24 @@
+/** Removes HTML tags until none are left. One pass is not enough: removing the inner tag of "<scr<b>ipt>" leaves
+ * "<script>" behind, so it repeats until the text stops changing (each pass that changes it makes it shorter). */
+function stripTags(text: string): string {
+  let previous: string;
+  let current = text;
+  do {
+    previous = current;
+    current = current
+      .replace(/<\/p>\s*<p[^>]*>|<br\s*\/?>/gi, "\n\n") // paragraph breaks some local models emit as HTML
+      .replace(/<\/?[a-zA-Z][^>]*>/g, ""); // any other stray HTML tag
+  } while (current !== previous);
+  return current;
+}
+
 /** Defense-in-depth cleanup for evidence text. The backend already strips
  * most markdown/nav noise from live search results (see
  * app/tools/tavily_tools.py::_clean_text), but this keeps the UI safe
  * against anything that slips through or against future tool sources that
  * don't clean as aggressively. */
 export function cleanDisplayText(text: string): string {
-  return text
-    .replace(/<\/p>\s*<p[^>]*>|<br\s*\/?>/gi, "\n\n") // paragraph breaks some local models emit as HTML
-    .replace(/<\/?[a-zA-Z][^>]*>/g, "") // any other stray HTML tag
+  return stripTags(text)
     .replace(/!\[[^\]]*\]\([^)]*\)/g, "") // markdown images
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1") // markdown links -> link text
     .replace(/^#{1,6}\s*/gm, "") // heading hashes

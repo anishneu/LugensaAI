@@ -299,3 +299,18 @@ def test_a_building_is_an_address_but_a_business_or_an_area_is_not():
     assert not _is_address({"category": "amenity", "type": "cafe", "addresstype": "amenity"})
     assert not _is_address({"category": "boundary", "type": "administrative", "addresstype": "suburb"})
     assert not _is_address({"category": "highway", "type": "residential", "addresstype": "road"})
+
+
+def test_detect_country_code_is_not_slowed_by_a_long_run_of_spaces():
+    # The zip-code pattern used to start with `\s*`, which made it quadratic on a query like this one.
+    import time
+
+    hostile = "Boston, MA" + " " * 200_000 + "1234x, Somewhere"
+    started = time.perf_counter()
+    assert _detect_country_code(hostile) is None
+    assert time.perf_counter() - started < 2.0
+
+
+@pytest.mark.parametrize("query", ["Cambridge, MA 02138", "Cambridge, MA 02138-4321", "Cambridge, MA02138"])
+def test_detect_country_code_still_ignores_a_trailing_zip_code(query):
+    assert _detect_country_code(query) == "us"
