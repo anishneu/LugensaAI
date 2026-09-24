@@ -37,6 +37,7 @@ the project**, and it never invents data: with nothing configured it says so ins
 - [Screenshots](#screenshots)
 - [Architecture](#architecture)
   - [System](#system)
+  - [Components](#components)
   - [The research pipeline](#the-research-pipeline)
   - [Retrieval-augmented generation and verification](#retrieval-augmented-generation-and-verification)
   - [The live feed](#the-live-feed)
@@ -59,7 +60,8 @@ Given a location and a question, the agent:
 1. Resolves the location.
 2. Plans which research topics are actually relevant to the question (not a fixed checklist).
 3. Retrieves evidence for each topic from live web search (including community and forum
-   commentary), Wikipedia and Wikivoyage, OpenStreetMap and, optionally, Google Places.
+   commentary), Wikipedia and Wikivoyage and, optionally, Google Places. (OpenStreetMap resolves the place and fills the
+   "Around this pin" panel; it is not an evidence source for the answer.)
 4. Extracts and verifies claims against that evidence, including a cross-source contradiction
    check.
 5. Synthesizes a cited, hedged answer — never a confident-sounding guess with no source behind
@@ -197,6 +199,75 @@ flowchart LR
   TOOLS --> WIKI
   TOOLS --> REDDIT
   TOOLS --> NEWS
+```
+
+### Components
+
+The same system by component, with the files that implement each part. Two things it is easy to get wrong: the research agent does not call the live feed or the "Around this pin" lookup (they are separate place services behind their own endpoints), and OpenStreetMap enters the agent only through location resolution.
+
+```mermaid
+flowchart TB
+  user(["Researcher"])
+
+  subgraph UI["User interface: frontend/src"]
+    direction LR
+    WS["Research workspace<br/>ResearchWorkspace.tsx"]
+    PANELS["Map, place panels, live feed<br/>MapPanel, PlacePanel,<br/>LiveFeedSidebar"]
+    HIST[("Session history<br/>storage.ts, this<br/>browser only")]
+    CLIENT["API client<br/>api.ts"]
+    VIEWS["Answer views<br/>ResponsePanel.tsx"]
+    WS --> PANELS
+    WS --> HIST
+    WS --> CLIENT
+    CLIENT --> VIEWS
+  end
+
+  subgraph API["API: backend/app/api/routes.py"]
+    direction LR
+    RRES["POST /research"]
+    RPLACE["GET /places/*"]
+    RFEED["GET /live-feed"]
+  end
+
+  subgraph Pipeline["Research pipeline: LocationResearchAgent"]
+    direction TB
+    RESOLVE["Location resolution"] --> PLAN["Topic planning and reflector"]
+    PLAN --> COLLECT["Evidence collection"]
+    COLLECT --> RANK["Hybrid retrieval<br/>keyword + MiniLM"]
+    RANK --> CLAIMS["Claim extraction"]
+    CLAIMS --> VERIFY["Claim verification<br/>verifier.py, never an LLM"]
+    VERIFY --> SYN["Cited synthesis"]
+  end
+
+  subgraph Place["Place services: no LLM, not part of the agent"]
+    direction TB
+    NEARBY["Around this pin<br/>overpass_tool.py"]
+    PROFILE["Google Maps profile<br/>google_places_tool.py"]
+    TRANS["Translation<br/>translation.py"]
+    FEED["Live feed<br/>live_feed.py"]
+  end
+
+  STORE[("Evidence repository<br/>SQLite")]
+  OLLAMA["Local Ollama model<br/>llm_service.py"]
+
+  subgraph Sources["External sources"]
+    direction TB
+    WEB["Tavily web search"]
+    COMM["Reddit, forums,<br/>community sites"]
+    WIKI["Wikipedia, Wikivoyage,<br/>Wikidata"]
+    OSM["OpenStreetMap<br/>Nominatim, Overpass"]
+    GOOGLE["Google Places<br/>optional"]
+    NEWS["Google News RSS,<br/>Reddit archive"]
+  end
+
+  user -->|"asks about a place"| UI
+  UI <-->|"JSON over HTTP"| API
+  API -->|"POST /research"| Pipeline
+  API -->|"places, translate, live feed"| Place
+  Pipeline <-->|"stores and reads"| STORE
+  Pipeline -.->|"plans, extracts, writes"| OLLAMA
+  Pipeline -->|"searches and reads"| Sources
+  Place -->|"map data, ratings, news"| Sources
 ```
 
 ### The research pipeline
