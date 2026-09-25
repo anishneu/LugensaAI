@@ -517,6 +517,13 @@ Full reasoning for each choice is in [`docs/architecture.md`](docs/architecture.
   them (`POST /api/research/stream`, server-sent events): "Selected Reddit archive search…", "Reading 14 evidence items
   to extract claims…", each one a real entry of the run's trace, in order. Nothing is estimated or invented: how many
   steps a run needs is not known until it ends, so there is no progress bar with a made-up percentage.
+- **Compare two places, save places, take the answer with you** — "Compare" in the top bar asks the same question of a second
+  place (one run after the other, since the local model is one machine) and shows both answers side by side with a table that
+  counts what each run found: sources, kinds of source, supported and contradicted claims, limitations. It deliberately says
+  nothing about which place is better, because nothing in the sources decides that. "Download report" saves an answer, or the
+  comparison, as Markdown built in the browser from what is on screen (claims with the sources they rest on, limitations, a
+  numbered source list); nothing is sent anywhere. The star saves a place in this browser only, and saved places wait on the
+  search page.
 - **Honest degradation** — every fallback (no LLM, no live search, an API failure, an
   off-topic result filtered out) is recorded in the response's `limitations`, not hidden.
 - **A real evaluation, not just a plan** — [`docs/evaluation.md`](docs/evaluation.md) has actual
@@ -588,7 +595,7 @@ LugensaAI/
 │   │   │                  Reddit archive, Google News RSS, translation; plus live_feed.py and feed_topics.py
 │   │   └── verification/  deterministic claim verifier and contradiction check
 │   ├── evaluation/        the runnable benchmark from docs/evaluation.md
-│   └── tests/             offline, deterministic pytest suite (513 tests)
+│   └── tests/             offline, deterministic pytest suite (536 tests)
 ├── frontend/
 │   └── src/
 │       ├── pages/         LandingPage, ResearchWorkspace
@@ -603,10 +610,10 @@ See [`backend/README.md`](backend/README.md) for the backend's internal layout.
 
 ```bash
 cd backend
-pytest          # 513 tests
+pytest          # 536 tests
 cd ../frontend
 npm run lint && npx tsc -b && npm run build
-npm run test:e2e   # 14 tests: 7 in a browser, 7 plain unit tests (PW_CHANNEL=msedge uses an installed browser; otherwise `npx playwright install chromium`)
+npm run test:e2e   # 25 tests: 11 in a browser, 14 plain unit tests (PW_CHANNEL=msedge uses an installed browser; otherwise `npx playwright install chromium`)
 ```
 
 The backend suite is free, offline, and deterministic by construction (its invented sample sources live
@@ -616,9 +623,10 @@ API keys and semantic retrieval off during tests regardless of local `.env` conf
 
 The frontend's browser tests ([`frontend/e2e`](frontend/e2e)) run the real UI in a real browser against the Vite dev
 server with every backend call mocked, so they need no backend, keys or network either. They cover the landing page, picking
-a place, the live feed (empty state, "Now" grouping, kind filter), and the streamed research: the page shows each step as
-the mocked server sends it, then the answer, an error, or the stream ending early. A small set of plain unit tests covers the
-event-stream parser and the text cleaner. CI runs them after the build.
+a place, saving places, the live feed (empty state, "Now" grouping, kind filter), exporting an answer, comparing two places,
+and the streamed research: the page shows each step as
+the mocked server sends it, then the answer, an error, or the stream ending early. A set of plain unit tests covers the
+event-stream parser, the text cleaner and the report builders. CI runs them after the build.
 
 ## Continuous integration
 

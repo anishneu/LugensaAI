@@ -1,13 +1,14 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useLocation as useRouterLocation } from "react-router-dom";
-import { ResearchApiError, runResearchStream, searchPlaces } from "../api";
+import { ResearchApiError, researchRequestFor, runResearchStream, searchPlaces } from "../api";
+import { ComparePlaces } from "../components/ComparePlaces";
 import { ChatSidebar } from "../components/ChatSidebar";
 import { PlacePanel } from "../components/place/PlacePanel";
 import { LiveFeedSidebar } from "../components/LiveFeedSidebar";
 import { ResponsePanel } from "../components/ResponsePanel";
 import { SearchHero } from "../components/SearchHero";
 import { TopNav } from "../components/TopNav";
-import { loadSessions, saveSessions } from "../storage";
+import { loadSavedPlaces, loadSessions, placeKey, removeSavedPlace, saveSessions, toggleSavedPlace } from "../storage";
 import type { ActiveLocation, QuerySession } from "../types";
 
 // MapLibre is large, so the map loads in its own chunk after the page is usable.
@@ -26,6 +27,8 @@ export function ResearchWorkspace() {
   const [query, setQuery] = useState("");
   const [location, setLocation] = useState<ActiveLocation | null>(handoff.location ?? null);
   const [sessions, setSessions] = useState<QuerySession[]>([]);
+  const [saved, setSaved] = useState(loadSavedPlaces);
+  const [compareOpen, setCompareOpen] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
   // Text typed on the landing page is resolved once on arrival (a ref, because StrictMode runs effects twice).
@@ -119,17 +122,7 @@ export function ResearchWorkspace() {
       // as-is — re-resolving its name as text server-side could land on a
       // different same-named place nearby.
       const response = await runResearchStream(
-        {
-          location: location.rawQuery,
-          question,
-          is_business: location.isBusiness,
-          is_address: location.isAddress,
-          latitude: location.latitude,
-          longitude: location.longitude,
-          city: location.city,
-          region: location.region,
-          country: location.country,
-        },
+        researchRequestFor(location, question),
         // Each step the agent takes is shown while the run is still going.
         (step) => setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, steps: [...(s.steps ?? []), step] } : s))),
       );
@@ -172,12 +165,27 @@ export function ResearchWorkspace() {
         onSelect={selectLocation}
         onSubmit={handleSubmitRawQuery}
         pendingQuestion={handoff.question}
+        saved={saved}
+        onRemoveSaved={(key) => setSaved(removeSavedPlace(key))}
       />;
   }
 
   return (
     <div className="flex min-h-screen flex-col bg-[var(--bg)] lg:h-screen">
-          <TopNav location={location} onChangeLocation={() => setLocation(null)} />
+          <TopNav
+            location={location}
+            onChangeLocation={() => setLocation(null)}
+            saved={saved.some((entry) => placeKey(entry.location) === placeKey(location))}
+            onToggleSaved={() => setSaved(toggleSavedPlace(location))}
+            onCompare={() => setCompareOpen(true)}
+          />
+          <ComparePlaces
+            key={placeKey(location)}
+            open={compareOpen}
+            onClose={() => setCompareOpen(false)}
+            place={location}
+            defaultQuestion={activeSession?.question ?? ""}
+          />
           <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[264px_minmax(0,1fr)_288px] xl:grid-cols-[340px_minmax(0,1fr)_340px]">
             {/* Left: the pin on a zoomed-in map, and where you ask. */}
             <aside className="flex min-h-0 flex-col border-b border-[var(--border)] bg-[var(--bg-alt)] lg:overflow-y-auto lg:border-r lg:border-b-0">

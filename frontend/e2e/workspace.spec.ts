@@ -1,13 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { feedItem, mockBackend, openWorkspace, researchResult } from "./fixtures";
 
-type Sse = { started: boolean; body: string; send: (event: string, data: unknown) => void; close: () => void };
-declare global {
-  interface Window {
-    __sse: Sse;
-  }
-}
-
 const step = (description: string, stage = "retrieval") => ({ stage, description, timestamp: new Date().toISOString(), details: {} });
 
 test.describe("landing page", () => {

@@ -1,5 +1,6 @@
 import { parseSseBlock } from "./sse";
 import type {
+  ActiveLocation,
   Capabilities,
   Evidence,
   NearbyPlaces,
@@ -36,6 +37,22 @@ export async function fetchCapabilities(): Promise<Capabilities | null> {
   } catch {
     return null;
   }
+}
+
+/** The research request for a place and a question. A place with coordinates (picked from search, or already resolved) is sent
+ * exactly as it is: re-resolving its name as text on the server could land on a different same-named place nearby. */
+export function researchRequestFor(location: ActiveLocation, question: string): ResearchRequest {
+  return {
+    location: location.rawQuery,
+    question,
+    is_business: location.isBusiness,
+    is_address: location.isAddress,
+    latitude: location.latitude,
+    longitude: location.longitude,
+    city: location.city,
+    region: location.region,
+    country: location.country,
+  };
 }
 
 export async function runResearch(request: ResearchRequest): Promise<ResearchResponse> {

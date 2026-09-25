@@ -654,3 +654,12 @@ All eight milestones from the original project plan are implemented, plus later 
   the live feed.** Google News RSS links do not lead to the publisher: each of four tried returned a 580 KB Google page that redirects
   by script. Reaching the article means calling Google's undocumented internal API, which is unofficial scraping that can break or
   be blocked at any time, so it was left out; items keep their headline, real time and outlet.
+- **Milestone 35:** compare two places, export, and saved places, all in the front end (no backend change). *Compare* runs the existing
+  streamed research once per place, one after the other because the local model is one machine, and shows both answers with a table of
+  what each run found. It does not rank the places or write any sentence about which is better: nothing in the sources decides that,
+  and a model-written verdict would be an unverified synthesis of two evidence sets. *Export* builds Markdown in the browser from the
+  response on screen (claims with their sources, limitations, numbered sources); there is no PDF. *Saved places* live in
+  `localStorage`, on the search page rather than the landing page, because the landing page has no place picker. The tests (25 in all)
+  found one thing worth writing down: an error event ends a run at once and the app moves straight on to the second place, so a test
+  that also closed the stream afterwards was closing the *second* run's stream. Not done: comparing three or more places, different
+  questions for each place, keeping comparisons, and any cross-place synthesis.

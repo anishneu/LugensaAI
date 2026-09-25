@@ -1,14 +1,22 @@
-import { ArrowPathRoundedSquareIcon, MapPinIcon } from "@heroicons/react/24/outline";
+import { ArrowPathRoundedSquareIcon, MapPinIcon, ScaleIcon, StarIcon } from "@heroicons/react/24/outline";
+import { StarIcon as StarSolidIcon } from "@heroicons/react/24/solid";
 import { useNavigate } from "react-router-dom";
 import type { ActiveLocation } from "../types";
 
 interface TopNavProps {
   location: ActiveLocation;
   onChangeLocation: () => void;
+  /** Whether this place is in the viewer's saved list, and how to change that. */
+  saved: boolean;
+  onToggleSaved: () => void;
+  onCompare: () => void;
 }
 
-/** Project title and the place being researched on the left; "Change location" on the right. */
-export function TopNav({ location, onChangeLocation }: TopNavProps) {
+const navButton =
+  "flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--bg-alt)] px-2.5 py-1.5 sm:px-4 text-[13px] font-medium text-[var(--text-h)] transition-colors hover:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none";
+
+/** Project title and the place being researched on the left; save, compare and "Change location" on the right. */
+export function TopNav({ location, onChangeLocation, saved, onToggleSaved, onCompare }: TopNavProps) {
   const navigate = useNavigate();
   const subtitle = [location.city, location.region, location.country]
     .filter((part, i, all) => part && all.indexOf(part) === i)
@@ -47,15 +55,27 @@ export function TopNav({ location, onChangeLocation }: TopNavProps) {
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={onChangeLocation}
-        aria-label="Change location"
-        className="flex flex-shrink-0 items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--bg-alt)] px-2.5 py-1.5 sm:px-4 text-[13px] font-medium text-[var(--text-h)] transition-colors hover:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none"
-      >
-        <ArrowPathRoundedSquareIcon className="h-4 w-4" aria-hidden="true" />
-        <span className="hidden sm:inline">Change location</span>
-      </button>
+      <div className="flex flex-shrink-0 items-center gap-2">
+        <button
+          type="button"
+          onClick={onToggleSaved}
+          aria-pressed={saved}
+          aria-label={saved ? "Remove from saved places" : "Save this place"}
+          title={saved ? "Saved: click to remove" : "Save this place"}
+          className={`${navButton} ${saved ? "border-amber-400/60 text-amber-400" : ""}`}
+        >
+          {saved ? <StarSolidIcon className="h-4 w-4" aria-hidden="true" /> : <StarIcon className="h-4 w-4" aria-hidden="true" />}
+          <span className="hidden lg:inline">{saved ? "Saved" : "Save"}</span>
+        </button>
+        <button type="button" onClick={onCompare} aria-label="Compare with another place" className={navButton}>
+          <ScaleIcon className="h-4 w-4" aria-hidden="true" />
+          <span className="hidden lg:inline">Compare</span>
+        </button>
+        <button type="button" onClick={onChangeLocation} aria-label="Change location" className={navButton}>
+          <ArrowPathRoundedSquareIcon className="h-4 w-4" aria-hidden="true" />
+          <span className="hidden sm:inline">Change location</span>
+        </button>
+      </div>
     </header>
   );
 }

@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
 import { Tab, TabGroup, TabList, TabPanel, TabPanels } from "@headlessui/react";
-import { CheckCircleIcon, ExclamationTriangleIcon, SparklesIcon } from "@heroicons/react/24/outline";
+import { ArrowDownTrayIcon, CheckCircleIcon, ClipboardDocumentIcon, ExclamationTriangleIcon, SparklesIcon } from "@heroicons/react/24/outline";
 import { fetchCapabilities } from "../api";
-import type { Capabilities, QuerySession, ResearchResponse, ResearchTraceStep } from "../types";
+import type { Capabilities, QuerySession, ResearchResponse } from "../types";
+import { downloadText } from "../download";
+import { buildReportMarkdown, reportFileName } from "../report";
 import { cleanDisplayText } from "../textUtils";
 import { ClaimsList } from "./ClaimsList";
 import { CommunityVoices, isVoice } from "./CommunityVoices";
 import type { EvidenceSortMode } from "./EvidenceList";
 import { EvidenceList } from "./EvidenceList";
+import { LiveSteps } from "./LiveSteps";
 import { ResearchTrace } from "./ResearchTrace";
 import { VerdictBanner } from "./VerdictBanner";
 
@@ -63,38 +66,32 @@ function ResearchProgress({ startedAt, capabilities }: { startedAt: string; capa
   );
 }
 
-const VISIBLE_STEPS = 8;
+const exportButton =
+  "flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--bg-alt)] px-3 py-1.5 text-xs font-medium text-[var(--text-h)] transition-colors hover:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none";
 
-/** What the agent is doing right now: its real trace steps, newest last, streamed while the run is going. */
-function LiveSteps({ steps }: { steps: ResearchTraceStep[] }) {
-  if (steps.length === 0) return null;
-  const shown = steps.slice(-VISIBLE_STEPS);
-  const hidden = steps.length - shown.length;
+/** The answer as a Markdown file, or on the clipboard. It is built in this page from the answer already shown: nothing is sent anywhere. */
+function ExportButtons({ response }: { response: ResearchResponse }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(buildReportMarkdown(response));
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard access can be refused; the download still works.
+    }
+  }
   return (
-    <ol
-      data-testid="research-steps"
-      aria-live="polite"
-      aria-label="What the agent is doing"
-      className="m-0 flex w-full max-w-lg list-none flex-col gap-2 p-0 text-left"
-    >
-      {hidden > 0 && <li className="text-[11px] text-[var(--text-muted)]">{hidden} earlier step{hidden === 1 ? "" : "s"}</li>}
-      {shown.map((step, i) => {
-        const current = i === shown.length - 1;
-        return (
-          <li key={hidden + i} className={`flex items-start gap-2.5 text-[13px] leading-snug ${current ? "text-[var(--text-h)]" : "text-[var(--text-muted)]"}`}>
-            {current ? (
-              <span className="mt-1.5 h-2 w-2 flex-shrink-0 animate-pulse rounded-full bg-[var(--accent)]" aria-hidden="true" />
-            ) : (
-              <CheckCircleIcon className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--supported)]" aria-hidden="true" />
-            )}
-            <span className="min-w-0">
-              <span className="block text-[10px] font-semibold tracking-[0.08em] uppercase opacity-70">{step.stage.replace(/_/g, " ")}</span>
-              <span dir="auto">{step.description}</span>
-            </span>
-          </li>
-        );
-      })}
-    </ol>
+    <div className="flex flex-shrink-0 gap-2">
+      <button type="button" onClick={() => downloadText(reportFileName(response), buildReportMarkdown(response))} className={exportButton}>
+        <ArrowDownTrayIcon className="h-3.5 w-3.5" aria-hidden="true" />
+        Download report
+      </button>
+      <button type="button" onClick={copy} className={exportButton}>
+        <ClipboardDocumentIcon className="h-3.5 w-3.5" aria-hidden="true" />
+        {copied ? "Copied" : "Copy as Markdown"}
+      </button>
+    </div>
   );
 }
 
@@ -257,9 +254,12 @@ export function ResponsePanel({ session }: ResponsePanelProps) {
 
   return (
     <div className={shell}>
-      <p className="m-0 mb-4 text-[15px] text-[var(--text-muted)] italic" dir="auto">
-        “{response.question}”
-      </p>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <p className="m-0 text-[15px] text-[var(--text-muted)] italic" dir="auto">
+          “{response.question}”
+        </p>
+        <ExportButtons response={response} />
+      </div>
 
       {/* Keyed by question, so each answer opens on Overview rather than on whatever tab the last one left. */}
       <TabGroup key={session.id}>

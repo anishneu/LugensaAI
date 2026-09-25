@@ -1,5 +1,11 @@
 import type { Page, Route } from "@playwright/test";
 
+declare global {
+  interface Window {
+    __sse: { started: boolean; count: number; body: string; send: (event: string, data: unknown) => void; close: () => void };
+  }
+}
+
 /** Everything the UI asks the backend for is answered here, so the tests need no server. */
 
 export const PLACE = {
@@ -11,6 +17,19 @@ export const PLACE = {
   country: "United States",
   latitude: 42.3736,
   longitude: -71.119,
+  is_business: false,
+  is_address: false,
+};
+
+export const KENDALL = {
+  name: "Kendall Square",
+  display_name: "Kendall Square, Cambridge, MA",
+  category: "Neighbourhood",
+  city: "Cambridge",
+  region: "Massachusetts",
+  country: "United States",
+  latitude: 42.3629,
+  longitude: -71.0865,
   is_business: false,
   is_address: false,
 };
@@ -56,13 +75,13 @@ export function feedItem(id: string, title: string, minutesAgo: number, metadata
 }
 
 /** A finished research answer, with just enough in it for every tab to have something to show. */
-export function researchResult(question: string) {
+export function researchResult(question: string, placeName = "Harvard Square") {
   const trace = (description: string) => ({ stage: "retrieval", description, timestamp: new Date().toISOString(), details: {} });
   return {
-    location: { name: "Harvard Square", city: "Cambridge", region: "Massachusetts", country: "United States", slug: "hs", latitude: 42.3736, longitude: -71.119, raw_query: "Harvard Square, Cambridge, MA", is_business: false },
+    location: { name: placeName, city: "Cambridge", region: "Massachusetts", country: "United States", slug: "hs", latitude: 42.3736, longitude: -71.119, raw_query: `${placeName}, Cambridge, MA`, is_business: false },
     question,
-    summary: "A lively, walkable area with plenty to do.",
-    key_findings: ["It is easy to reach by subway."],
+    summary: `${placeName} is a lively, walkable area with plenty to do.`,
+    key_findings: [`${placeName} is easy to reach by subway.`],
     details: "",
     recommendation: "Worth visiting.",
     topics: [{ topic_id: "transportation", reason: "asked about getting around", search_queries: [], preferred_source_types: [], expected_evidence: "", priority: "high", completion_criteria: "" }],
@@ -90,6 +109,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
     const sse = {
       started: false,
+      count: 0,
       body: "",
       send(event: string, data: unknown) {
         controller?.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
@@ -103,6 +123,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       if (url.includes("/api/research/stream")) {
         sse.started = true;
+        sse.count += 1;
         sse.body = String(init?.body ?? "");
         const stream = new ReadableStream<Uint8Array>({ start: (c) => (controller = c) });
         return Promise.resolve(new Response(stream, { status: 200, headers: { "Content-Type": "text/event-stream" } }));
@@ -119,13 +140,21 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers: CORS });
     const path = new URL(request.url()).pathname;
     if (path.endsWith("/api/capabilities")) return json(route, CAPABILITIES);
-    if (path.endsWith("/api/places/search")) return json(route, [PLACE]);
+    if (path.endsWith("/api/places/search")) {
+      return json(route, new URL(request.url()).searchParams.get("q")?.toLowerCase().includes("kendall") ? [KENDALL] : [PLACE]);
+    }
     if (path.endsWith("/api/places/live-feed") || path.endsWith("/api/live-feed")) return json(route, options.feed ?? []);
     if (path.endsWith("/api/places/profile")) return json(route, { detail: "No match" }, 404);
     if (path.endsWith("/api/places/nearby")) return json(route, { detail: "Live map lookups are disabled on this server." }, 503);
     if (path.endsWith("/api/places/popular")) return json(route, []);
     return json(route, { detail: "not mocked" }, 404);
   });
+}
+
+/** Sends a whole research answer down the hand-driven stream and ends it. */
+export async function finishRun(page: Page, result: unknown) {
+  await page.evaluate((r) => window.__sse.send("result", r), result);
+  await page.evaluate(() => window.__sse.close());
 }
 
 /** Opens the search page, picks Harvard Square from the (mocked) suggestions and waits for the workspace. */

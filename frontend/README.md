@@ -183,3 +183,17 @@ one step and the next. Set `PW_CHANNEL=msedge` (or `chrome`) to use a browser yo
 
 While a question runs, `runResearchStream` (`src/api.ts`) reads the server-sent events and `ResponsePanel` lists the agent's steps
 (`LiveSteps`); if the server has no streaming endpoint it falls back to the plain request.
+
+## Compare, export and saved places
+
+- **Saved places** (`storage.ts`, `SearchHero.tsx`): the star in the top bar saves the open place in this browser (`localStorage`,
+  at most 12, keyed by coordinates so two spellings of one spot are one place). Saved places are listed on the search page, where
+  a place is picked; the landing page has no place picker, so they are not there. Nothing leaves the browser.
+- **Export** (`report.ts`, `download.ts`, `ExportButtons` in `ResponsePanel.tsx`): "Download report" and "Copy as Markdown" build a
+  report from the response on screen: the question, the summary, key findings, every claim with the sources it rests on, the
+  limitations and a numbered source list. `report.ts` is pure functions, unit-tested in Node (`e2e/report.spec.ts`). There is no PDF:
+  print the page, or convert the Markdown.
+- **Compare** (`ComparePlaces.tsx`): a dialog that takes the open place, a second place picked from the search suggestions (so both are
+  exact) and one question, and runs `runResearchStream` for each in turn, with each run's live steps shown in its own column. When both
+  finish it shows both answers and `compareRows`: counts of what each run found. It never says which place is better, and the
+  downloaded comparison says so too. If one run fails the other still shows, and there is no table. Results are not persisted.
