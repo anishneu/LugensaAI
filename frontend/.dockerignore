@@ -1,8 +1,0 @@
-node_modules
-dist
-e2e
-test-results
-playwright-report
-.env
-.env.*
-*.log

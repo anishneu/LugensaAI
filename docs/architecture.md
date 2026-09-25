@@ -673,9 +673,9 @@ All eight milestones from the original project plan are implemented, plus later 
   measures cannot say whether an answer is right, so `review` writes a sheet of the ten cases' answers under shuffled letters (the
   order differs per case) with the sources beside them and an empty ratings file, and `score-review` unblinds the ratings; the
   blinding is partial, since the pipeline's answers have a recognisable shape. The ratings have not been made, and they take a person.
-  *Repo files:* `SECURITY.md`, `CONTRIBUTING.md`, issue and pull-request templates, `CITATION.cff`. *Docker:* Dockerfiles for both
-  services, nginx for the built front end, and a compose file with Ollama left on the host; written **without Docker on the machine**,
-  so it was checked in pieces and not built (see the README). The CI's browser tests were also run locally on Playwright's own
+  *Repo files:* `SECURITY.md`, `CONTRIBUTING.md`, issue and pull-request templates, `CITATION.cff`. *Docker:* written (Dockerfiles for both services, nginx for the built front end, a compose file with Ollama on the host), then
+  **removed**: there was no Docker on the machine, so it could never be built or shown to work, the app needs Ollama on the host
+  either way, and unverified infrastructure is a liability. It is in the git history if someone wants to build on it. The CI's browser tests were also run locally on Playwright's own
   Chromium, as CI runs them, and pass. *Demo GIF* (`docs/images/demo.gif`, 4.6 MB): a real run recorded through the real app in free mode
   (no search key, so no credit spent), with the four-minute model wait time-lapsed 30 times; it is a truthful demo and a modest one, since
   with no web search the answer is thin, the one claim the model made was flagged insufficient because its wording was not in its cited

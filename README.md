@@ -563,14 +563,6 @@ npm run dev -- --port 3000
 
 Open `http://localhost:3000`.
 
-**With Docker instead** (`docker compose up --build`, then the same address): one command starts the backend and the front end.
-The local model is not in the containers: install [Ollama](https://ollama.com) on your machine, `ollama pull qwen3:30b`, and set
-`OLLAMA_ENABLED=1` in `backend/.env`; the backend reaches it through `host.docker.internal`. Keys are read from `backend/.env` at run
-time and never copied into an image. **This setup has not been built or run as a whole:** it was written on a machine without
-Docker, and checked in pieces (the backend starts and answers from a copy holding only what the image holds, the front end builds
-without the folders `.dockerignore` leaves out, the lockfile has the Linux and Alpine binaries, the compose file parses). If a build
-fails, please open an issue with the output.
-
 Full details, troubleshooting, and what each part does are in
 [`backend/README.md`](backend/README.md) and [`frontend/README.md`](frontend/README.md).
 
@@ -620,7 +612,6 @@ LugensaAI/
 │   └── src/
 │       ├── pages/         LandingPage, ResearchWorkspace
 │       └── components/    workspace panels, live feed, map, place/ (Google Maps + Around this pin), landing/
-├── docker-compose.yml     backend + front end in containers (Ollama stays on the host); see Quick start
 ├── docs/                  architecture.md, research-workflow.md, evaluation.md, images/
 └── .github/               workflows (ci, codeql, secret-scan, dependency-audit, release), scripts, dependabot.yml
 ```
