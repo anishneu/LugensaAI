@@ -4,6 +4,8 @@
     python -m evaluation.answer_quality run     [--case ID ...] [--system A,B,PIPELINE]
     python -m evaluation.answer_quality rescore                      # after changing a metric: no model, no network
     python -m evaluation.answer_quality report
+    python -m evaluation.answer_quality review                       # a blinded sheet for a person to judge whether answers are right
+    python -m evaluation.answer_quality score-review                 # unblinds the filled-in ratings.csv
 
 The systems, all on the local model and all reading the same frozen sources (`frozen_corpus.py`):
 
@@ -36,7 +38,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 from app.core.llm_service import LLMServiceError, OllamaLLMService  # noqa: E402
 from app.models.evidence import Evidence  # noqa: E402
 from app.models.location import Location  # noqa: E402
-from evaluation import frozen_corpus  # noqa: E402
+from evaluation import frozen_corpus, human_review  # noqa: E402
 from evaluation.quality_cases import QUALITY_CASES, QualityCase  # noqa: E402
 from evaluation.quality_metrics import (  # noqa: E402
     citation_check,
@@ -48,6 +50,7 @@ from evaluation.quality_metrics import (  # noqa: E402
 
 RUNS_DIR = Path(__file__).resolve().parent / "runs"
 RESULTS_PATH = Path(__file__).resolve().parent / "answer_quality_results.json"
+REVIEW_DIR = Path(__file__).resolve().parent / "review"  # gitignored: it holds source text and full answers
 SYSTEMS = ("A", "B", "PIPELINE")
 RUN_TIMEOUT_SECONDS = 20 * 60  # no single run may take longer than this
 _SOURCE_BUDGET_CHARS = 8000  # what fits in the model's context beside the question
@@ -253,6 +256,63 @@ def cmd_rescore(_args) -> None:
     print("rescored")
 
 
+def cmd_review(args) -> None:
+    """Writes the blinded sheet, an empty ratings file and the key, for a person to judge the answers."""
+    answers: dict[str, dict[str, str]] = {}
+    cases: dict[str, tuple[str, str]] = {}
+    sources: dict[str, list[human_review.SourceRef]] = {}
+    for case in QUALITY_CASES:
+        by_system = {}
+        for system in SYSTEMS:
+            path = RUNS_DIR / f"{case.case_id}__{system}.json"
+            if path.exists():
+                saved = json.loads(path.read_text(encoding="utf-8"))
+                if "answer" in saved:
+                    by_system[system] = saved["answer"]
+        if len(by_system) == len(SYSTEMS):  # a case is judged only when every system answered it
+            answers[case.case_id] = by_system
+            cases[case.case_id] = (case.place, case.question)
+            _, evidence, _ = frozen_corpus.load(case)
+            sources[case.case_id] = [human_review.SourceRef(e.source_title, e.source_url, " ".join(e.text.split())[:220]) for e in evidence]
+    if not answers:
+        sys.exit("No case has an answer from every system yet. Run `run` first.")
+    ratings_path = REVIEW_DIR / "ratings.csv"
+    if ratings_path.exists() and not args.force:
+        sys.exit(f"{ratings_path} already exists and may hold your ratings. Use --force to start over.")
+    key = human_review.build_key(answers)
+    REVIEW_DIR.mkdir(exist_ok=True)
+    (REVIEW_DIR / "review_sheet.md").write_text(human_review.build_sheet(cases, answers, sources, key), encoding="utf-8")
+    ratings_path.write_text(human_review.blank_ratings(key), encoding="utf-8")
+    (REVIEW_DIR / "review_key.json").write_text(json.dumps(key, indent=1), encoding="utf-8")
+    print(f"{len(answers)} cases written to {REVIEW_DIR}")
+    print("Read review_sheet.md, fill in ratings.csv (accuracy and usefulness, 0 to 2), then run `score-review`.")
+    print("Do not open review_key.json until you have finished: it says which system wrote which answer.")
+
+
+def cmd_score_review(_args) -> None:
+    """Unblinds the ratings and prints per-system means, and records them in the results file."""
+    try:
+        key = json.loads((REVIEW_DIR / "review_key.json").read_text(encoding="utf-8"))
+        scored = human_review.score_ratings((REVIEW_DIR / "ratings.csv").read_text(encoding="utf-8"), key)
+    except FileNotFoundError:
+        sys.exit("No review found. Run `review` first, then fill in evaluation/review/ratings.csv.")
+    except human_review.RatingError as exc:
+        sys.exit(f"ratings.csv: {exc}")
+    if not scored:
+        sys.exit("ratings.csv has no ratings in it yet.")
+    print("| system | answers rated | mean accuracy (0-2) | mean usefulness (0-2) | rated 0 for accuracy |")
+    print("|---|---|---|---|---|")
+    for system in SYSTEMS:
+        if system in scored:
+            r = scored[system]
+            print(f"| {system} | {r['rated']} | {r['mean_accuracy']} | {r['mean_usefulness']} | {r['rated_0_for_accuracy']} |")
+    if RESULTS_PATH.exists():
+        results = json.loads(RESULTS_PATH.read_text(encoding="utf-8"))
+        results["human_review"] = scored
+        RESULTS_PATH.write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
+        print(f"\nRecorded in {RESULTS_PATH.name} (numbers only)")
+
+
 def cmd_report(_args) -> None:
     rows: list[dict] = []
     for case in QUALITY_CASES:
@@ -310,13 +370,15 @@ def cmd_report(_args) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name, fn in (("collect", cmd_collect), ("run", cmd_run), ("rescore", cmd_rescore), ("report", cmd_report)):
+    for name, fn in (("collect", cmd_collect), ("run", cmd_run), ("rescore", cmd_rescore), ("report", cmd_report), ("review", cmd_review), ("score-review", cmd_score_review)):
         p = sub.add_parser(name)
         p.set_defaults(fn=fn)
         if name in ("collect", "run"):
             p.add_argument("--case", action="append", help="a case id (repeatable); default all")
         if name == "collect":
             p.add_argument("--refresh", action="store_true")
+        if name == "review":
+            p.add_argument("--force", action="store_true", help="overwrite ratings.csv (loses ratings already entered)")
         if name == "run":
             p.add_argument("--system", default=",".join(SYSTEMS))
     args = parser.parse_args()

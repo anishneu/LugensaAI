@@ -1,9 +1,9 @@
 import { useRef, useState } from "react";
 import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from "@headlessui/react";
-import { ArrowDownTrayIcon, ExclamationTriangleIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { ArrowDownTrayIcon, ExclamationTriangleIcon, PrinterIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { ResearchApiError, researchRequestFor, runResearchStream } from "../api";
-import { downloadText } from "../download";
-import { buildComparisonMarkdown, buildReportMarkdown, comparisonFileName, compareRows, placeTitle, reportFileName } from "../report";
+import { downloadText, printHtml } from "../download";
+import { buildComparisonHtml, buildComparisonMarkdown, buildReportMarkdown, comparisonFileName, compareRows, placeTitle, reportFileName } from "../report";
 import { cleanDisplayText } from "../textUtils";
 import type { ActiveLocation, ResearchResponse, ResearchTraceStep } from "../types";
 import { LiveSteps } from "./LiveSteps";
@@ -265,6 +265,12 @@ export function ComparePlaces({ open, onClose, place, defaultQuestion }: Compare
                   <button type="button" onClick={() => downloadText(comparisonFileName(both[0], both[1]), buildComparisonMarkdown(both[0], both[1]))} className={button}>
                     <ArrowDownTrayIcon className="h-4 w-4" aria-hidden="true" />
                     Download the comparison
+                  </button>
+                )}
+                {both && (
+                  <button type="button" onClick={() => printHtml(buildComparisonHtml(both[0], both[1]))} className={button}>
+                    <PrinterIcon className="h-4 w-4" aria-hidden="true" />
+                    Print / Save as PDF
                   </button>
                 )}
                 <button type="button" onClick={reset} disabled={phase === "running"} className={button}>

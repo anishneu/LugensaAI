@@ -26,7 +26,7 @@ export function TopNav({ location, onChangeLocation, saved, onToggleSaved, onCom
     <header
       className="sticky top-0 z-40 flex h-14 flex-shrink-0 items-center justify-between gap-4 border-b border-[var(--border)] bg-[var(--bg)]/85 px-4 backdrop-blur-xl sm:px-6"
     >
-      <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+      <div className="flex min-w-0 items-center gap-2 sm:gap-4">
         <button
           type="button"
           onClick={() => navigate("/")}
@@ -39,7 +39,7 @@ export function TopNav({ location, onChangeLocation, saved, onToggleSaved, onCom
         <span className="hidden h-6 w-px flex-shrink-0 bg-[var(--border)] sm:block" aria-hidden="true" />
 
         <div className="flex min-w-0 items-center gap-2.5">
-          <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--accent-bg)] text-[var(--accent)]">
+          <span className="hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--accent-bg)] text-[var(--accent)] sm:flex">
             <MapPinIcon className="h-4.5 w-4.5" aria-hidden="true" />
           </span>
           <span className="flex min-w-0 flex-col leading-tight">

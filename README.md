@@ -35,6 +35,7 @@ the project**, and it never invents data: with nothing configured it says so ins
 - [Overview](#overview)
 - [Tech stack](#tech-stack)
 - [Screenshots](#screenshots)
+  - [A real run](#a-real-run)
 - [Architecture](#architecture)
   - [System](#system)
   - [Components](#components)
@@ -138,6 +139,15 @@ page's workspace preview is drawn with placeholder bars on purpose, because it s
 
 <sub><b>The workspace for Harvard Square.</b> "Around this pin" lists what OpenStreetMap has within 1,000 m (not AI-generated). On the right, the live feed
 with its blinking red dot: items from the last 30 days, newest first, each labelled with its kind and the place it is about ("Near Harvard Square").</sub>
+
+### A real run
+
+<img src="docs/images/demo.gif" alt="A recording of the app: pick Harvard Square, ask whether it is a good place to visit as a tourist, watch the agent's steps stream in, then read the answer, its community voices, its claims and its known limitations" width="100%">
+
+<sub><b>A real run, not a mock-up, recorded in free mode:</b> no web-search key (so no search credit was spent), the local model, the free Reddit
+archive and OpenStreetMap. The four-minute model wait is sped up about 30 times. Because nothing was web-searched, the answer is thin
+on purpose: the Details tab says what was not searched, and the one claim the model made is marked "insufficient evidence" because its
+wording was not found in the source it cited. That is the app doing what it is for, not a polished result; with a search key the agent also has web pages to work from.</sub>
 
 ## Architecture
 
@@ -551,7 +561,17 @@ npm install
 npm run dev -- --port 3000
 ```
 
-Open `http://localhost:3000`. Full details, troubleshooting, and what each part does are in
+Open `http://localhost:3000`.
+
+**With Docker instead** (`docker compose up --build`, then the same address): one command starts the backend and the front end.
+The local model is not in the containers: install [Ollama](https://ollama.com) on your machine, `ollama pull qwen3:30b`, and set
+`OLLAMA_ENABLED=1` in `backend/.env`; the backend reaches it through `host.docker.internal`. Keys are read from `backend/.env` at run
+time and never copied into an image. **This setup has not been built or run as a whole:** it was written on a machine without
+Docker, and checked in pieces (the backend starts and answers from a copy holding only what the image holds, the front end builds
+without the folders `.dockerignore` leaves out, the lockfile has the Linux and Alpine binaries, the compose file parses). If a build
+fails, please open an issue with the output.
+
+Full details, troubleshooting, and what each part does are in
 [`backend/README.md`](backend/README.md) and [`frontend/README.md`](frontend/README.md).
 
 ## Configuration
@@ -595,11 +615,12 @@ LugensaAI/
 │   │   │                  Reddit archive, Google News RSS, translation; plus live_feed.py and feed_topics.py
 │   │   └── verification/  deterministic claim verifier and contradiction check
 │   ├── evaluation/        the runnable benchmark from docs/evaluation.md
-│   └── tests/             offline, deterministic pytest suite (536 tests)
+│   └── tests/             offline, deterministic pytest suite (547 tests)
 ├── frontend/
 │   └── src/
 │       ├── pages/         LandingPage, ResearchWorkspace
 │       └── components/    workspace panels, live feed, map, place/ (Google Maps + Around this pin), landing/
+├── docker-compose.yml     backend + front end in containers (Ollama stays on the host); see Quick start
 ├── docs/                  architecture.md, research-workflow.md, evaluation.md, images/
 └── .github/               workflows (ci, codeql, secret-scan, dependency-audit, release), scripts, dependabot.yml
 ```
@@ -610,10 +631,10 @@ See [`backend/README.md`](backend/README.md) for the backend's internal layout.
 
 ```bash
 cd backend
-pytest          # 536 tests
+pytest          # 547 tests
 cd ../frontend
 npm run lint && npx tsc -b && npm run build
-npm run test:e2e   # 25 tests: 11 in a browser, 14 plain unit tests (PW_CHANNEL=msedge uses an installed browser; otherwise `npx playwright install chromium`)
+npm run test:e2e   # 33 tests: 16 in a browser, 17 plain unit tests (PW_CHANNEL=msedge uses an installed browser; otherwise `npx playwright install chromium`)
 ```
 
 The backend suite is free, offline, and deterministic by construction (its invented sample sources live
@@ -701,6 +722,7 @@ occasionally less source diversity). Requires `TAVILY_API_KEY`.
 - [`docs/architecture.md`](docs/architecture.md) — design, interfaces, and what's opt-in vs. free
 - [`docs/research-workflow.md`](docs/research-workflow.md) — the research lifecycle in detail
 - [`docs/evaluation.md`](docs/evaluation.md) — the evaluation plan and its actual results
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`SECURITY.md`](SECURITY.md) — how to contribute, and how to report a vulnerability privately
 
 ## License
 

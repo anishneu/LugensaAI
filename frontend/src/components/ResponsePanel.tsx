@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { Tab, TabGroup, TabList, TabPanel, TabPanels } from "@headlessui/react";
-import { ArrowDownTrayIcon, CheckCircleIcon, ClipboardDocumentIcon, ExclamationTriangleIcon, SparklesIcon } from "@heroicons/react/24/outline";
+import { ArrowDownTrayIcon, CheckCircleIcon, ClipboardDocumentIcon, ExclamationTriangleIcon, PrinterIcon, SparklesIcon } from "@heroicons/react/24/outline";
 import { fetchCapabilities } from "../api";
 import type { Capabilities, QuerySession, ResearchResponse } from "../types";
-import { downloadText } from "../download";
-import { buildReportMarkdown, reportFileName } from "../report";
+import { downloadText, printHtml } from "../download";
+import { buildReportHtml, buildReportMarkdown, reportFileName } from "../report";
 import { cleanDisplayText } from "../textUtils";
 import { ClaimsList } from "./ClaimsList";
 import { CommunityVoices, isVoice } from "./CommunityVoices";
@@ -82,7 +82,11 @@ function ExportButtons({ response }: { response: ResearchResponse }) {
     }
   }
   return (
-    <div className="flex flex-shrink-0 gap-2">
+    <div className="flex min-w-0 flex-wrap gap-2">
+      <button type="button" onClick={() => printHtml(buildReportHtml(response))} className={exportButton}>
+        <PrinterIcon className="h-3.5 w-3.5" aria-hidden="true" />
+        Print / Save as PDF
+      </button>
       <button type="button" onClick={() => downloadText(reportFileName(response), buildReportMarkdown(response))} className={exportButton}>
         <ArrowDownTrayIcon className="h-3.5 w-3.5" aria-hidden="true" />
         Download report
@@ -205,7 +209,7 @@ export function ResponsePanel({ session }: ResponsePanelProps) {
     return (
       <div className={`${shell} flex flex-col items-center gap-3 rounded-2xl border border-dashed border-[var(--border)] px-6 py-16 text-center`}>
         <SparklesIcon className="h-8 w-8 text-[var(--accent)]" aria-hidden="true" />
-        <p className="m-0 max-w-sm text-sm text-[var(--text-muted)]">Ask a question on the left to see the agent's research here.</p>
+        <p className="m-0 max-w-sm text-sm text-[var(--text-muted)]">Ask a question to see the agent's research here.</p>
       </div>
     );
   }

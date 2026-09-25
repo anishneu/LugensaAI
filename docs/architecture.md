@@ -663,3 +663,20 @@ All eight milestones from the original project plan are implemented, plus later 
   found one thing worth writing down: an error event ends a run at once and the app moves straight on to the second place, so a test
   that also closed the stream afterwards was closing the *second* run's stream. Not done: comparing three or more places, different
   questions for each place, keeping comparisons, and any cross-place synthesis.
+- **Milestone 36:** the leftovers from the earlier list. *Mobile:* measured horizontal overflow of every screen at 320, 375, 390 and
+  768 px (none), looked at the 375 px screens, and fixed the one real problem, the place's name shrinking to "Harv…" beside the pin
+  badge and three buttons (the badge is now hidden on small screens); a permanent test asserts no screen scrolls sideways at
+  320, 375 and 768 px. The empty state said "on the left", which is wrong on a phone. *PDF:* "Print / Save as PDF" prints the same
+  report as a print-styled page from a hidden frame (no PDF library, nothing uploaded; every source-supplied string is escaped, and a
+  test checks that markup in a title or address cannot get through). *Compare on real data:* run through the real UI with the keys
+  blanked; it works, and its columns honestly show "no evidence" where the free sources found none. *Human review:* the automatic
+  measures cannot say whether an answer is right, so `review` writes a sheet of the ten cases' answers under shuffled letters (the
+  order differs per case) with the sources beside them and an empty ratings file, and `score-review` unblinds the ratings; the
+  blinding is partial, since the pipeline's answers have a recognisable shape. The ratings have not been made, and they take a person.
+  *Repo files:* `SECURITY.md`, `CONTRIBUTING.md`, issue and pull-request templates, `CITATION.cff`. *Docker:* Dockerfiles for both
+  services, nginx for the built front end, and a compose file with Ollama left on the host; written **without Docker on the machine**,
+  so it was checked in pieces and not built (see the README). The CI's browser tests were also run locally on Playwright's own
+  Chromium, as CI runs them, and pass. *Demo GIF* (`docs/images/demo.gif`, 4.6 MB): a real run recorded through the real app in free mode
+  (no search key, so no credit spent), with the four-minute model wait time-lapsed 30 times; it is a truthful demo and a modest one, since
+  with no web search the answer is thin, the one claim the model made was flagged insufficient because its wording was not in its cited
+  source, and the Details tab lists what was not searched.

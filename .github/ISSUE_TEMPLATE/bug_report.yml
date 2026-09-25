@@ -1,0 +1,47 @@
+name: Bug report
+description: Something is wrong, missing or misleading in an answer, the live feed, or the app
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Never paste an API key or the contents of `backend/.env`.** For a security problem, do not open an
+        issue: see the [security policy](https://github.com/anishneu/LugensaAI/blob/main/SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: What went wrong
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: input
+    id: place
+    attributes:
+      label: The place
+      description: Exactly what you searched or picked, for example "Harvard Square, Cambridge, MA".
+    validations:
+      required: true
+  - type: input
+    id: question
+    attributes:
+      label: The question you asked
+      description: Leave empty if the problem is not in an answer (the live feed, the map, "Around this pin").
+  - type: textarea
+    id: limitations
+    attributes:
+      label: The limitations text
+      description: The "Known limitations" from the answer's Details tab. It often says what went wrong (a source that failed, thin coverage).
+  - type: textarea
+    id: environment
+    attributes:
+      label: Your setup
+      description: |
+        Operating system, Python and Node versions, the Ollama model if you use one, and which optional sources are on
+        (search, Google Maps, translation). Say which are on, not their keys.
+      placeholder: "Windows 11, Python 3.12, Node 20, qwen3:30b, Tavily on, Google Maps off"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Anything from the backend log or the browser console
+      description: Remove anything that looks like a key or a personal address first.
+      render: text
