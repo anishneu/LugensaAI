@@ -93,8 +93,10 @@ def wording_support(text: str, source_texts: list[str]) -> WordingSupport:
     return WordingSupport(overlap=round(overlap, 3), missing_numbers=missing)
 
 
-def untraceable_sentences(text: str, source_texts: list[str], min_overlap: float = MIN_SENTENCE_OVERLAP) -> list[str]:
-    """Sentences of `text` that no single source backs.
+def assess_sentences(
+    text: str, source_texts: list[str], min_overlap: float = MIN_SENTENCE_OVERLAP
+) -> tuple[int, list[str]]:
+    """How many sentences of `text` were long enough to judge, and which of those no single source backs.
 
     A sentence passes if one source covers `min_overlap` of its content words;
     judging against the union of every source would let a long page vouch for
@@ -103,12 +105,19 @@ def untraceable_sentences(text: str, source_texts: list[str], min_overlap: float
     per_source = [(content_tokens(s), numbers_in(s)) for s in source_texts]
     all_numbers: set[str] = set().union(*(numbers for _, numbers in per_source)) if per_source else set()
 
+    assessed = 0
     flagged: list[str] = []
     for sentence in (s.strip() for s in _SENTENCE_SPLIT_RE.split(text)):
         tokens = content_tokens(sentence)
         if len(tokens) < _MIN_SENTENCE_TOKENS:
             continue
+        assessed += 1
         best = max((len(tokens & source_tokens) / len(tokens) for source_tokens, _ in per_source), default=0.0)
         if best < min_overlap or numbers_in(sentence) - all_numbers:
             flagged.append(sentence)
-    return flagged
+    return assessed, flagged
+
+
+def untraceable_sentences(text: str, source_texts: list[str], min_overlap: float = MIN_SENTENCE_OVERLAP) -> list[str]:
+    """Sentences of `text` that no single source backs (see `assess_sentences`)."""
+    return assess_sentences(text, source_texts, min_overlap)[1]

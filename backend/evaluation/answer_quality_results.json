@@ -1,0 +1,908 @@
+{
+ "summary": {
+  "A": {
+   "runs": 10,
+   "mean_seconds": 28.25,
+   "mean_words": 118.9,
+   "sentences_assessed": 58,
+   "sentences_ungrounded": 57,
+   "specifics_total": 19,
+   "specifics_unsupported": 10,
+   "runs_admitting_a_limit": 0,
+   "runs_admitting_a_limit_in_own_words": 0,
+   "unsupported_specifics_per_100_words": 0.84
+  },
+  "B": {
+   "runs": 10,
+   "mean_seconds": 55.11,
+   "mean_words": 135.8,
+   "sentences_assessed": 59,
+   "sentences_ungrounded": 51,
+   "specifics_total": 67,
+   "specifics_unsupported": 7,
+   "runs_admitting_a_limit": 1,
+   "runs_admitting_a_limit_in_own_words": 1,
+   "unsupported_specifics_per_100_words": 0.52
+  },
+  "PIPELINE": {
+   "runs": 10,
+   "mean_seconds": 222.61,
+   "mean_words": 294.0,
+   "sentences_assessed": 136,
+   "sentences_ungrounded": 78,
+   "specifics_total": 99,
+   "specifics_unsupported": 4,
+   "runs_admitting_a_limit": 10,
+   "runs_admitting_a_limit_in_own_words": 2,
+   "unsupported_specifics_per_100_words": 0.14
+  },
+  "pipeline_claims": {
+   "claims": 45,
+   "with_real_citation": 45,
+   "worded_like_source": 45,
+   "supported": 45
+  }
+ },
+ "runs": [
+  {
+   "case_id": "harvard_broad",
+   "system": "A",
+   "seconds": 15.7,
+   "corpus": {
+    "collected_at": "2026-09-25T16:26:40.826272+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "reddit": 11,
+     "news": 25
+    },
+    "items": 40
+   },
+   "words": 108,
+   "sentences_assessed": 6,
+   "sentences_ungrounded": 6,
+   "ungrounded_share": 1.0,
+   "specifics_total": 2,
+   "specifics_unsupported": 1,
+   "unsupported_examples": [
+    "name Harvard University"
+   ],
+   "states_a_limit": false,
+   "states_a_limit_in_its_own_words": false,
+   "limitations": 0,
+   "kind": "broad question, well-covered place"
+  },
+  {
+   "case_id": "harvard_broad",
+   "system": "B",
+   "seconds": 42.0,
+   "corpus": {
+    "collected_at": "2026-09-25T16:26:40.826272+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "reddit": 11,
+     "news": 25
+    },
+    "items": 40
+   },
+   "words": 154,
+   "sentences_assessed": 6,
+   "sentences_ungrounded": 5,
+   "ungrounded_share": 0.833,
+   "specifics_total": 7,
+   "specifics_unsupported": 2,
+   "unsupported_examples": [
+    "name Harvard University",
+    "name MBTA Red Line"
+   ],
+   "states_a_limit": false,
+   "sources_in_prompt": 40,
+   "states_a_limit_in_its_own_words": false,
+   "limitations": 0,
+   "kind": "broad question, well-covered place"
+  },
+  {
+   "case_id": "harvard_broad",
+   "system": "PIPELINE",
+   "seconds": 285.0,
+   "corpus": {
+    "collected_at": "2026-09-25T16:26:40.826272+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "reddit": 11,
+     "news": 25
+    },
+    "items": 40
+   },
+   "words": 216,
+   "sentences_assessed": 12,
+   "sentences_ungrounded": 7,
+   "ungrounded_share": 0.583,
+   "specifics_total": 12,
+   "specifics_unsupported": 0,
+   "unsupported_examples": [],
+   "states_a_limit": true,
+   "evidence_kept": 20,
+   "claims": 11,
+   "claims_with_real_citation": 11,
+   "claims_worded_like_source": 11,
+   "claims_supported": 11,
+   "claims_contradicted": 0,
+   "topics_planned": 5,
+   "topics_with_evidence": 5,
+   "limitations": 2,
+   "trace_steps": 26,
+   "states_a_limit_in_its_own_words": false,
+   "kind": "broad question, well-covered place"
+  },
+  {
+   "case_id": "harvard_nightlife",
+   "system": "A",
+   "seconds": 17.9,
+   "corpus": {
+    "collected_at": "2026-09-25T16:26:51.815646+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "reddit": 13,
+     "news": 23
+    },
+    "items": 40
+   },
+   "words": 129,
+   "sentences_assessed": 6,
+   "sentences_ungrounded": 6,
+   "ungrounded_share": 1.0,
+   "specifics_total": 4,
+   "specifics_unsupported": 3,
+   "unsupported_examples": [
+    "name Harvard Square Tavern",
+    "name Club Passim",
+    "name Harvard Square Diner"
+   ],
+   "states_a_limit": false,
+   "states_a_limit_in_its_own_words": false,
+   "limitations": 0,
+   "kind": "narrow question, well-covered place"
+  },
+  {
+   "case_id": "harvard_nightlife",
+   "system": "B",
+   "seconds": 48.7,
+   "corpus": {
+    "collected_at": "2026-09-25T16:26:51.815646+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "reddit": 13,
+     "news": 23
+    },
+    "items": 40
+   },
+   "words": 142,
+   "sentences_assessed": 6,
+   "sentences_ungrounded": 6,
+   "ungrounded_share": 1.0,
+   "specifics_total": 4,
+   "specifics_unsupported": 1,
+   "unsupported_examples": [
+    "name MBTA Red Line"
+   ],
+   "states_a_limit": true,
+   "sources_in_prompt": 38,
+   "states_a_limit_in_its_own_words": true,
+   "limitations": 0,
+   "kind": "narrow question, well-covered place"
+  },
+  {
+   "case_id": "harvard_nightlife",
+   "system": "PIPELINE",
+   "seconds": 80.5,
+   "corpus": {
+    "collected_at": "2026-09-25T16:26:51.815646+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "reddit": 13,
+     "news": 23
+    },
+    "items": 40
+   },
+   "words": 228,
+   "sentences_assessed": 10,
+   "sentences_ungrounded": 6,
+   "ungrounded_share": 0.6,
+   "specifics_total": 15,
+   "specifics_unsupported": 1,
+   "unsupported_examples": [
+    "name MBTA Red Line"
+   ],
+   "states_a_limit": true,
+   "evidence_kept": 4,
+   "claims": 3,
+   "claims_with_real_citation": 3,
+   "claims_worded_like_source": 3,
+   "claims_supported": 3,
+   "claims_contradicted": 0,
+   "topics_planned": 1,
+   "topics_with_evidence": 1,
+   "limitations": 2,
+   "trace_steps": 14,
+   "states_a_limit_in_its_own_words": false,
+   "kind": "narrow question, well-covered place"
+  },
+  {
+   "case_id": "northern_quarter",
+   "system": "A",
+   "seconds": 18.9,
+   "corpus": {
+    "collected_at": "2026-09-25T16:27:10.617363+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "news": 36
+    },
+    "items": 40
+   },
+   "words": 120,
+   "sentences_assessed": 6,
+   "sentences_ungrounded": 6,
+   "ungrounded_share": 1.0,
+   "specifics_total": 1,
+   "specifics_unsupported": 0,
+   "unsupported_examples": [],
+   "states_a_limit": false,
+   "states_a_limit_in_its_own_words": false,
+   "limitations": 0,
+   "kind": "broad question, English-speaking city"
+  },
+  {
+   "case_id": "northern_quarter",
+   "system": "B",
+   "seconds": 47.4,
+   "corpus": {
+    "collected_at": "2026-09-25T16:27:10.617363+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "news": 36
+    },
+    "items": 40
+   },
+   "words": 126,
+   "sentences_assessed": 5,
+   "sentences_ungrounded": 4,
+   "ungrounded_share": 0.8,
+   "specifics_total": 3,
+   "specifics_unsupported": 0,
+   "unsupported_examples": [],
+   "states_a_limit": false,
+   "sources_in_prompt": 40,
+   "states_a_limit_in_its_own_words": false,
+   "limitations": 0,
+   "kind": "broad question, English-speaking city"
+  },
+  {
+   "case_id": "northern_quarter",
+   "system": "PIPELINE",
+   "seconds": 277.7,
+   "corpus": {
+    "collected_at": "2026-09-25T16:27:10.617363+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "news": 36
+    },
+    "items": 40
+   },
+   "words": 392,
+   "sentences_assessed": 17,
+   "sentences_ungrounded": 15,
+   "ungrounded_share": 0.882,
+   "specifics_total": 8,
+   "specifics_unsupported": 1,
+   "unsupported_examples": [
+    "name Community Sentiment"
+   ],
+   "states_a_limit": true,
+   "evidence_kept": 24,
+   "claims": 0,
+   "claims_with_real_citation": 0,
+   "claims_worded_like_source": 0,
+   "claims_supported": 0,
+   "claims_contradicted": 0,
+   "topics_planned": 6,
+   "topics_with_evidence": 6,
+   "limitations": 11,
+   "trace_steps": 29,
+   "states_a_limit_in_its_own_words": true,
+   "kind": "broad question, English-speaking city"
+  },
+  {
+   "case_id": "shibuya_safety",
+   "system": "A",
+   "seconds": 37.7,
+   "corpus": {
+    "collected_at": "2026-09-25T16:27:14.072888+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "news": 36
+    },
+    "items": 40
+   },
+   "words": 113,
+   "sentences_assessed": 5,
+   "sentences_ungrounded": 5,
+   "ungrounded_share": 1.0,
+   "specifics_total": 1,
+   "specifics_unsupported": 0,
+   "unsupported_examples": [],
+   "states_a_limit": false,
+   "states_a_limit_in_its_own_words": false,
+   "limitations": 0,
+   "kind": "safety question, non-English country"
+  },
+  {
+   "case_id": "shibuya_safety",
+   "system": "B",
+   "seconds": 69.7,
+   "corpus": {
+    "collected_at": "2026-09-25T16:27:14.072888+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "news": 36
+    },
+    "items": 40
+   },
+   "words": 120,
+   "sentences_assessed": 6,
+   "sentences_ungrounded": 6,
+   "ungrounded_share": 1.0,
+   "specifics_total": 2,
+   "specifics_unsupported": 0,
+   "unsupported_examples": [],
+   "states_a_limit": false,
+   "sources_in_prompt": 40,
+   "states_a_limit_in_its_own_words": false,
+   "limitations": 0,
+   "kind": "safety question, non-English country"
+  },
+  {
+   "case_id": "shibuya_safety",
+   "system": "PIPELINE",
+   "seconds": 153.3,
+   "corpus": {
+    "collected_at": "2026-09-25T16:27:14.072888+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "news": 36
+    },
+    "items": 40
+   },
+   "words": 257,
+   "sentences_assessed": 13,
+   "sentences_ungrounded": 12,
+   "ungrounded_share": 0.923,
+   "specifics_total": 4,
+   "specifics_unsupported": 0,
+   "unsupported_examples": [],
+   "states_a_limit": true,
+   "evidence_kept": 4,
+   "claims": 1,
+   "claims_with_real_citation": 1,
+   "claims_worded_like_source": 1,
+   "claims_supported": 1,
+   "claims_contradicted": 0,
+   "topics_planned": 1,
+   "topics_with_evidence": 1,
+   "limitations": 4,
+   "trace_steps": 14,
+   "states_a_limit_in_its_own_words": false,
+   "kind": "safety question, non-English country"
+  },
+  {
+   "case_id": "gion_tourist",
+   "system": "A",
+   "seconds": 34.3,
+   "corpus": {
+    "collected_at": "2026-09-25T16:27:17.248920+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "news": 36
+    },
+    "items": 40
+   },
+   "words": 140,
+   "sentences_assessed": 6,
+   "sentences_ungrounded": 6,
+   "ungrounded_share": 1.0,
+   "specifics_total": 0,
+   "specifics_unsupported": 0,
+   "unsupported_examples": [],
+   "states_a_limit": false,
+   "states_a_limit_in_its_own_words": false,
+   "limitations": 0,
+   "kind": "tourism question, non-English country"
+  },
+  {
+   "case_id": "gion_tourist",
+   "system": "B",
+   "seconds": 66.8,
+   "corpus": {
+    "collected_at": "2026-09-25T16:27:17.248920+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "news": 36
+    },
+    "items": 40
+   },
+   "words": 144,
+   "sentences_assessed": 6,
+   "sentences_ungrounded": 6,
+   "ungrounded_share": 1.0,
+   "specifics_total": 12,
+   "specifics_unsupported": 1,
+   "unsupported_examples": [
+    "name MICHELIN-rated Hotel The Celestine Kyoto Gion"
+   ],
+   "states_a_limit": false,
+   "sources_in_prompt": 40,
+   "states_a_limit_in_its_own_words": false,
+   "limitations": 0,
+   "kind": "tourism question, non-English country"
+  },
+  {
+   "case_id": "gion_tourist",
+   "system": "PIPELINE",
+   "seconds": 288.3,
+   "corpus": {
+    "collected_at": "2026-09-25T16:27:17.248920+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "news": 36
+    },
+    "items": 40
+   },
+   "words": 221,
+   "sentences_assessed": 13,
+   "sentences_ungrounded": 10,
+   "ungrounded_share": 0.769,
+   "specifics_total": 12,
+   "specifics_unsupported": 0,
+   "unsupported_examples": [],
+   "states_a_limit": true,
+   "evidence_kept": 20,
+   "claims": 0,
+   "claims_with_real_citation": 0,
+   "claims_worded_like_source": 0,
+   "claims_supported": 0,
+   "claims_contradicted": 0,
+   "topics_planned": 5,
+   "topics_with_evidence": 5,
+   "limitations": 9,
+   "trace_steps": 26,
+   "states_a_limit_in_its_own_words": false,
+   "kind": "tourism question, non-English country"
+  },
+  {
+   "case_id": "zhongshan_food",
+   "system": "A",
+   "seconds": 33.2,
+   "corpus": {
+    "collected_at": "2026-09-25T16:27:58.151096+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "reddit": 12,
+     "news": 24
+    },
+    "items": 40
+   },
+   "words": 121,
+   "sentences_assessed": 6,
+   "sentences_ungrounded": 6,
+   "ungrounded_share": 1.0,
+   "specifics_total": 2,
+   "specifics_unsupported": 1,
+   "unsupported_examples": [
+    "name Shilin Night Market"
+   ],
+   "states_a_limit": false,
+   "states_a_limit_in_its_own_words": false,
+   "limitations": 0,
+   "kind": "narrow question, non-English country"
+  },
+  {
+   "case_id": "zhongshan_food",
+   "system": "B",
+   "seconds": 85.6,
+   "corpus": {
+    "collected_at": "2026-09-25T16:27:58.151096+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "reddit": 12,
+     "news": 24
+    },
+    "items": 40
+   },
+   "words": 176,
+   "sentences_assessed": 8,
+   "sentences_ungrounded": 7,
+   "ungrounded_share": 0.875,
+   "specifics_total": 5,
+   "specifics_unsupported": 0,
+   "unsupported_examples": [],
+   "states_a_limit": false,
+   "sources_in_prompt": 40,
+   "states_a_limit_in_its_own_words": false,
+   "limitations": 0,
+   "kind": "narrow question, non-English country"
+  },
+  {
+   "case_id": "zhongshan_food",
+   "system": "PIPELINE",
+   "seconds": 132.2,
+   "corpus": {
+    "collected_at": "2026-09-25T16:27:58.151096+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "reddit": 12,
+     "news": 24
+    },
+    "items": 40
+   },
+   "words": 195,
+   "sentences_assessed": 8,
+   "sentences_ungrounded": 4,
+   "ungrounded_share": 0.5,
+   "specifics_total": 5,
+   "specifics_unsupported": 0,
+   "unsupported_examples": [],
+   "states_a_limit": true,
+   "evidence_kept": 4,
+   "claims": 2,
+   "claims_with_real_citation": 2,
+   "claims_worded_like_source": 2,
+   "claims_supported": 2,
+   "claims_contradicted": 0,
+   "topics_planned": 1,
+   "topics_with_evidence": 1,
+   "limitations": 2,
+   "trace_steps": 14,
+   "states_a_limit_in_its_own_words": false,
+   "kind": "narrow question, non-English country"
+  },
+  {
+   "case_id": "erfurt_weekend",
+   "system": "A",
+   "seconds": 32.9,
+   "corpus": {
+    "collected_at": "2026-09-25T16:28:01.004630+00:00",
+    "counts": {
+     "wikimedia": 4
+    },
+    "items": 4
+   },
+   "words": 123,
+   "sentences_assessed": 6,
+   "sentences_ungrounded": 6,
+   "ungrounded_share": 1.0,
+   "specifics_total": 5,
+   "specifics_unsupported": 4,
+   "unsupported_examples": [
+    "name Merchants' Bridge",
+    "name Erfurt Cathedral",
+    "name Augustinian Friary",
+    "name Martin Luther"
+   ],
+   "states_a_limit": false,
+   "states_a_limit_in_its_own_words": false,
+   "limitations": 0,
+   "kind": "smaller city, non-English country"
+  },
+  {
+   "case_id": "erfurt_weekend",
+   "system": "B",
+   "seconds": 40.7,
+   "corpus": {
+    "collected_at": "2026-09-25T16:28:01.004630+00:00",
+    "counts": {
+     "wikimedia": 4
+    },
+    "items": 4
+   },
+   "words": 145,
+   "sentences_assessed": 8,
+   "sentences_ungrounded": 4,
+   "ungrounded_share": 0.5,
+   "specifics_total": 12,
+   "specifics_unsupported": 1,
+   "unsupported_examples": [
+    "name Memorial Centre"
+   ],
+   "states_a_limit": false,
+   "sources_in_prompt": 4,
+   "states_a_limit_in_its_own_words": false,
+   "limitations": 0,
+   "kind": "smaller city, non-English country"
+  },
+  {
+   "case_id": "erfurt_weekend",
+   "system": "PIPELINE",
+   "seconds": 425.3,
+   "corpus": {
+    "collected_at": "2026-09-25T16:28:01.004630+00:00",
+    "counts": {
+     "wikimedia": 4
+    },
+    "items": 4
+   },
+   "words": 835,
+   "sentences_assessed": 34,
+   "sentences_ungrounded": 2,
+   "ungrounded_share": 0.059,
+   "specifics_total": 12,
+   "specifics_unsupported": 2,
+   "unsupported_examples": [
+    "name Gothic Lutheran",
+    "name Community Sentiment"
+   ],
+   "states_a_limit": true,
+   "evidence_kept": 16,
+   "claims": 16,
+   "claims_with_real_citation": 16,
+   "claims_worded_like_source": 16,
+   "claims_supported": 16,
+   "claims_contradicted": 0,
+   "topics_planned": 4,
+   "topics_with_evidence": 4,
+   "limitations": 3,
+   "trace_steps": 23,
+   "states_a_limit_in_its_own_words": false,
+   "kind": "smaller city, non-English country"
+  },
+  {
+   "case_id": "kurume_family",
+   "system": "A",
+   "seconds": 38.3,
+   "corpus": {
+    "collected_at": "2026-09-25T16:28:03.834236+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "news": 30
+    },
+    "items": 34
+   },
+   "words": 128,
+   "sentences_assessed": 6,
+   "sentences_ungrounded": 6,
+   "ungrounded_share": 1.0,
+   "specifics_total": 2,
+   "specifics_unsupported": 1,
+   "unsupported_examples": [
+    "name Fukuoka City"
+   ],
+   "states_a_limit": false,
+   "states_a_limit_in_its_own_words": false,
+   "limitations": 0,
+   "kind": "thinly covered place"
+  },
+  {
+   "case_id": "kurume_family",
+   "system": "B",
+   "seconds": 75.5,
+   "corpus": {
+    "collected_at": "2026-09-25T16:28:03.834236+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "news": 30
+    },
+    "items": 34
+   },
+   "words": 142,
+   "sentences_assessed": 5,
+   "sentences_ungrounded": 4,
+   "ungrounded_share": 0.8,
+   "specifics_total": 13,
+   "specifics_unsupported": 2,
+   "unsupported_examples": [
+    "name Bairin-ji Temple",
+    "name Rinzai Zen"
+   ],
+   "states_a_limit": false,
+   "sources_in_prompt": 34,
+   "states_a_limit_in_its_own_words": false,
+   "limitations": 0,
+   "kind": "thinly covered place"
+  },
+  {
+   "case_id": "kurume_family",
+   "system": "PIPELINE",
+   "seconds": 306.2,
+   "corpus": {
+    "collected_at": "2026-09-25T16:28:03.834236+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "news": 30
+    },
+    "items": 34
+   },
+   "words": 169,
+   "sentences_assessed": 9,
+   "sentences_ungrounded": 6,
+   "ungrounded_share": 0.667,
+   "specifics_total": 11,
+   "specifics_unsupported": 0,
+   "unsupported_examples": [],
+   "states_a_limit": true,
+   "evidence_kept": 20,
+   "claims": 5,
+   "claims_with_real_citation": 5,
+   "claims_worded_like_source": 5,
+   "claims_supported": 5,
+   "claims_contradicted": 0,
+   "topics_planned": 5,
+   "topics_with_evidence": 5,
+   "limitations": 2,
+   "trace_steps": 26,
+   "states_a_limit_in_its_own_words": true,
+   "kind": "thinly covered place"
+  },
+  {
+   "case_id": "hunts_bank",
+   "system": "A",
+   "seconds": 25.6,
+   "corpus": {
+    "collected_at": "2026-09-25T16:37:46.636834+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "news": 11
+    },
+    "items": 15
+   },
+   "words": 102,
+   "sentences_assessed": 5,
+   "sentences_ungrounded": 5,
+   "ungrounded_share": 1.0,
+   "specifics_total": 1,
+   "specifics_unsupported": 0,
+   "unsupported_examples": [],
+   "states_a_limit": false,
+   "states_a_limit_in_its_own_words": false,
+   "limitations": 0,
+   "kind": "obscure street, thin coverage"
+  },
+  {
+   "case_id": "hunts_bank",
+   "system": "B",
+   "seconds": 37.7,
+   "corpus": {
+    "collected_at": "2026-09-25T16:37:46.636834+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "news": 11
+    },
+    "items": 15
+   },
+   "words": 116,
+   "sentences_assessed": 5,
+   "sentences_ungrounded": 5,
+   "ungrounded_share": 1.0,
+   "specifics_total": 5,
+   "specifics_unsupported": 0,
+   "unsupported_examples": [],
+   "states_a_limit": false,
+   "sources_in_prompt": 15,
+   "states_a_limit_in_its_own_words": false,
+   "limitations": 0,
+   "kind": "obscure street, thin coverage"
+  },
+  {
+   "case_id": "hunts_bank",
+   "system": "PIPELINE",
+   "seconds": 166.8,
+   "corpus": {
+    "collected_at": "2026-09-25T16:37:46.636834+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "news": 11
+    },
+    "items": 15
+   },
+   "words": 223,
+   "sentences_assessed": 10,
+   "sentences_ungrounded": 6,
+   "ungrounded_share": 0.6,
+   "specifics_total": 10,
+   "specifics_unsupported": 0,
+   "unsupported_examples": [],
+   "states_a_limit": true,
+   "evidence_kept": 4,
+   "claims": 6,
+   "claims_with_real_citation": 6,
+   "claims_worded_like_source": 6,
+   "claims_supported": 6,
+   "claims_contradicted": 0,
+   "topics_planned": 1,
+   "topics_with_evidence": 1,
+   "limitations": 2,
+   "trace_steps": 14,
+   "states_a_limit_in_its_own_words": false,
+   "kind": "obscure street, thin coverage"
+  },
+  {
+   "case_id": "tatte_cafe",
+   "system": "A",
+   "seconds": 28.0,
+   "corpus": {
+    "collected_at": "2026-09-25T16:28:09.963472+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "news": 9
+    },
+    "items": 13
+   },
+   "words": 105,
+   "sentences_assessed": 6,
+   "sentences_ungrounded": 5,
+   "ungrounded_share": 0.833,
+   "specifics_total": 1,
+   "specifics_unsupported": 0,
+   "unsupported_examples": [],
+   "states_a_limit": false,
+   "states_a_limit_in_its_own_words": false,
+   "limitations": 0,
+   "kind": "a specific business without Google reviews"
+  },
+  {
+   "case_id": "tatte_cafe",
+   "system": "B",
+   "seconds": 37.0,
+   "corpus": {
+    "collected_at": "2026-09-25T16:28:09.963472+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "news": 9
+    },
+    "items": 13
+   },
+   "words": 93,
+   "sentences_assessed": 4,
+   "sentences_ungrounded": 4,
+   "ungrounded_share": 1.0,
+   "specifics_total": 4,
+   "specifics_unsupported": 0,
+   "unsupported_examples": [],
+   "states_a_limit": false,
+   "sources_in_prompt": 13,
+   "states_a_limit_in_its_own_words": false,
+   "limitations": 0,
+   "kind": "a specific business without Google reviews"
+  },
+  {
+   "case_id": "tatte_cafe",
+   "system": "PIPELINE",
+   "seconds": 110.8,
+   "corpus": {
+    "collected_at": "2026-09-25T16:28:09.963472+00:00",
+    "counts": {
+     "wikimedia": 4,
+     "news": 9
+    },
+    "items": 13
+   },
+   "words": 204,
+   "sentences_assessed": 10,
+   "sentences_ungrounded": 10,
+   "ungrounded_share": 1.0,
+   "specifics_total": 10,
+   "specifics_unsupported": 0,
+   "unsupported_examples": [],
+   "states_a_limit": true,
+   "evidence_kept": 4,
+   "claims": 1,
+   "claims_with_real_citation": 1,
+   "claims_worded_like_source": 1,
+   "claims_supported": 1,
+   "claims_contradicted": 0,
+   "topics_planned": 1,
+   "topics_with_evidence": 1,
+   "limitations": 3,
+   "trace_steps": 14,
+   "states_a_limit_in_its_own_words": false,
+   "kind": "a specific business without Google reviews"
+  }
+ ]
+}

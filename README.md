@@ -668,7 +668,18 @@ cd backend
 python -m evaluation.run_benchmark
 ```
 
-Runs the benchmark described in [`docs/evaluation.md`](docs/evaluation.md) for real — Baseline B
+```bash
+python -m evaluation.answer_quality report   # after collect and run: the answer-quality comparison
+```
+
+That second evaluation answers ten questions three ways on the local model, all from the same frozen free sources (no search
+credit): the model alone, the model given every source, and the full pipeline. Headline: figures and names found in no source
+were 53% of the model-alone answers, 10% with sources handed over, and 4% from the pipeline, but on ten cases and one run each,
+so the gap between the last two is not shown to be reliable; the pipeline is about four times slower than the plain
+source-stuffing baseline. It measures staying with the sources, not whether an answer is right. The method, the metric bug it
+found in itself and what it does not show are in [`docs/evaluation.md`](docs/evaluation.md).
+
+The first benchmark: runs the benchmark described in [`docs/evaluation.md`](docs/evaluation.md) for real — Baseline B
 vs. the proposed system's orchestration — and prints/saves actual measured results, including
 tradeoffs where the proposed system does *not* clearly win (e.g. more tool calls, more latency,
 occasionally less source diversity). Requires `TAVILY_API_KEY`.

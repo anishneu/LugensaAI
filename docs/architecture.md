@@ -642,3 +642,15 @@ All eight milestones from the original project plan are implemented, plus later 
   dev server with the backend mocked, 7 plain unit tests). Writing them found a real bug, two siblings sharing one React `key` in
   the answer panel, now fixed. Not done: cancelling a run from the page, and streaming partial claims (steps are streamed, not
   partial answers).
+- **Milestone 34:** an answer-quality evaluation, and one thing not built. `evaluation/answer_quality.py` answers ten questions with
+  the model alone, the model handed all the sources, and the full pipeline, over the same frozen sources collected free from
+  Wikipedia, the Reddit archive and Google News RSS (no search credit), and scores every answer with deterministic measures
+  (`quality_metrics.py`): sentences no single source backs, figures and names in no source, and whether citations are real.
+  `FrozenSearch` lets the real pipeline read a fixed evidence set with everything that reaches the network switched off. Results,
+  in `docs/evaluation.md`: 53% of the model-alone answers' specifics are in no source, 10% with sources handed over, 4% for the
+  pipeline, which is about four times slower than the sources-handed-over baseline. Building it found two bugs in its own measure
+  (names joined across a line break; provenance ignored), fixed after the first results and disclosed with both sets of numbers,
+  and made `assess_sentences` public so the sentence check can report how many sentences it judged. **Not built: article text for
+  the live feed.** Google News RSS links do not lead to the publisher: each of four tried returned a 580 KB Google page that redirects
+  by script. Reaching the article means calling Google's undocumented internal API, which is unofficial scraping that can break or
+  be blocked at any time, so it was left out; items keep their headline, real time and outlet.

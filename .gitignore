@@ -31,3 +31,7 @@ playwright-report/
 # AI-assistant config and notes, never committed
 .claude/
 CLAUDE.md
+
+# Answer-quality evaluation: third-party source text and full model answers stay local
+backend/evaluation/corpora/
+backend/evaluation/runs/
