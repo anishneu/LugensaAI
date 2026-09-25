@@ -34,6 +34,11 @@ test.describe("report", () => {
     expect(buildReportMarkdown(tricky, AT)).toContain("[Cafe \\[best\\] in town](https://example.org/a_(b%29)");
   });
 
+  test("escapes a backslash in a source title before the brackets, so it cannot undo their escaping", () => {
+    const evil = { ...answer, evidence: [{ ...answer.evidence[0], source_title: "Path C:\\dir\\ [x]", source_url: "https://example.org/a" }] };
+    expect(buildReportMarkdown(evil, AT)).toContain("[Path C:\\\\dir\\\\ \\[x\\]](https://example.org/a)");
+  });
+
   test("names the file after the place, the question and the date", () => {
     expect(reportFileName(answer, AT)).toBe("harvard-square-cambridge-would-this-be-a-good-place-for-a-college-2026-09-25.md");
   });

@@ -20,7 +20,8 @@ function oneLine(text: string): string {
 }
 
 function linkTitle(title: string): string {
-  return oneLine(title).replace(/([[\]])/g, "\\$1") || "Untitled source";
+  // Backslashes first: otherwise a title ending in "\" would cancel the backslash that escapes the bracket after it.
+  return oneLine(title).replace(/\\/g, "\\\\").replace(/([[\]])/g, "\\$1") || "Untitled source";
 }
 
 function linkUrl(url: string): string {
