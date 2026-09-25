@@ -1,3 +1,4 @@
+import { parseSseBlock } from "./sse";
 import type {
   Capabilities,
   Evidence,
@@ -7,6 +8,7 @@ import type {
   PopularPlace,
   ResearchRequest,
   ResearchResponse,
+  ResearchTraceStep,
   TranslatedTexts,
 } from "./types";
 
@@ -50,6 +52,54 @@ export async function runResearch(request: ResearchRequest): Promise<ResearchRes
   }
 
   return response.json();
+}
+
+/** The same research as `runResearch`, but reports each step the agent takes as it takes it (`onStep`), so the page can
+ * show real progress during a run that lasts minutes. Resolves with the finished response, exactly as `runResearch`
+ * does. Falls back to the plain request when the server has no streaming endpoint (an older backend). */
+export async function runResearchStream(
+  request: ResearchRequest,
+  onStep: (step: ResearchTraceStep) => void,
+): Promise<ResearchResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/research/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    body: JSON.stringify(request),
+  });
+  if (response.status === 404 || response.status === 405) return runResearch(request);
+  if (!response.ok || !response.body) {
+    const body = await response.json().catch(() => null);
+    throw new ResearchApiError(body?.detail ?? `Request failed with status ${response.status}`, response.status);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result: ResearchResponse | null = null;
+
+  const handle = (block: string) => {
+    const parsed = parseSseBlock(block);
+    if (!parsed) return;
+    if (parsed.event === "step") onStep(JSON.parse(parsed.data) as ResearchTraceStep);
+    else if (parsed.event === "result") result = JSON.parse(parsed.data) as ResearchResponse;
+    else if (parsed.event === "error") {
+      const failure = JSON.parse(parsed.data) as { status?: number; detail?: string };
+      throw new ResearchApiError(failure.detail ?? "The research run failed.", failure.status ?? 500);
+    }
+  };
+
+  for (;;) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    for (let match = /\r?\n\r?\n/.exec(buffer); match; match = /\r?\n\r?\n/.exec(buffer)) {
+      handle(buffer.slice(0, match.index));
+      buffer = buffer.slice(match.index + match[0].length);
+    }
+    if (done) break;
+  }
+  if (buffer.trim()) handle(buffer);
+  if (!result) throw new ResearchApiError("The research stream ended before an answer arrived.", 502);
+  return result;
 }
 
 /** Live place search (Google when configured, else OpenStreetMap): any real

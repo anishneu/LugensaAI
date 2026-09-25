@@ -25,6 +25,7 @@ the loop is guaranteed to terminate.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from urllib.parse import urlparse
@@ -188,7 +189,12 @@ class LocationResearchAgent:
             and regional_domains(location.country_code)
         )
 
-    def run(self, raw_location: str | Location, question: str) -> ResearchResponse:
+    def run(
+        self,
+        raw_location: str | Location,
+        question: str,
+        on_step: Callable[[ResearchTraceStep], None] | None = None,
+    ) -> ResearchResponse:
         """Run the full research lifecycle and always release the evidence
         repository's resources afterward (e.g. closing a SQLite connection),
         even if location resolution or a later stage raises.
@@ -201,9 +207,12 @@ class LocationResearchAgent:
         principle, land on a *different* same-named place nearby (a
         different branch of the same chain), which would silently research
         the wrong location.
+
+        `on_step`, when given, is called with each trace step the moment it is recorded, so a caller can show progress
+        while the run is still going. It never changes the run: an exception it raises is swallowed.
         """
         try:
-            return self._run(raw_location, question)
+            return self._run(raw_location, question, on_step)
         finally:
             self.evidence_repository.close()
 
@@ -418,19 +427,28 @@ class LocationResearchAgent:
             )
         return location, plan
 
-    def _run(self, raw_location: str | Location, question: str) -> ResearchResponse:
+    def _run(
+        self,
+        raw_location: str | Location,
+        question: str,
+        on_step: Callable[[ResearchTraceStep], None] | None = None,
+    ) -> ResearchResponse:
         trace: list[ResearchTraceStep] = []
         tool_calls_made = 0
 
         def log(stage: TraceStage, description: str, **details: object) -> None:
-            trace.append(
-                ResearchTraceStep(
-                    stage=stage,
-                    description=description,
-                    timestamp=datetime.now(timezone.utc),
-                    details={k: str(v) for k, v in details.items()},
-                )
+            step = ResearchTraceStep(
+                stage=stage,
+                description=description,
+                timestamp=datetime.now(timezone.utc),
+                details={k: str(v) for k, v in details.items()},
             )
+            trace.append(step)
+            if on_step is not None:
+                try:
+                    on_step(step)
+                except Exception:  # a progress display must never break the research
+                    pass
 
         if isinstance(raw_location, Location):
             location = raw_location
@@ -452,6 +470,7 @@ class LocationResearchAgent:
         location = self._adopt_venue_named_in_question(location, question, limitations, log)
         location = self._add_name_variants(location, log)
 
+        log(TraceStage.RESEARCH_PLANNING, "Working out which topics the question needs")
         plan = self.planner.plan(location, question)
         log(
             TraceStage.QUESTION_UNDERSTANDING,
@@ -632,6 +651,7 @@ class LocationResearchAgent:
                 if tool_calls_made >= self.config.max_tool_calls:
                     limitations.append("Research budget exhausted before follow-up research could run.")
                     break
+                log(TraceStage.ADDITIONAL_RESEARCH, f"Checking whether the evidence so far answers the question (pass {round_no})")
                 reflection = self.reflector.reflect(
                     question,
                     location,
@@ -696,6 +716,7 @@ class LocationResearchAgent:
         else:
             log(TraceStage.COVERAGE_CHECK, "Evidence was found for every planned topic.")
 
+        log(TraceStage.CLAIM_EXTRACTION, f"Reading {len(all_evidence)} evidence item(s) to extract claims")
         extraction = self.claim_extractor.extract(all_evidence, plan)
         claims = extraction.claims
         limitations.extend(extraction.notes)
@@ -709,6 +730,7 @@ class LocationResearchAgent:
             supported=sum(1 for c in verified_claims if c.status == ClaimStatus.SUPPORTED),
         )
 
+        log(TraceStage.SYNTHESIS, "Writing the overview from the verified claims and evidence")
         synthesis = self.synthesizer.synthesize(
             location, question, plan, verified_claims, all_evidence, evidence_topic_ids
         )

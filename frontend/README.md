@@ -2,7 +2,7 @@
 
 A React + TypeScript client for the `LocationResearchAgent` backend. This is deliberately
 secondary to the backend: it does no research logic of its own — it sends a location + question
-to `POST /api/research` and renders exactly what comes back, plus a couple of independent,
+to `POST /api/research/stream` and renders exactly what comes back, plus a couple of independent,
 backend-driven surfaces (live place search, "around this pin", the live feed). No map or geocoding API key is
 needed anywhere: the map is MapLibre GL over free [OpenFreeMap](https://openfreemap.org) vector tiles
 (OpenStreetMap data), and geocoding is Nominatim.
@@ -172,3 +172,14 @@ npm run build
 ```
 
 Type-checks (`tsc -b`) then produces a static build in `dist/`. `npm run lint` runs `oxlint`.
+
+## Tests
+
+`npm run test:e2e` runs the browser tests in [`e2e/`](e2e) with Playwright against the Vite dev server. Every backend call
+is answered by `e2e/fixtures.ts`, so no backend, keys or network are needed and nothing can spend a search credit; map tiles
+are blocked. The research stream is driven by hand (`window.__sse.send(...)`), which is what lets a test see the page between
+one step and the next. Set `PW_CHANNEL=msedge` (or `chrome`) to use a browser you already have; otherwise run
+`npx playwright install chromium` once. `e2e/unit.spec.ts` holds plain unit tests (event-stream parsing, text cleaning) that run in Node.
+
+While a question runs, `runResearchStream` (`src/api.ts`) reads the server-sent events and `ResponsePanel` lists the agent's steps
+(`LiveSteps`); if the server has no streaming endpoint it falls back to the plain request.

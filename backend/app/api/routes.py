@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import json
+import logging
 import os
+import queue
+import threading
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.agents.factory import build_default_agent, build_location_resolver
@@ -40,6 +45,7 @@ from app.tools.post_dates import PostDateRecovery
 from app.tools.translation import default_translator, translate_short_texts
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # How long reading the local embedding model off disk adds to the first
 # request after a restart. Measured on one machine at ~61s: the same research
@@ -164,6 +170,63 @@ def research(request: ResearchRequest) -> ResearchResponse:
         return agent.run(location, request.question)
     except LocationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+# How long the stream stays quiet before it sends a comment line, so a proxy or browser does not decide it has gone dead
+# during a long model call.
+_KEEPALIVE_SECONDS = 15
+
+
+def _sse(event: str, data: str) -> str:
+    return f"event: {event}\ndata: {data}\n\n"
+
+
+@router.post("/research/stream")
+def research_stream(request: ResearchRequest) -> StreamingResponse:
+    """The same run as `POST /research`, streamed as server-sent events so the page can show what the agent is doing.
+
+    `step` events carry each trace step the moment the agent records it, `result` carries the finished
+    `ResearchResponse` (exactly what `POST /research` returns), and `error` carries `{status, detail}` (a place that
+    cannot be resolved is status 404, as on the plain endpoint). The run happens in one worker thread from start to
+    finish, because the evidence store's SQLite connection belongs to the thread that opened it. If the reader goes
+    away the run still finishes: there is no way to cancel it part-way.
+    """
+    events: queue.Queue[tuple[str, str] | None] = queue.Queue()
+
+    def work() -> None:
+        try:
+            agent = build_default_agent()
+            location = request.resolve(agent.location_resolver)
+            result = agent.run(
+                location, request.question, on_step=lambda step: events.put(("step", step.model_dump_json()))
+            )
+            events.put(("result", result.model_dump_json()))
+        except LocationNotFoundError as exc:
+            events.put(("error", json.dumps({"status": 404, "detail": str(exc)})))
+        except Exception:
+            # What went wrong goes to the server log, not to whoever asked.
+            logger.exception("A streamed research run failed")
+            events.put(("error", json.dumps({"status": 500, "detail": "The research run failed. The server log has the details."})))
+        finally:
+            events.put(None)
+
+    threading.Thread(target=work, name="research-stream", daemon=True).start()
+
+    def stream():
+        yield ": connected\n\n"
+        while True:
+            try:
+                item = events.get(timeout=_KEEPALIVE_SECONDS)
+            except queue.Empty:
+                yield ": keep-alive\n\n"
+                continue
+            if item is None:
+                return
+            yield _sse(*item)
+
+    return StreamingResponse(
+        stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
 
 
 @router.get("/places/search", response_model=list[PlaceCandidate])

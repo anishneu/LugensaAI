@@ -415,6 +415,9 @@ uvicorn app.main:app --reload
 Then:
 
 ```bash
+# The same run, streamed as server-sent events: a `step` event for each trace step as the agent records it, then `result`
+# (the same body as /api/research), or `error` ({status, detail}). `-N` stops curl buffering.
+#   curl -N -X POST http://127.0.0.1:8000/api/research/stream -H "Content-Type: application/json" -d '{...}'
 curl -X POST http://127.0.0.1:8000/api/research \
   -H "Content-Type: application/json" \
   -d '{"location": "Harvard Square, Cambridge, MA", "question": "Would this be a good place for a college student?"}'

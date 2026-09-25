@@ -24,6 +24,10 @@ backend/data/
 *.whl
 *.log
 
+# Browser-test output
+test-results/
+playwright-report/
+
 # AI-assistant config and notes, never committed
 .claude/
 CLAUDE.md

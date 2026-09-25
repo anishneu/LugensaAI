@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useLocation as useRouterLocation } from "react-router-dom";
-import { ResearchApiError, runResearch, searchPlaces } from "../api";
+import { ResearchApiError, runResearchStream, searchPlaces } from "../api";
 import { ChatSidebar } from "../components/ChatSidebar";
 import { PlacePanel } from "../components/place/PlacePanel";
 import { LiveFeedSidebar } from "../components/LiveFeedSidebar";
@@ -118,18 +118,22 @@ export function ResearchWorkspace() {
       // already resolved by a previous question) is passed through exactly
       // as-is — re-resolving its name as text server-side could land on a
       // different same-named place nearby.
-      const response = await runResearch({
-        location: location.rawQuery,
-        question,
-        is_business: location.isBusiness,
-        is_address: location.isAddress,
-        latitude: location.latitude,
-        longitude: location.longitude,
-        city: location.city,
-        region: location.region,
-        country: location.country,
-      });
-      setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, status: "done", response } : s)));
+      const response = await runResearchStream(
+        {
+          location: location.rawQuery,
+          question,
+          is_business: location.isBusiness,
+          is_address: location.isAddress,
+          latitude: location.latitude,
+          longitude: location.longitude,
+          city: location.city,
+          region: location.region,
+          country: location.country,
+        },
+        // Each step the agent takes is shown while the run is still going.
+        (step) => setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, steps: [...(s.steps ?? []), step] } : s))),
+      );
+      setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, status: "done", steps: undefined, response } : s)));
 
       // Refine the location from the answer when it was unresolved, or when the backend matched a street
       // address to the business standing at it (so the Google card and the header show that business).
@@ -155,7 +159,7 @@ export function ResearchWorkspace() {
     } catch (err) {
       const message =
         err instanceof ResearchApiError ? err.message : "Could not reach the research API. Is the backend running?";
-      setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, status: "error", error: message } : s)));
+      setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, status: "error", steps: undefined, error: message } : s)));
     }
   }
 

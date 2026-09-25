@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Tab, TabGroup, TabList, TabPanel, TabPanels } from "@headlessui/react";
 import { CheckCircleIcon, ExclamationTriangleIcon, SparklesIcon } from "@heroicons/react/24/outline";
 import { fetchCapabilities } from "../api";
-import type { Capabilities, QuerySession, ResearchResponse } from "../types";
+import type { Capabilities, QuerySession, ResearchResponse, ResearchTraceStep } from "../types";
 import { cleanDisplayText } from "../textUtils";
 import { ClaimsList } from "./ClaimsList";
 import { CommunityVoices, isVoice } from "./CommunityVoices";
@@ -24,8 +24,9 @@ function formatDuration(totalSeconds: number): string {
 
 /** Elapsed time is the real measurement; the estimate beside it only sets expectations, because run time swings
  * from seconds to minutes depending on whether a local model is doing the reasoning. Once elapsed passes the
- * estimate, the estimate is dropped rather than left contradicting the clock. No fake "step 2 of 4" progress:
- * the backend doesn't report steps, so none is invented. */
+ * estimate, the estimate is dropped rather than left contradicting the clock. The steps beside it are the agent's own
+ * trace, streamed as it records them (see `LiveSteps`); there is no invented "step 2 of 4", because how many steps a
+ * run needs is not known until it ends. */
 function ResearchProgress({ startedAt, capabilities }: { startedAt: string; capabilities: Capabilities | null }) {
   const [elapsed, setElapsed] = useState(() => Math.max(0, Math.round((Date.now() - new Date(startedAt).getTime()) / 1000)));
 
@@ -59,6 +60,41 @@ function ResearchProgress({ startedAt, capabilities }: { startedAt: string; capa
         </p>
       )}
     </div>
+  );
+}
+
+const VISIBLE_STEPS = 8;
+
+/** What the agent is doing right now: its real trace steps, newest last, streamed while the run is going. */
+function LiveSteps({ steps }: { steps: ResearchTraceStep[] }) {
+  if (steps.length === 0) return null;
+  const shown = steps.slice(-VISIBLE_STEPS);
+  const hidden = steps.length - shown.length;
+  return (
+    <ol
+      data-testid="research-steps"
+      aria-live="polite"
+      aria-label="What the agent is doing"
+      className="m-0 flex w-full max-w-lg list-none flex-col gap-2 p-0 text-left"
+    >
+      {hidden > 0 && <li className="text-[11px] text-[var(--text-muted)]">{hidden} earlier step{hidden === 1 ? "" : "s"}</li>}
+      {shown.map((step, i) => {
+        const current = i === shown.length - 1;
+        return (
+          <li key={hidden + i} className={`flex items-start gap-2.5 text-[13px] leading-snug ${current ? "text-[var(--text-h)]" : "text-[var(--text-muted)]"}`}>
+            {current ? (
+              <span className="mt-1.5 h-2 w-2 flex-shrink-0 animate-pulse rounded-full bg-[var(--accent)]" aria-hidden="true" />
+            ) : (
+              <CheckCircleIcon className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--supported)]" aria-hidden="true" />
+            )}
+            <span className="min-w-0">
+              <span className="block text-[10px] font-semibold tracking-[0.08em] uppercase opacity-70">{step.stage.replace(/_/g, " ")}</span>
+              <span dir="auto">{step.description}</span>
+            </span>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
@@ -185,11 +221,14 @@ export function ResponsePanel({ session }: ResponsePanelProps) {
           <p className="m-0 text-[15px] font-medium text-[var(--text-h)]" dir="auto">
             Researching “{session.question}”…
           </p>
-          <p className="m-0 text-xs text-[var(--text-muted)]">Planning topics, searching the web and communities, verifying claims.</p>
+          {!session.steps?.length && (
+            <p className="m-0 text-xs text-[var(--text-muted)]">Planning topics, searching the web and communities, verifying claims.</p>
+          )}
         </div>
         <div className="h-1 w-56 overflow-hidden rounded-full bg-[var(--border)]">
           <div className="h-full w-1/3 animate-[slide_1.6s_ease-in-out_infinite] rounded-full bg-[var(--accent)]" />
         </div>
+        <LiveSteps steps={session.steps ?? []} />
         <ResearchProgress startedAt={session.askedAt} capabilities={capabilities} />
       </div>
     );
@@ -218,7 +257,7 @@ export function ResponsePanel({ session }: ResponsePanelProps) {
 
   return (
     <div className={shell}>
-      <p key={session.id} className="m-0 mb-4 text-[15px] text-[var(--text-muted)] italic" dir="auto">
+      <p className="m-0 mb-4 text-[15px] text-[var(--text-muted)] italic" dir="auto">
         “{response.question}”
       </p>
 

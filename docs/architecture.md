@@ -89,7 +89,7 @@ flowchart TB
 
   subgraph API["API: backend/app/api/routes.py"]
     direction LR
-    RRES["POST /research"]
+    RRES["POST /research/stream<br/>(and POST /research)"]
     RPLACE["GET /places/*"]
     RFEED["GET /live-feed"]
   end
@@ -127,7 +127,7 @@ flowchart TB
 
   user -->|"asks about a place"| UI
   UI <-->|"JSON over HTTP"| API
-  API -->|"POST /research"| Pipeline
+  API -->|"research, steps streamed back"| Pipeline
   API -->|"places, translate, live feed"| Place
   Pipeline <-->|"stores and reads"| STORE
   Pipeline -.->|"plans, extracts, writes"| OLLAMA
@@ -156,8 +156,9 @@ sequenceDiagram
   T-->>A: ratings, nearby places, dated news and posts
   A-->>W: profile, nearby places, feed
   U->>W: ask a question
-  W->>A: POST /research
+  W->>A: POST /research/stream
   A->>G: run(place, question)
+  G-->>W: each step, as it happens (server-sent events)
   G->>L: plan topics
   G->>T: search in parallel, then community and forums
   G->>L: reflect: enough evidence?
@@ -166,7 +167,7 @@ sequenceDiagram
   G->>G: verify claims (deterministic)
   G->>L: write the overview
   G-->>A: answer, claims, evidence, limitations, trace
-  A-->>W: ResearchResponse
+  A-->>W: the finished ResearchResponse
   W-->>U: tabs: Overview, Community, Claims, Evidence
 ```
 
@@ -628,3 +629,16 @@ All eight milestones from the original project plan are implemented, plus later 
   page's workspace preview still drew the old News/Community tabs for the live feed, so it now draws the blinking dot and the
   Now/Today grouping. An audit found no credentials in the working tree or in any commit on any branch, no commit carrying a
   co-author line, and no fabricated sample content in the product (its invented fixtures live only under `backend/tests`).
+- **Milestone 33:** progress streaming and browser tests. A research run takes minutes on a local model and the page showed a
+  spinner. `LocationResearchAgent.run` now takes an optional `on_step` callback, called with each trace step as it is recorded
+  (an exception in it is swallowed: a progress display must not change a run), and `POST /api/research/stream` sends those steps
+  as server-sent events, then the same `ResearchResponse` as `POST /api/research`, or an error event. The run stays in one worker
+  thread because the evidence store's SQLite connection belongs to the thread that opened it; a client that goes away does not
+  cancel it. Four "starting" steps were added before the slow model calls (planning, the reflector, claim extraction, the
+  overview), because without them the stream fell silent for exactly the long waits. A crash inside a streamed run is logged
+  and the reader gets a fixed message, not the exception text (the same information-exposure rule as the code-scanning fixes).
+  Measured on a real run with keys blanked: the first step arrived after 2.9 s, and the stream showed "Selected Reddit archive
+  search" through a 39-second wait that used to be a silent spinner. The UI has 14 Playwright tests (7 in a real browser over the
+  dev server with the backend mocked, 7 plain unit tests). Writing them found a real bug, two siblings sharing one React `key` in
+  the answer panel, now fixed. Not done: cancelling a run from the page, and streaming partial claims (steps are streamed, not
+  partial answers).

@@ -224,7 +224,7 @@ flowchart TB
 
   subgraph API["API: backend/app/api/routes.py"]
     direction LR
-    RRES["POST /research"]
+    RRES["POST /research/stream<br/>(and POST /research)"]
     RPLACE["GET /places/*"]
     RFEED["GET /live-feed"]
   end
@@ -262,7 +262,7 @@ flowchart TB
 
   user -->|"asks about a place"| UI
   UI <-->|"JSON over HTTP"| API
-  API -->|"POST /research"| Pipeline
+  API -->|"research, steps streamed back"| Pipeline
   API -->|"places, translate, live feed"| Place
   Pipeline <-->|"stores and reads"| STORE
   Pipeline -.->|"plans, extracts, writes"| OLLAMA
@@ -395,8 +395,9 @@ sequenceDiagram
   T-->>A: ratings, nearby places, dated news and posts
   A-->>W: profile, nearby places, feed
   U->>W: ask a question
-  W->>A: POST /research
+  W->>A: POST /research/stream
   A->>G: run(place, question)
+  G-->>W: each step, as it happens (server-sent events)
   G->>L: plan topics
   G->>T: search in parallel, then community and forums
   G->>L: reflect: enough evidence?
@@ -405,7 +406,7 @@ sequenceDiagram
   G->>G: verify claims (deterministic)
   G->>L: write the overview
   G-->>A: answer, claims, evidence, limitations, trace
-  A-->>W: ResearchResponse
+  A-->>W: the finished ResearchResponse
   W-->>U: tabs: Overview, Community, Claims, Evidence
 ```
 
@@ -512,6 +513,10 @@ Full reasoning for each choice is in [`docs/architecture.md`](docs/architecture.
   grounding itself is also enforced deterministically: a claim is kept only if its cited evidence
   id validates, or its own wording is independently matched against real evidence text — never on
   an LLM's self-reported citation alone.
+- **You watch it work** — a run takes minutes on a local model, so its steps are streamed to the page as the agent records
+  them (`POST /api/research/stream`, server-sent events): "Selected Reddit archive search…", "Reading 14 evidence items
+  to extract claims…", each one a real entry of the run's trace, in order. Nothing is estimated or invented: how many
+  steps a run needs is not known until it ends, so there is no progress bar with a made-up percentage.
 - **Honest degradation** — every fallback (no LLM, no live search, an API failure, an
   off-topic result filtered out) is recorded in the response's `limitations`, not hidden.
 - **A real evaluation, not just a plan** — [`docs/evaluation.md`](docs/evaluation.md) has actual
@@ -601,12 +606,19 @@ cd backend
 pytest          # 513 tests
 cd ../frontend
 npm run lint && npx tsc -b && npm run build
+npm run test:e2e   # 14 tests: 7 in a browser, 7 plain unit tests (PW_CHANNEL=msedge uses an installed browser; otherwise `npx playwright install chromium`)
 ```
 
 The backend suite is free, offline, and deterministic by construction (its invented sample sources live
 only in `backend/tests/fixtures` and are never served by the app; a test enforces that) — an autouse fixture forces real
 API keys and semantic retrieval off during tests regardless of local `.env` configuration, so
 `pytest` never makes a real network call or spends API credits.
+
+The frontend's browser tests ([`frontend/e2e`](frontend/e2e)) run the real UI in a real browser against the Vite dev
+server with every backend call mocked, so they need no backend, keys or network either. They cover the landing page, picking
+a place, the live feed (empty state, "Now" grouping, kind filter), and the streamed research: the page shows each step as
+the mocked server sends it, then the answer, an error, or the stream ending early. A small set of plain unit tests covers the
+event-stream parser and the text cleaner. CI runs them after the build.
 
 ## Continuous integration
 
