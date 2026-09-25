@@ -415,6 +415,9 @@ uvicorn app.main:app --reload
 Then:
 
 ```bash
+# The same run, streamed as server-sent events: a `step` event for each trace step as the agent records it, then `result`
+# (the same body as /api/research), or `error` ({status, detail}). `-N` stops curl buffering.
+#   curl -N -X POST http://127.0.0.1:8000/api/research/stream -H "Content-Type: application/json" -d '{...}'
 curl -X POST http://127.0.0.1:8000/api/research \
   -H "Content-Type: application/json" \
   -d '{"location": "Harvard Square, Cambridge, MA", "question": "Would this be a good place for a college student?"}'
@@ -558,6 +561,18 @@ Runs the benchmark from [`../docs/evaluation.md`](../docs/evaluation.md) for rea
 the proposed system, both against live Tavily search) and prints/saves actual metrics — not just
 the plan. Requires `TAVILY_API_KEY`; results and their scope (what could and couldn't be measured
 without the LLM-backed components) are written up in that doc.
+
+A second, model-backed evaluation compares answering three ways over the same frozen sources (no search credit):
+
+```bash
+python -m evaluation.answer_quality collect   # once: real sources from Wikipedia, the Reddit archive and Google News RSS (free)
+python -m evaluation.answer_quality run       # the model alone, the model given every source, and the full pipeline (about an hour)
+python -m evaluation.answer_quality report    # the table; rescore recomputes it from saved answers with no model
+```
+
+Corpora and full answers are kept in `evaluation/corpora/` and `evaluation/runs/` (gitignored: they are third parties' text and
+model output); `evaluation/answer_quality_results.json` holds the measurements. See the "Answer quality" section of
+[`../docs/evaluation.md`](../docs/evaluation.md) for the method, the numbers and what they do not show.
 
 ## Layout
 

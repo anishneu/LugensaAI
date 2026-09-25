@@ -35,6 +35,7 @@ the project**, and it never invents data: with nothing configured it says so ins
 - [Overview](#overview)
 - [Tech stack](#tech-stack)
 - [Screenshots](#screenshots)
+  - [A real run](#a-real-run)
 - [Architecture](#architecture)
   - [System](#system)
   - [Components](#components)
@@ -139,6 +140,15 @@ page's workspace preview is drawn with placeholder bars on purpose, because it s
 <sub><b>The workspace for Harvard Square.</b> "Around this pin" lists what OpenStreetMap has within 1,000 m (not AI-generated). On the right, the live feed
 with its blinking red dot: items from the last 30 days, newest first, each labelled with its kind and the place it is about ("Near Harvard Square").</sub>
 
+### A real run
+
+<img src="docs/images/demo.gif" alt="A recording of the app: pick Harvard Square, ask whether it is a good place to visit as a tourist, watch the agent's steps stream in, then read the answer, its community voices, its claims and its known limitations" width="100%">
+
+<sub><b>A real run, not a mock-up, recorded in free mode:</b> no web-search key (so no search credit was spent), the local model, the free Reddit
+archive and OpenStreetMap. The four-minute model wait is sped up about 30 times. Because nothing was web-searched, the answer is thin
+on purpose: the Details tab says what was not searched, and the one claim the model made is marked "insufficient evidence" because its
+wording was not found in the source it cited. That is the app doing what it is for, not a polished result; with a search key the agent also has web pages to work from.</sub>
+
 ## Architecture
 
 The diagrams below are Mermaid, so GitHub draws them; the text under each says what it shows and, where it
@@ -224,7 +234,7 @@ flowchart TB
 
   subgraph API["API: backend/app/api/routes.py"]
     direction LR
-    RRES["POST /research"]
+    RRES["POST /research/stream<br/>(and POST /research)"]
     RPLACE["GET /places/*"]
     RFEED["GET /live-feed"]
   end
@@ -262,7 +272,7 @@ flowchart TB
 
   user -->|"asks about a place"| UI
   UI <-->|"JSON over HTTP"| API
-  API -->|"POST /research"| Pipeline
+  API -->|"research, steps streamed back"| Pipeline
   API -->|"places, translate, live feed"| Place
   Pipeline <-->|"stores and reads"| STORE
   Pipeline -.->|"plans, extracts, writes"| OLLAMA
@@ -395,8 +405,9 @@ sequenceDiagram
   T-->>A: ratings, nearby places, dated news and posts
   A-->>W: profile, nearby places, feed
   U->>W: ask a question
-  W->>A: POST /research
+  W->>A: POST /research/stream
   A->>G: run(place, question)
+  G-->>W: each step, as it happens (server-sent events)
   G->>L: plan topics
   G->>T: search in parallel, then community and forums
   G->>L: reflect: enough evidence?
@@ -405,7 +416,7 @@ sequenceDiagram
   G->>G: verify claims (deterministic)
   G->>L: write the overview
   G-->>A: answer, claims, evidence, limitations, trace
-  A-->>W: ResearchResponse
+  A-->>W: the finished ResearchResponse
   W-->>U: tabs: Overview, Community, Claims, Evidence
 ```
 
@@ -512,6 +523,17 @@ Full reasoning for each choice is in [`docs/architecture.md`](docs/architecture.
   grounding itself is also enforced deterministically: a claim is kept only if its cited evidence
   id validates, or its own wording is independently matched against real evidence text — never on
   an LLM's self-reported citation alone.
+- **You watch it work** — a run takes minutes on a local model, so its steps are streamed to the page as the agent records
+  them (`POST /api/research/stream`, server-sent events): "Selected Reddit archive search…", "Reading 14 evidence items
+  to extract claims…", each one a real entry of the run's trace, in order. Nothing is estimated or invented: how many
+  steps a run needs is not known until it ends, so there is no progress bar with a made-up percentage.
+- **Compare two places, save places, take the answer with you** — "Compare" in the top bar asks the same question of a second
+  place (one run after the other, since the local model is one machine) and shows both answers side by side with a table that
+  counts what each run found: sources, kinds of source, supported and contradicted claims, limitations. It deliberately says
+  nothing about which place is better, because nothing in the sources decides that. "Download report" saves an answer, or the
+  comparison, as Markdown built in the browser from what is on screen (claims with the sources they rest on, limitations, a
+  numbered source list); nothing is sent anywhere. The star saves a place in this browser only, and saved places wait on the
+  search page.
 - **Honest degradation** — every fallback (no LLM, no live search, an API failure, an
   off-topic result filtered out) is recorded in the response's `limitations`, not hidden.
 - **A real evaluation, not just a plan** — [`docs/evaluation.md`](docs/evaluation.md) has actual
@@ -539,7 +561,9 @@ npm install
 npm run dev -- --port 3000
 ```
 
-Open `http://localhost:3000`. Full details, troubleshooting, and what each part does are in
+Open `http://localhost:3000`.
+
+Full details, troubleshooting, and what each part does are in
 [`backend/README.md`](backend/README.md) and [`frontend/README.md`](frontend/README.md).
 
 ## Configuration
@@ -583,7 +607,7 @@ LugensaAI/
 │   │   │                  Reddit archive, Google News RSS, translation; plus live_feed.py and feed_topics.py
 │   │   └── verification/  deterministic claim verifier and contradiction check
 │   ├── evaluation/        the runnable benchmark from docs/evaluation.md
-│   └── tests/             offline, deterministic pytest suite (513 tests)
+│   └── tests/             offline, deterministic pytest suite (547 tests)
 ├── frontend/
 │   └── src/
 │       ├── pages/         LandingPage, ResearchWorkspace
@@ -598,15 +622,23 @@ See [`backend/README.md`](backend/README.md) for the backend's internal layout.
 
 ```bash
 cd backend
-pytest          # 513 tests
+pytest          # 547 tests
 cd ../frontend
 npm run lint && npx tsc -b && npm run build
+npm run test:e2e   # 33 tests: 16 in a browser, 17 plain unit tests (PW_CHANNEL=msedge uses an installed browser; otherwise `npx playwright install chromium`)
 ```
 
 The backend suite is free, offline, and deterministic by construction (its invented sample sources live
 only in `backend/tests/fixtures` and are never served by the app; a test enforces that) — an autouse fixture forces real
 API keys and semantic retrieval off during tests regardless of local `.env` configuration, so
 `pytest` never makes a real network call or spends API credits.
+
+The frontend's browser tests ([`frontend/e2e`](frontend/e2e)) run the real UI in a real browser against the Vite dev
+server with every backend call mocked, so they need no backend, keys or network either. They cover the landing page, picking
+a place, saving places, the live feed (empty state, "Now" grouping, kind filter), exporting an answer, comparing two places,
+and the streamed research: the page shows each step as
+the mocked server sends it, then the answer, an error, or the stream ending early. A set of plain unit tests covers the
+event-stream parser, the text cleaner and the report builders. CI runs them after the build.
 
 ## Continuous integration
 
@@ -656,7 +688,18 @@ cd backend
 python -m evaluation.run_benchmark
 ```
 
-Runs the benchmark described in [`docs/evaluation.md`](docs/evaluation.md) for real — Baseline B
+```bash
+python -m evaluation.answer_quality report   # after collect and run: the answer-quality comparison
+```
+
+That second evaluation answers ten questions three ways on the local model, all from the same frozen free sources (no search
+credit): the model alone, the model given every source, and the full pipeline. Headline: figures and names found in no source
+were 53% of the model-alone answers, 10% with sources handed over, and 4% from the pipeline, but on ten cases and one run each,
+so the gap between the last two is not shown to be reliable; the pipeline is about four times slower than the plain
+source-stuffing baseline. It measures staying with the sources, not whether an answer is right. The method, the metric bug it
+found in itself and what it does not show are in [`docs/evaluation.md`](docs/evaluation.md).
+
+The first benchmark: runs the benchmark described in [`docs/evaluation.md`](docs/evaluation.md) for real — Baseline B
 vs. the proposed system's orchestration — and prints/saves actual measured results, including
 tradeoffs where the proposed system does *not* clearly win (e.g. more tool calls, more latency,
 occasionally less source diversity). Requires `TAVILY_API_KEY`.
@@ -670,6 +713,7 @@ occasionally less source diversity). Requires `TAVILY_API_KEY`.
 - [`docs/architecture.md`](docs/architecture.md) — design, interfaces, and what's opt-in vs. free
 - [`docs/research-workflow.md`](docs/research-workflow.md) — the research lifecycle in detail
 - [`docs/evaluation.md`](docs/evaluation.md) — the evaluation plan and its actual results
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`SECURITY.md`](SECURITY.md) — how to contribute, and how to report a vulnerability privately
 
 ## License
 

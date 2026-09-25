@@ -1,0 +1,22 @@
+name: Feature request
+description: An idea that would make the research more useful or more honest
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you are trying to do
+      description: The situation first, then the change. "I want to compare X with Y" is easier to help with than "add a button".
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like
+  - type: textarea
+    id: rules
+    attributes:
+      label: How it fits the project's rules
+      description: |
+        The project never invents evidence, stays free to run (no billed model API), says what it could not confirm, and keeps the claim
+        verifier deterministic. If your idea needs a paid or key-gated source, say so, since those stay optional. See [CONTRIBUTING.md](https://github.com/anishneu/LugensaAI/blob/main/CONTRIBUTING.md).

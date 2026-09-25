@@ -159,6 +159,8 @@ export interface QuerySession {
   question: string;
   askedAt: string;
   status: "loading" | "done" | "error";
+  /** What the agent has done so far, while the run is going. Dropped once the answer arrives: the response carries the full trace. */
+  steps?: ResearchTraceStep[];
   response: ResearchResponse | null;
   error: string | null;
 }

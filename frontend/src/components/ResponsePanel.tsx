@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
 import { Tab, TabGroup, TabList, TabPanel, TabPanels } from "@headlessui/react";
-import { CheckCircleIcon, ExclamationTriangleIcon, SparklesIcon } from "@heroicons/react/24/outline";
+import { ArrowDownTrayIcon, CheckCircleIcon, ClipboardDocumentIcon, ExclamationTriangleIcon, PrinterIcon, SparklesIcon } from "@heroicons/react/24/outline";
 import { fetchCapabilities } from "../api";
 import type { Capabilities, QuerySession, ResearchResponse } from "../types";
+import { downloadText, printHtml } from "../download";
+import { buildReportHtml, buildReportMarkdown, reportFileName } from "../report";
 import { cleanDisplayText } from "../textUtils";
 import { ClaimsList } from "./ClaimsList";
 import { CommunityVoices, isVoice } from "./CommunityVoices";
 import type { EvidenceSortMode } from "./EvidenceList";
 import { EvidenceList } from "./EvidenceList";
+import { LiveSteps } from "./LiveSteps";
 import { ResearchTrace } from "./ResearchTrace";
 import { VerdictBanner } from "./VerdictBanner";
 
@@ -24,8 +27,9 @@ function formatDuration(totalSeconds: number): string {
 
 /** Elapsed time is the real measurement; the estimate beside it only sets expectations, because run time swings
  * from seconds to minutes depending on whether a local model is doing the reasoning. Once elapsed passes the
- * estimate, the estimate is dropped rather than left contradicting the clock. No fake "step 2 of 4" progress:
- * the backend doesn't report steps, so none is invented. */
+ * estimate, the estimate is dropped rather than left contradicting the clock. The steps beside it are the agent's own
+ * trace, streamed as it records them (see `LiveSteps`); there is no invented "step 2 of 4", because how many steps a
+ * run needs is not known until it ends. */
 function ResearchProgress({ startedAt, capabilities }: { startedAt: string; capabilities: Capabilities | null }) {
   const [elapsed, setElapsed] = useState(() => Math.max(0, Math.round((Date.now() - new Date(startedAt).getTime()) / 1000)));
 
@@ -58,6 +62,39 @@ function ResearchProgress({ startedAt, capabilities }: { startedAt: string; capa
           minutes) or only the CPU (much longer).
         </p>
       )}
+    </div>
+  );
+}
+
+const exportButton =
+  "flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--bg-alt)] px-3 py-1.5 text-xs font-medium text-[var(--text-h)] transition-colors hover:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none";
+
+/** The answer as a Markdown file, or on the clipboard. It is built in this page from the answer already shown: nothing is sent anywhere. */
+function ExportButtons({ response }: { response: ResearchResponse }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(buildReportMarkdown(response));
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard access can be refused; the download still works.
+    }
+  }
+  return (
+    <div className="flex min-w-0 flex-wrap gap-2">
+      <button type="button" onClick={() => printHtml(buildReportHtml(response))} className={exportButton}>
+        <PrinterIcon className="h-3.5 w-3.5" aria-hidden="true" />
+        Print / Save as PDF
+      </button>
+      <button type="button" onClick={() => downloadText(reportFileName(response), buildReportMarkdown(response))} className={exportButton}>
+        <ArrowDownTrayIcon className="h-3.5 w-3.5" aria-hidden="true" />
+        Download report
+      </button>
+      <button type="button" onClick={copy} className={exportButton}>
+        <ClipboardDocumentIcon className="h-3.5 w-3.5" aria-hidden="true" />
+        {copied ? "Copied" : "Copy as Markdown"}
+      </button>
     </div>
   );
 }
@@ -172,7 +209,7 @@ export function ResponsePanel({ session }: ResponsePanelProps) {
     return (
       <div className={`${shell} flex flex-col items-center gap-3 rounded-2xl border border-dashed border-[var(--border)] px-6 py-16 text-center`}>
         <SparklesIcon className="h-8 w-8 text-[var(--accent)]" aria-hidden="true" />
-        <p className="m-0 max-w-sm text-sm text-[var(--text-muted)]">Ask a question on the left to see the agent's research here.</p>
+        <p className="m-0 max-w-sm text-sm text-[var(--text-muted)]">Ask a question to see the agent's research here.</p>
       </div>
     );
   }
@@ -185,11 +222,14 @@ export function ResponsePanel({ session }: ResponsePanelProps) {
           <p className="m-0 text-[15px] font-medium text-[var(--text-h)]" dir="auto">
             Researching “{session.question}”…
           </p>
-          <p className="m-0 text-xs text-[var(--text-muted)]">Planning topics, searching the web and communities, verifying claims.</p>
+          {!session.steps?.length && (
+            <p className="m-0 text-xs text-[var(--text-muted)]">Planning topics, searching the web and communities, verifying claims.</p>
+          )}
         </div>
         <div className="h-1 w-56 overflow-hidden rounded-full bg-[var(--border)]">
           <div className="h-full w-1/3 animate-[slide_1.6s_ease-in-out_infinite] rounded-full bg-[var(--accent)]" />
         </div>
+        <LiveSteps steps={session.steps ?? []} />
         <ResearchProgress startedAt={session.askedAt} capabilities={capabilities} />
       </div>
     );
@@ -218,9 +258,12 @@ export function ResponsePanel({ session }: ResponsePanelProps) {
 
   return (
     <div className={shell}>
-      <p key={session.id} className="m-0 mb-4 text-[15px] text-[var(--text-muted)] italic" dir="auto">
-        “{response.question}”
-      </p>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <p className="m-0 text-[15px] text-[var(--text-muted)] italic" dir="auto">
+          “{response.question}”
+        </p>
+        <ExportButtons response={response} />
+      </div>
 
       {/* Keyed by question, so each answer opens on Overview rather than on whatever tab the last one left. */}
       <TabGroup key={session.id}>

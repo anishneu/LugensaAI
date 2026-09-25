@@ -271,3 +271,69 @@ def test_translate_endpoint_says_unavailable_where_the_place_has_no_local_langua
 
 def test_popular_places_is_503_without_google():
     assert client.get("/api/places/popular", params={"latitude": 35.0, "longitude": 135.8}).status_code == 503
+
+
+def _events(body: str) -> list[tuple[str, dict]]:
+    """Parses a server-sent-events body into (event, data) pairs, ignoring comment lines."""
+    import json
+
+    parsed = []
+    for block in body.split("\n\n"):
+        lines = [line for line in block.split("\n") if line and not line.startswith(":")]
+        if not lines:
+            continue
+        event = next(line[len("event: "):] for line in lines if line.startswith("event: "))
+        data = next(line[len("data: "):] for line in lines if line.startswith("data: "))
+        parsed.append((event, json.loads(data)))
+    return parsed
+
+
+def test_the_streamed_research_sends_each_step_and_then_the_same_result_as_the_plain_endpoint(monkeypatch):
+    from app.api import routes
+    from tests.fixture_tools import fixture_agent
+
+    monkeypatch.setattr(routes, "build_default_agent", fixture_agent)
+    payload = {"location": "Harvard Square, Cambridge, MA", "question": "Would this be a good place for a college student?"}
+
+    response = client.post("/api/research/stream", json=payload)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    events = _events(response.text)
+    kinds = [kind for kind, _ in events]
+    assert kinds[-1] == "result" and kinds.count("result") == 1
+    steps = [data for kind, data in events if kind == "step"]
+    assert len(steps) >= 5 and all({"stage", "description", "timestamp"} <= set(step) for step in steps)
+
+    result = events[-1][1]
+    assert result["location"]["name"] == "Harvard Square" and result["claims"] and result["evidence"]
+    # The steps that were streamed are the trace of the result, in the same order.
+    assert [step["description"] for step in steps] == [step["description"] for step in result["research_trace"]]
+
+
+def test_the_streamed_research_reports_an_unresolvable_place_as_a_404_error_event():
+    response = client.post("/api/research/stream", json={"location": "Nowhereville, XX", "question": "Is it safe?"})
+
+    assert response.status_code == 200  # the stream itself opened fine
+    [(kind, data)] = _events(response.text)
+    assert kind == "error" and data["status"] == 404 and "geocoding is disabled" in data["detail"]
+
+
+def test_a_crash_during_a_streamed_run_is_logged_and_not_shown_to_the_reader(monkeypatch):
+    from app.api import routes
+
+    class Exploding:
+        location_resolver = None
+
+        def run(self, *args, **kwargs):
+            raise RuntimeError("internal detail: /home/secret/path and an api key")
+
+    monkeypatch.setattr(routes, "build_default_agent", lambda: Exploding())
+    body = client.post(
+        "/api/research/stream",
+        json={"location": "Somewhere", "question": "Is it safe?", "latitude": 1.0, "longitude": 2.0},
+    ).text
+
+    [(kind, data)] = _events(body)
+    assert kind == "error" and data["status"] == 500
+    assert "secret" not in body and "api key" not in body

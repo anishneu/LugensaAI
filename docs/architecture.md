@@ -89,7 +89,7 @@ flowchart TB
 
   subgraph API["API: backend/app/api/routes.py"]
     direction LR
-    RRES["POST /research"]
+    RRES["POST /research/stream<br/>(and POST /research)"]
     RPLACE["GET /places/*"]
     RFEED["GET /live-feed"]
   end
@@ -127,7 +127,7 @@ flowchart TB
 
   user -->|"asks about a place"| UI
   UI <-->|"JSON over HTTP"| API
-  API -->|"POST /research"| Pipeline
+  API -->|"research, steps streamed back"| Pipeline
   API -->|"places, translate, live feed"| Place
   Pipeline <-->|"stores and reads"| STORE
   Pipeline -.->|"plans, extracts, writes"| OLLAMA
@@ -156,8 +156,9 @@ sequenceDiagram
   T-->>A: ratings, nearby places, dated news and posts
   A-->>W: profile, nearby places, feed
   U->>W: ask a question
-  W->>A: POST /research
+  W->>A: POST /research/stream
   A->>G: run(place, question)
+  G-->>W: each step, as it happens (server-sent events)
   G->>L: plan topics
   G->>T: search in parallel, then community and forums
   G->>L: reflect: enough evidence?
@@ -166,7 +167,7 @@ sequenceDiagram
   G->>G: verify claims (deterministic)
   G->>L: write the overview
   G-->>A: answer, claims, evidence, limitations, trace
-  A-->>W: ResearchResponse
+  A-->>W: the finished ResearchResponse
   W-->>U: tabs: Overview, Community, Claims, Evidence
 ```
 
@@ -628,3 +629,54 @@ All eight milestones from the original project plan are implemented, plus later 
   page's workspace preview still drew the old News/Community tabs for the live feed, so it now draws the blinking dot and the
   Now/Today grouping. An audit found no credentials in the working tree or in any commit on any branch, no commit carrying a
   co-author line, and no fabricated sample content in the product (its invented fixtures live only under `backend/tests`).
+- **Milestone 33:** progress streaming and browser tests. A research run takes minutes on a local model and the page showed a
+  spinner. `LocationResearchAgent.run` now takes an optional `on_step` callback, called with each trace step as it is recorded
+  (an exception in it is swallowed: a progress display must not change a run), and `POST /api/research/stream` sends those steps
+  as server-sent events, then the same `ResearchResponse` as `POST /api/research`, or an error event. The run stays in one worker
+  thread because the evidence store's SQLite connection belongs to the thread that opened it; a client that goes away does not
+  cancel it. Four "starting" steps were added before the slow model calls (planning, the reflector, claim extraction, the
+  overview), because without them the stream fell silent for exactly the long waits. A crash inside a streamed run is logged
+  and the reader gets a fixed message, not the exception text (the same information-exposure rule as the code-scanning fixes).
+  Measured on a real run with keys blanked: the first step arrived after 2.9 s, and the stream showed "Selected Reddit archive
+  search" through a 39-second wait that used to be a silent spinner. The UI has 14 Playwright tests (7 in a real browser over the
+  dev server with the backend mocked, 7 plain unit tests). Writing them found a real bug, two siblings sharing one React `key` in
+  the answer panel, now fixed. Not done: cancelling a run from the page, and streaming partial claims (steps are streamed, not
+  partial answers).
+- **Milestone 34:** an answer-quality evaluation, and one thing not built. `evaluation/answer_quality.py` answers ten questions with
+  the model alone, the model handed all the sources, and the full pipeline, over the same frozen sources collected free from
+  Wikipedia, the Reddit archive and Google News RSS (no search credit), and scores every answer with deterministic measures
+  (`quality_metrics.py`): sentences no single source backs, figures and names in no source, and whether citations are real.
+  `FrozenSearch` lets the real pipeline read a fixed evidence set with everything that reaches the network switched off. Results,
+  in `docs/evaluation.md`: 53% of the model-alone answers' specifics are in no source, 10% with sources handed over, 4% for the
+  pipeline, which is about four times slower than the sources-handed-over baseline. Building it found two bugs in its own measure
+  (names joined across a line break; provenance ignored), fixed after the first results and disclosed with both sets of numbers,
+  and made `assess_sentences` public so the sentence check can report how many sentences it judged. **Not built: article text for
+  the live feed.** Google News RSS links do not lead to the publisher: each of four tried returned a 580 KB Google page that redirects
+  by script. Reaching the article means calling Google's undocumented internal API, which is unofficial scraping that can break or
+  be blocked at any time, so it was left out; items keep their headline, real time and outlet.
+- **Milestone 35:** compare two places, export, and saved places, all in the front end (no backend change). *Compare* runs the existing
+  streamed research once per place, one after the other because the local model is one machine, and shows both answers with a table of
+  what each run found. It does not rank the places or write any sentence about which is better: nothing in the sources decides that,
+  and a model-written verdict would be an unverified synthesis of two evidence sets. *Export* builds Markdown in the browser from the
+  response on screen (claims with their sources, limitations, numbered sources); there is no PDF. *Saved places* live in
+  `localStorage`, on the search page rather than the landing page, because the landing page has no place picker. The tests (25 in all)
+  found one thing worth writing down: an error event ends a run at once and the app moves straight on to the second place, so a test
+  that also closed the stream afterwards was closing the *second* run's stream. Not done: comparing three or more places, different
+  questions for each place, keeping comparisons, and any cross-place synthesis.
+- **Milestone 36:** the leftovers from the earlier list. *Mobile:* measured horizontal overflow of every screen at 320, 375, 390 and
+  768 px (none), looked at the 375 px screens, and fixed the one real problem, the place's name shrinking to "Harv…" beside the pin
+  badge and three buttons (the badge is now hidden on small screens); a permanent test asserts no screen scrolls sideways at
+  320, 375 and 768 px. The empty state said "on the left", which is wrong on a phone. *PDF:* "Print / Save as PDF" prints the same
+  report as a print-styled page from a hidden frame (no PDF library, nothing uploaded; every source-supplied string is escaped, and a
+  test checks that markup in a title or address cannot get through). *Compare on real data:* run through the real UI with the keys
+  blanked; it works, and its columns honestly show "no evidence" where the free sources found none. *Human review:* the automatic
+  measures cannot say whether an answer is right, so `review` writes a sheet of the ten cases' answers under shuffled letters (the
+  order differs per case) with the sources beside them and an empty ratings file, and `score-review` unblinds the ratings; the
+  blinding is partial, since the pipeline's answers have a recognisable shape. The ratings have not been made, and they take a person.
+  *Repo files:* `SECURITY.md`, `CONTRIBUTING.md`, issue and pull-request templates, `CITATION.cff`. *Docker:* written (Dockerfiles for both services, nginx for the built front end, a compose file with Ollama on the host), then
+  **removed**: there was no Docker on the machine, so it could never be built or shown to work, the app needs Ollama on the host
+  either way, and unverified infrastructure is a liability. It is in the git history if someone wants to build on it. The CI's browser tests were also run locally on Playwright's own
+  Chromium, as CI runs them, and pass. *Demo GIF* (`docs/images/demo.gif`, 4.6 MB): a real run recorded through the real app in free mode
+  (no search key, so no credit spent), with the four-minute model wait time-lapsed 30 times; it is a truthful demo and a modest one, since
+  with no web search the answer is thin, the one claim the model made was flagged insufficient because its wording was not in its cited
+  source, and the Details tab lists what was not searched.

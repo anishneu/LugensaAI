@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Lugensa AI: an agentic location web-intelligence system"
+abstract: >-
+  An agentic research system that investigates the public information about a place to answer a natural-language question about
+  it, and produces an evidence-backed, cited assessment. Every claim is checked against its sources by a deterministic verifier,
+  and what could not be confirmed is listed. It runs on a local model, with no billed model API.
+type: software
+authors:
+  - family-names: Kuila
+    given-names: Anish
+    alias: anishneu
+repository-code: "https://github.com/anishneu/LugensaAI"
+url: "https://github.com/anishneu/LugensaAI"
+license: MIT
+keywords:
+  - agentic AI
+  - retrieval-augmented generation
+  - location intelligence
+  - local LLM
+  - OpenStreetMap
