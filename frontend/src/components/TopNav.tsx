@@ -3,6 +3,8 @@ import { ArrowPathRoundedSquareIcon, MapPinIcon, ScaleIcon, StarIcon, XMarkIcon 
 import { StarIcon as StarSolidIcon } from "@heroicons/react/24/solid";
 import { useNavigate } from "react-router-dom";
 import { placeKey } from "../storage";
+import { placeSubtitle } from "../textUtils";
+import { TOOLTIP_CLASS } from "./IconButton";
 import type { SavedPlace } from "../storage";
 import type { ActiveLocation } from "../types";
 
@@ -20,13 +22,14 @@ interface TopNavProps {
 
 const navButton =
   "flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--bg-alt)] px-2.5 py-1.5 sm:px-4 text-[13px] font-medium text-[var(--text-h)] transition-colors hover:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none";
+// Saved places and Compare are icons alone, their names in a tooltip: round, and the same height as the "Change location" button beside them.
+const navIconButton =
+  "flex h-[34px] w-[34px] items-center justify-center rounded-full border border-[var(--border)] bg-[var(--bg-alt)] text-[var(--text-h)] transition-colors hover:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none";
 
 /** Project title and the place being researched on the left; save, compare and "Change location" on the right. */
 export function TopNav({ location, onChangeLocation, saved, isSaved, onToggleSaved, onOpenSaved, onRemoveSaved, onCompare }: TopNavProps) {
   const navigate = useNavigate();
-  const subtitle = [location.city, location.region, location.country]
-    .filter((part, i, all) => part && all.indexOf(part) === i)
-    .join(", ");
+  const subtitle = placeSubtitle(location.displayName, [location.city, location.region, location.country]);
 
   return (
     <header
@@ -62,16 +65,18 @@ export function TopNav({ location, onChangeLocation, saved, isSaved, onToggleSav
       </div>
 
       <div className="flex flex-shrink-0 items-center gap-2">
-        <Popover className="relative">
-          <PopoverButton
-            aria-label={`Saved places (${saved.length})`}
-            title="Saved places"
-            className={`${navButton} ${isSaved ? "border-amber-400/60 text-amber-400" : ""}`}
-          >
+        <Popover className="group relative">
+          {({ open }) => (
+            <>
+          <PopoverButton aria-label={`Saved places (${saved.length})`} className={`${navIconButton} ${isSaved ? "border-amber-400/60 text-amber-400" : ""}`}>
             {isSaved ? <StarSolidIcon className="h-4 w-4" aria-hidden="true" /> : <StarIcon className="h-4 w-4" aria-hidden="true" />}
-            <span className="hidden lg:inline">Saved</span>
-            {saved.length > 0 && <span className="rounded-full bg-[var(--accent-bg)] px-1.5 text-[11px] text-[var(--accent)]">{saved.length}</span>}
           </PopoverButton>
+          {/* Not while the menu is open: the button keeps focus, and its tooltip would show beside the menu it names. */}
+          {!open && (
+            <span aria-hidden="true" className={TOOLTIP_CLASS}>
+              Saved places{saved.length > 0 ? ` (${saved.length})` : ""}
+            </span>
+          )}
           <PopoverPanel
             anchor={{ to: "bottom end", gap: 8 }}
             className="z-50 w-[min(20rem,calc(100vw-2rem))] rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-2 shadow-2xl"
@@ -127,11 +132,17 @@ export function TopNav({ location, onChangeLocation, saved, isSaved, onToggleSav
               </div>
             )}
           </PopoverPanel>
+            </>
+          )}
         </Popover>
-        <button type="button" onClick={onCompare} aria-label="Compare with another place" className={navButton}>
-          <ScaleIcon className="h-4 w-4" aria-hidden="true" />
-          <span className="hidden lg:inline">Compare</span>
-        </button>
+        <span className="group relative inline-flex">
+          <button type="button" onClick={onCompare} aria-label="Compare with another place" className={navIconButton}>
+            <ScaleIcon className="h-4 w-4" aria-hidden="true" />
+          </button>
+          <span aria-hidden="true" className={TOOLTIP_CLASS}>
+            Compare with another place
+          </span>
+        </span>
         <button type="button" onClick={onChangeLocation} aria-label="Change location" className={navButton}>
           <ArrowPathRoundedSquareIcon className="h-4 w-4" aria-hidden="true" />
           <span className="hidden sm:inline">Change location</span>

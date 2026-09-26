@@ -21,6 +21,18 @@ interface SearchOption {
   toActiveLocation: () => ActiveLocation;
 }
 
+/** Suggestions that would read the same on screen are one suggestion: the same name over the same address line. The server already
+ * drops repeated full names; this is the guarantee that the list itself never shows two identical rows. */
+function withoutLookalikes(options: SearchOption[]): SearchOption[] {
+  const seen = new Set<string>();
+  return options.filter((option) => {
+    const key = `${option.label}|${option.sublabel}`.toLowerCase().replace(/\s+/g, " ").trim();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function placeToOption(place: PlaceCandidate): SearchOption {
   return {
     key: `place:${place.display_name}:${place.latitude}:${place.longitude}`,
@@ -77,7 +89,7 @@ export function LocationSearchInput({
     };
   }, [value]);
 
-  const options = useMemo<SearchOption[]>(() => liveResults.map(placeToOption).slice(0, 8), [liveResults]);
+  const options = useMemo<SearchOption[]>(() => withoutLookalikes(liveResults.map(placeToOption)).slice(0, 8), [liveResults]);
 
   function selectOption(option: SearchOption) {
     onSelect(option.toActiveLocation());

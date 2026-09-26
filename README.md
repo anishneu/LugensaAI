@@ -610,7 +610,7 @@ LugensaAI/
 │   │   │                  Reddit archive, Google News RSS, translation; plus live_feed.py and feed_topics.py
 │   │   └── verification/  deterministic claim verifier and contradiction check
 │   ├── evaluation/        the runnable benchmark from docs/evaluation.md
-│   └── tests/             offline, deterministic pytest suite (561 tests)
+│   └── tests/             offline, deterministic pytest suite (563 tests)
 ├── frontend/
 │   └── src/
 │       ├── pages/         LandingPage, ResearchWorkspace
@@ -625,10 +625,10 @@ See [`backend/README.md`](backend/README.md) for the backend's internal layout.
 
 ```bash
 cd backend
-pytest          # 561 tests
+pytest          # 563 tests
 cd ../frontend
 npm run lint && npx tsc -b && npm run build
-npm run test:e2e   # 42 tests: 23 in a browser, 19 plain unit tests (PW_CHANNEL=msedge uses an installed browser; otherwise `npx playwright install chromium`)
+npm run test:e2e   # 56 tests: 32 in a browser, 24 plain unit tests (PW_CHANNEL=msedge uses an installed browser; otherwise `npx playwright install chromium`)
 ```
 
 The backend suite is free, offline, and deterministic by construction (its invented sample sources live

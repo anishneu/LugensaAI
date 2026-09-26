@@ -300,7 +300,7 @@ export function LiveFeedSidebar({ location }: LiveFeedSidebarProps) {
             href={googleNewsSearchUrl(location)}
             target="_blank"
             rel="noreferrer"
-            className="flex w-fit items-center gap-1.5 text-xs font-medium text-[var(--accent)] hover:underline"
+            className="flex w-fit items-center gap-1.5 self-end text-xs font-medium text-[var(--accent)] hover:underline"
             title="The feed's news comes from Google News' public feed, which lists headlines. This opens Google News' own results for the place."
           >
             See more on Google News

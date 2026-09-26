@@ -1,5 +1,9 @@
 import type { ReactNode } from "react";
 
+/** How a tooltip looks: a small dark label under the button, shown on hover or keyboard focus of the `group` around it. */
+export const TOOLTIP_CLASS =
+  "pointer-events-none absolute top-full right-0 z-30 mt-1.5 rounded-md bg-[var(--text-h)] px-2 py-1 text-[11px] font-medium whitespace-nowrap text-[var(--bg)] opacity-0 shadow-lg transition-opacity delay-100 group-focus-within:opacity-100 group-hover:opacity-100";
+
 /** A round icon-only button whose name appears in a tooltip on hover or keyboard focus. The name is also the accessible label, so
  * a screen reader announces it, and the tooltip itself is hidden from it (it would only say the same thing twice). */
 export function IconButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
@@ -15,7 +19,7 @@ export function IconButton({ label, onClick, children }: { label: string; onClic
       </button>
       <span
         aria-hidden="true"
-        className="pointer-events-none absolute top-full right-0 z-30 mt-1.5 rounded-md bg-[var(--text-h)] px-2 py-1 text-[11px] font-medium whitespace-nowrap text-[var(--bg)] opacity-0 shadow-lg transition-opacity delay-100 group-focus-within:opacity-100 group-hover:opacity-100"
+        className={TOOLTIP_CLASS}
       >
         {label}
       </span>

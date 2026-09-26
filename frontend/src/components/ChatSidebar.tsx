@@ -43,7 +43,7 @@ export function ChatSidebar({ sessions, activeSessionId, onAsk, onSelectSession,
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-col gap-5 p-5">
+    <div className="flex min-w-0 shrink-0 flex-col gap-5 p-5">
       <div className="flex flex-col gap-1">
         <h2 className="m-0 flex items-center gap-1.5 text-[15px] font-bold text-[var(--text-h)]">💬 Ask the agent</h2>
         <p className="m-0 text-xs leading-relaxed text-[var(--text-muted)]">

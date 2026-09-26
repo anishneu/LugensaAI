@@ -77,3 +77,22 @@ export function absoluteTimeFrom(iso: string): string {
     minute: "2-digit",
   });
 }
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** The line under a place's name: its city, region and country, leaving out any that the name already says ("Chi-Joan How, Boston" over
+ * "Boston, Massachusetts, United States" said Boston twice) and any that repeat each other ("Singapore, Singapore"). */
+export function placeSubtitle(displayName: string, parts: (string | null | undefined)[]): string {
+  const seen = new Set<string>();
+  return parts
+    .filter((part): part is string => Boolean(part && part.trim()))
+    .filter((part) => {
+      const key = part.trim().toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return !new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRegExp(key)}($|[^\\p{L}\\p{N}])`, "iu").test(displayName);
+    })
+    .join(", ");
+}

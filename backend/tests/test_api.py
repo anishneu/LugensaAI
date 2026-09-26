@@ -337,3 +337,60 @@ def test_a_crash_during_a_streamed_run_is_logged_and_not_shown_to_the_reader(mon
     [(kind, data)] = _events(body)
     assert kind == "error" and data["status"] == 500
     assert "secret" not in body and "api key" not in body
+
+
+def test_place_search_lists_a_place_once_however_many_sources_name_it(monkeypatch):
+    import httpx
+
+    from app.api import routes
+    from app.models.place import PlaceCandidate
+    from app.tools.google_places_tool import GooglePlacesTool
+
+    # Google's "Germany" and OpenStreetMap's are hundreds of kilometres apart, so the "same spot" rule keeps both: a repeat on screen.
+    google_payload = {
+        "places": [{"id": "g1", "displayName": {"text": "Germany"}, "formattedAddress": "Germany", "location": {"latitude": 51.0, "longitude": 10.0}, "types": ["country"]}]
+    }
+    google = GooglePlacesTool(api_key="k", transport=httpx.MockTransport(lambda r: httpx.Response(200, json=google_payload)))
+    monkeypatch.setattr(routes, "_google_places_tool", lambda: google)
+    monkeypatch.delenv("DISABLE_LIVE_GEOCODING", raising=False)
+
+    def osm(name, display, lat, lon):
+        return PlaceCandidate(name=name, display_name=display, category="administrative", latitude=lat, longitude=lon)
+
+    class _FakeOsm:
+        def search_places(self, query, limit=6):
+            return [
+                osm("Germany", "Germany", 51.164, 10.448),
+                # OpenStreetMap listing one city three times, at slightly different points:
+                osm("Paris", "Paris, Ile-de-France, Metropolitan France, France", 48.853, 2.348),
+                osm("Paris", "Paris, Ile-de-France, Metropolitan France, France", 48.859, 2.320),
+                osm("Paris", "  paris, ile-de-france, metropolitan france, france ", 48.859, 2.321),
+                osm("Paris", "Paris, Lamar County, Texas, United States", 33.662, -95.556),
+            ]
+
+    monkeypatch.setattr(routes, "NominatimPlaceSearchTool", _FakeOsm)
+
+    shown = [p["display_name"] for p in client.get("/api/places/search", params={"q": "germany paris"}).json()]
+
+    assert shown.count("Germany") == 1
+    assert [d for d in shown if d.lower().strip().startswith("paris, ile")] == ["Paris, Ile-de-France, Metropolitan France, France"]
+    assert "Paris, Lamar County, Texas, United States" in shown  # a different Paris is still offered
+
+
+def test_places_that_share_only_a_short_name_are_all_kept(monkeypatch):
+    from app.api import routes
+    from app.models.place import PlaceCandidate
+
+    monkeypatch.setattr(routes, "_google_places_tool", lambda: None)
+    monkeypatch.delenv("DISABLE_LIVE_GEOCODING", raising=False)
+
+    class _FakeOsm:
+        def search_places(self, query, limit=6):
+            return [
+                PlaceCandidate(name="Starbucks", display_name="Starbucks, 36 JFK St, Cambridge, MA", category="cafe", latitude=42.3733, longitude=-71.1195),
+                PlaceCandidate(name="Starbucks", display_name="Starbucks, 1 Main St, Cambridge, MA", category="cafe", latitude=42.3600, longitude=-71.0900),
+            ]
+
+    monkeypatch.setattr(routes, "NominatimPlaceSearchTool", _FakeOsm)
+
+    assert len(client.get("/api/places/search", params={"q": "starbucks cambridge"}).json()) == 2

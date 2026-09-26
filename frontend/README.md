@@ -48,7 +48,7 @@ local-dev setting, not a production policy.
 ## Pages
 
 - **Landing (`/`)** — a dark, single-page product page (`pages/LandingPage.tsx`, with `components/landing/`): a sticky
-  nav with the app button at the far right; a hero over a **still image** of a street map (`assets/landing-map.webp`, Midtown Manhattan close up, 719 KB, rendered once
+  nav with the app button at the far right; a hero over a **still image** of a street map (`assets/landing-map.webp`, Midtown Manhattan, flat, 308 KB, rendered once
   from OpenFreeMap's style of OpenStreetMap data and dimmed under a gradient). It is an image because the live map beneath
   the landing page could come up blank on a refresh or a first visit, and it is decoration; the footer credits the map data
   in general terms (OpenStreetMap contributors), and every map inside the app keeps its own credit control. Two buttons, with no search box, because the app opens on one; a preview of the workspace's layout
@@ -65,7 +65,7 @@ local-dev setting, not a production policy.
 - **Workspace (`/app`)** — the search screen, then the research view. Arriving from the landing page it opens
   straight on the place chosen there (router state: `location`, or `submitQuery` for typed text, plus an optional
   `question` that is put in the question box and never run for you; the search screen says a question is waiting):
-  - A **search** screen (`SearchHero`) over a slowly drifting street-map image (`MapBackdrop`) and a live place search (`LocationSearchInput`, from
+  - A **search** screen (`SearchHero`) over slowly drifting street-map images that rotate through cities (`MapBackdrop`) and a live place search (`LocationSearchInput`, from
     `GET /api/places/search`, debounced 350 ms, min 3 characters) — any real business or address, not just
     a neighborhood. Picking one exact result passes its coordinates straight through on every subsequent
     question, so the backend never has to re-resolve the name as text (see `../backend/README.md`'s POI
@@ -185,9 +185,9 @@ While a question runs, `runResearchStream` (`src/api.ts`) reads the server-sent 
 
 ## Compare, export and saved places
 
-- **Saved places** (`storage.ts`, `TopNav.tsx`, `SearchHero.tsx`): the star in the top bar opens a menu with "Save this place" (or
-  "Remove this place from saved") and the list of saved places, each one click to open, with a remove button; a count shows on the
-  button. They are kept in this browser (`localStorage`, at most 12, keyed by coordinates so two spellings of one spot are one place),
+- **Saved places** (`storage.ts`, `TopNav.tsx`, `SearchHero.tsx`): the star in the top bar (an icon alone; its name and the count are in a
+  tooltip) opens a menu with "Save this place" (or "Remove this place from saved") and the list of saved places, each one click to open,
+  with a remove button. They are kept in this browser (`localStorage`, at most 12, keyed by coordinates so two spellings of one spot are one place),
   and are also listed on the search page. The landing page has no place picker, so they are not there. Nothing leaves the browser.
 - **Export** (`report.ts`, `download.ts`, `ExportButtons` in `ResponsePanel.tsx`): icon buttons at the right of the answer's tab row
   (print or save as PDF, download, copy as Markdown), each with a tooltip on hover or keyboard focus (`IconButton.tsx`). They build a
@@ -201,13 +201,19 @@ While a question runs, `runResearchStream` (`src/api.ts`) reads the server-sent 
 
 ## Backdrop maps, the live feed's news link, and the "what it is doing" panel
 
-- **Backdrop maps.** Two still images of Midtown Manhattan, drawn once from OpenFreeMap's tiles of OpenStreetMap data. The landing page
-  shows `assets/landing-map.webp` still: a close-up (zoom 14.7, retina, 2880 by 1800) with street names, transit stops and building
-  shading. The search page's `MapBackdrop` uses the wider `assets/search-map.webp` (2560 by 1600) and drifts it along a diagonal with a
-  CSS animation (`.map-drift`: a sine path traced in keyframes, 52 s a cycle, about 5 px a second, switched off for reduced motion),
-  and credits the map data in the corner. An earlier version used easing between two ends of the sweep and looked frozen for several
-  seconds before it moved, at half the old pace; the sine path starts mid-sweep, already moving. It replaced a live map because a live map waited on tile requests and WebGL and arrived seconds
-  after the rest of the page; an image is there with it, with no tile requests. Only the map beside the question is still live.
+- **Backdrop maps.** Both are still images drawn once from OpenFreeMap's tiles of OpenStreetMap data, so they are there with the
+  page. The landing page shows `assets/landing-map.webp` still: Midtown Manhattan at zoom 14.1, **flat**: the style's extruded
+  (3D) building layer is removed when the image is drawn, because the 3D sides read as a messy, dark, tilted view under the headline
+  (zoom 14.7 and 15.3 with 3D were both rejected). It keeps street names and transit stops. The search page's `MapBackdrop` is a
+  **slideshow** of eleven street-level maps (`assets/backdrops/`: Paris, Cairo, Nairobi, Sao Paulo, Sydney, Istanbul, Mumbai, Berlin,
+  Tokyo, Chicago, San Francisco; 1600 by 1000, about 175 KB each). The first is there with the page. Every 26 s the next fades in over
+  it (2.5 s, the old one stays underneath until done, so the page is never bare), and that next map was fetched while the last one
+  was showing, so a change never waits. The order of the cities is shuffled once when the page opens and gone through in turn, and
+  so is the order of four drift directions (across, up and down, and each diagonal), so every map and every kind of movement comes
+  round before any repeats and two maps in a row never move the same way. Each drifts on a sine path traced in keyframes, 52 s a
+  cycle, about 5 px a second, direction taken from `--dx` and `--dy` (`.map-drift` in index.css); it starts mid-sweep, already moving
+  (an earlier easing version looked frozen for seconds). Reduced motion: one still map, no rotation. The map data is credited in the
+  corner. To add a city, drop another 1600 by 1000 WebP in the folder.
 - **Live feed.** The news in it already comes from Google News' public RSS feed (headlines with real publication dates, no key). Since
   a headline list cannot show more, the feed ends with "See more on Google News", which opens Google News' own results for the place
   over the last 30 days (`googleNewsSearchUrl` in `maps.ts`). The feed's intro no longer says "No politics"; politics is still left
@@ -217,3 +223,17 @@ While a question runs, `runResearchStream` (`src/api.ts`) reads the server-sent 
   behind "Show all N steps" and open as a timeline (a thin line with dots), not a second bordered box; the sliding bar and the long
   paragraph about the model's speed are gone.
 - **Compare** opens in the middle of the page (it used to hug the top).
+
+## The top bar
+
+Saved places and Compare are round icon buttons with no text (their names are in a tooltip on hover or keyboard focus, and are the
+buttons' accessible names); "Change location" keeps its words. The line under the place's name is `placeSubtitle` (`textUtils.ts`): its
+city, region and country, leaving out any the name already says and any that repeat each other, so "Chi-Joan How, Boston" is followed
+by "Massachusetts, United States" and not "Boston, Massachusetts, United States".
+
+## Place suggestions
+
+The search box never shows the same place twice. The server drops suggestions with the same full name (`_without_repeats` in
+`routes.py`: Google's "Germany" and OpenStreetMap's sit at different points of the country, so the 150 m "same spot" rule kept both, and
+OpenStreetMap lists a city like Paris several times); the box also drops rows that would read the same on screen (`withoutLookalikes` in
+`LocationSearchInput.tsx`). The live feed's "See more on Google News" link sits in the right-hand corner of the feed.

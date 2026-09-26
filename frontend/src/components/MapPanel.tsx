@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Map as MapLibreMap, Marker } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { ArrowTopRightOnSquareIcon, MapPinIcon } from "@heroicons/react/24/outline";
+import { flattenMap } from "../mapFlat";
 import { MAP_STYLE } from "../mapSetup";
 import { pinMapsUrl } from "../maps";
 import type { ActiveLocation } from "../types";
@@ -56,6 +57,8 @@ export default function MapPanel({ location }: { location: ActiveLocation }) {
       setFailed(true); // no WebGL
       return;
     }
+    // Flat, not 3D: see `flattenMap`. Done when the style has loaded, before any tile is drawn with the raised buildings.
+    map.on("style.load", () => flattenMap(map));
     map.on("error", (event) => {
       if (!map.isStyleLoaded()) {
         console.warn("Map style failed to load", event.error);

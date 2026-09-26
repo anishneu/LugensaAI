@@ -705,3 +705,51 @@ All eight milestones from the original project plan are implemented, plus later 
   and already moving (52 s a cycle, about 5 px a second); a test asserts it has moved more than 5 px on both axes within two seconds
   of load. *"Box inside a box":* the agent panel was a card containing a bordered current-step box and a bordered step list; the
   current step is now two plain lines and the history a timeline, so the card is the only container. Tests: 42 frontend, 561 backend.
+- **Milestone 39:** more from use. *Landing map:* zoom 14.7 was too close and dense, so it is now zoom 14.1 (street names and transit
+  stops, without every building shaded), re-encoded from 719 KB to 442 KB. *Landing preview card:* the drawn workspace on the landing
+  page was still the Milestone 22 layout; it now shows the top bar as it is (Saved, Compare, Change location), a Details tab, the
+  print, download and copy icons at the right of the tabs, and the feed's filter chips. *Search backdrop:* the wish was for what the
+  live map gave (a different city each visit, street level) without the wait it caused. So the live map is not back: eleven world
+  cities are drawn in advance as street-level images, one is picked at random per visit, and only that one is downloaded (about 175 KB;
+  the folder is read with `import.meta.glob` for addresses only). Tests: 43 frontend (24 in a browser, 19 plain unit), 561 backend.
+  The new backdrop test first counted Vite's per-file address modules as downloads in development and then timed out under load with
+  the other tests running; both were the test's fault, not the page's.
+- **Milestone 40:** four more fixes from use. *Landing map:* still "3D and messy" after two zoom changes, because the cause was not the
+  zoom: the map style draws buildings as extruded 3D shapes from about zoom 14, and their dark sides under the headline read as a
+  tilted mess. The image is now drawn with that layer removed (flat, 2D), at zoom 14.1, and is smaller (308 KB). *Search backdrop:*
+  one map per visit became a slideshow: the maps rotate by themselves every 26 s with a 2.5 s crossfade, the next one fetched while the
+  current shows so a change never waits, and the drift direction cycles through across, up and down, and both diagonals (vertical
+  scaled 1.6 so it covers about as much ground as horizontal). Writing the test found a real bug: the timer that removes the map that has
+  faded out was in the same effect as the slide timer, and that effect's cleanup cancelled it on every change, so the old layer would
+  have stayed underneath forever. *Top bar:* Saved places and Compare are icons only, with tooltips; the landing preview card matches.
+  *Duplicated location:* the line under a place's name repeated the city ("Chi-Joan How, Boston" over "Boston, Massachusetts, United
+  States"); it now leaves out what the name already says. (The report said "the country locations is duplicated" and its screenshot
+  did not arrive, so this is the repeat visible in earlier screenshots; if another is meant, it is not fixed.) Tests: 49 frontend (27 in
+  a browser, 22 plain unit), 561 backend.
+- **Milestone 41:** the "duplicated country" was in the search suggestions, not the top bar (Milestone 40 guessed the wrong one; the
+  top bar's repeated city was a real repeat too, and that fix stays). Typing "germany" listed Germany twice. Two causes, both found
+  with a live query: `/api/places/search` puts Google's results first and drops OpenStreetMap entries within 150 m of one, and Google's
+  "Germany" and OpenStreetMap's are hundreds of kilometres apart, so both survived; and OpenStreetMap alone returns "Paris, Ile-de-France,
+  Metropolitan France, France" three times (the city, the department, its boundary). The route now keeps each full name once, the first
+  (Google's) winning; places that share only a short name keep their own addresses, so every Starbucks is still there, and a different
+  Paris (Texas) is still offered. The box also filters rows that would look identical. The live feed's Google News link moved to the
+  right-hand corner. Tests: 563 backend, 50 frontend (28 in a browser, 22 plain unit).
+  *Landing preview card (later the same day):* about 30 px taller (452 px on desktop, was 400), with the suggested questions under the
+  question box and the feed ending in "See more on Google News" in its right-hand corner, so the drawing matches the workspace.
+- **Milestone 42:** three things noticed in use. *The pin map looked 3D:* nothing about it had changed (`MapPanel.tsx` was last edited on
+  20 September), but it uses the same OpenFreeMap "liberty" style as the landing map, which draws buildings as raised shapes from about
+  zoom 14, and the pin map's zoom is 16.2. It is now flattened the same way: `flattenMap` (`mapFlat.ts`) removes the style's
+  `fill-extrusion` layers when the style loads, and the flat outlines, streets, names and stops stay. Checked on the real map with real
+  tiles. *No space under the last suggested question:* the left column scrolls, and the sidebar box was allowed to shrink to fit it,
+  so its content spilled out of the box and its bottom padding was lost (the fix is `shrink-0`; a test scrolls the column to the end
+  and asserts at least 16 px under the last suggestion, and was checked to fail without the fix). *The landing card's feed ended
+  differently from the app's:* the app has the cards, then a centred "Show N more" button, then the Google News link in the right corner;
+  the card had the link without the button. It now has both, and "Try asking:" carries its colon as in the app. Tests: 563 backend, 53
+  frontend (29 in a browser, 24 plain unit).
+
+- **Milestone 43:** two things left over from the last round. *A tooltip showed behind the open Saved-places menu:* the star button's
+  "Saved places" label kept showing while its menu was open and peeked out from behind it; the label is now not rendered while the
+  menu is open (a test checks it is gone then and back after). *The landing card's live-feed header had the red dot on the wrong
+  side:* the app has "Live feed", then the dot, with the refresh button at the far right; the card had the dot first. It now matches
+  (a test checks the order in both places, and both new tests were checked to fail on the old code). Tests: 563 backend, 56 frontend
+  (32 in a browser, 24 plain unit).

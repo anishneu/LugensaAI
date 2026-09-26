@@ -263,7 +263,23 @@ def search_places(q: str = "") -> list[PlaceCandidate]:
             for place in osm
             if not any(distance_m(place.latitude, place.longitude, c.latitude, c.longitude) < 150 for c in candidates)
         ]
-    return candidates[:8]
+    return _without_repeats(candidates)[:8]
+
+
+def _without_repeats(places: list[PlaceCandidate]) -> list[PlaceCandidate]:
+    """Each place once. Two suggestions with the same full name are the same place to a person reading the list, however far apart
+    their coordinates are: Google's "Germany" and OpenStreetMap's sit at different points of a country, and OpenStreetMap lists Paris
+    three times (the city, the department and its boundary). The first is kept, which is Google's when it has one. Places that only
+    share a short name keep their own addresses ("Starbucks, 36 JFK St..." and "Starbucks, 1 Main St..."), so they are all kept."""
+    seen: set[str] = set()
+    unique: list[PlaceCandidate] = []
+    for place in places:
+        key = " ".join(place.display_name.casefold().split())
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(place)
+    return unique
 
 
 class TranslateRequest(BaseModel):
