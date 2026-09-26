@@ -357,3 +357,16 @@ test.describe("the live feed header: card and app agree", () => {
     expect(dot.x + dot.width, "inside the title row, at its end").toBeLessThanOrEqual(titleBox.x + titleBox.width + 1);
   });
 });
+
+test.describe("top bar tooltips", () => {
+  test("the Saved places tooltip sits centred under its star", async ({ page }) => {
+    await mockBackend(page);
+    await openWorkspace(page);
+    const star = page.getByRole("button", { name: /^Saved places/ });
+    await star.hover();
+    const tip = page.getByText("Saved places", { exact: true });
+    await expect(tip).toHaveCSS("opacity", "1");
+    const [b, t] = [await star.boundingBox(), await tip.boundingBox()];
+    expect(Math.abs(b!.x + b!.width / 2 - (t!.x + t!.width / 2))).toBeLessThan(2);
+  });
+});

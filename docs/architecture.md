@@ -753,3 +753,9 @@ All eight milestones from the original project plan are implemented, plus later 
   side:* the app has "Live feed", then the dot, with the refresh button at the far right; the card had the dot first. It now matches
   (a test checks the order in both places, and both new tests were checked to fail on the old code). Tests: 563 backend, 56 frontend
   (32 in a browser, 24 plain unit).
+  A follow-up: the top bar's tooltips (Saved places, Compare) were lined up with their button's right edge, so on these small buttons
+  they hung off to the left; they are now centred under the button (a test checks it). Frontend is now 57 tests (33 in a browser).
+  *Images refreshed:* `docs/images/workspace.jpg` and `docs/images/demo.gif` were re-taken from a new real run (Harvard Square, "Is it a
+  good place to visit as a tourist?", free mode with no search or Google key, so no credit spent) so they show the current top bar, agent
+  panel and live feed. The answer is a thin, honest one for the same reason as before (no web search: mixed/partial evidence, 1 of 4
+  topics supported); the model wait is time-lapsed 30 times in the GIF (4.2 MB).

@@ -4,7 +4,7 @@ import { StarIcon as StarSolidIcon } from "@heroicons/react/24/solid";
 import { useNavigate } from "react-router-dom";
 import { placeKey } from "../storage";
 import { placeSubtitle } from "../textUtils";
-import { TOOLTIP_CLASS } from "./IconButton";
+import { TOOLTIP_CENTERED_CLASS } from "./IconButton";
 import type { SavedPlace } from "../storage";
 import type { ActiveLocation } from "../types";
 
@@ -73,7 +73,7 @@ export function TopNav({ location, onChangeLocation, saved, isSaved, onToggleSav
           </PopoverButton>
           {/* Not while the menu is open: the button keeps focus, and its tooltip would show beside the menu it names. */}
           {!open && (
-            <span aria-hidden="true" className={TOOLTIP_CLASS}>
+            <span aria-hidden="true" className={TOOLTIP_CENTERED_CLASS}>
               Saved places{saved.length > 0 ? ` (${saved.length})` : ""}
             </span>
           )}
@@ -139,7 +139,7 @@ export function TopNav({ location, onChangeLocation, saved, isSaved, onToggleSav
           <button type="button" onClick={onCompare} aria-label="Compare with another place" className={navIconButton}>
             <ScaleIcon className="h-4 w-4" aria-hidden="true" />
           </button>
-          <span aria-hidden="true" className={TOOLTIP_CLASS}>
+          <span aria-hidden="true" className={TOOLTIP_CENTERED_CLASS}>
             Compare with another place
           </span>
         </span>
