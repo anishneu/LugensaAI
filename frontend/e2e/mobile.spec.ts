@@ -8,6 +8,18 @@ async function expectNoSidewaysScroll(page: Page, screen: string) {
   expect(scrollWidth, `${screen} is ${scrollWidth}px wide on a ${innerWidth}px screen`).toBeLessThanOrEqual(innerWidth + 1);
 }
 
+// CI runs on Linux, whose default font is wider than Windows' or macOS's, and a label that just fits in one can overflow in the other
+// (a tooltip once made the page 7px too wide there and only there). So every test here uses a wide font.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    document.addEventListener("DOMContentLoaded", () => {
+      const style = document.createElement("style");
+      style.textContent = '*{font-family:Verdana,"DejaVu Sans",sans-serif !important}';
+      document.head.appendChild(style);
+    });
+  });
+});
+
 for (const width of [320, 375, 768]) {
   test(`no screen scrolls sideways at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 });

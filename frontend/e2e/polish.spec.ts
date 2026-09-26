@@ -293,17 +293,45 @@ test.describe("flat pin map (plain function)", () => {
 });
 
 test.describe("left sidebar", () => {
-  test("leaves room below the last suggested question, even when the column has to scroll", async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 620 }); // short, so the left column scrolls
+  /** The column (map, question box, suggestions) is as tall as the window and never scrolls as a whole; the last thing in it must be seen. */
+  async function expectFits(page: import("@playwright/test").Page, what: string) {
+    const column = page.locator("aside").first();
+    await expect(column.locator(".animate-pulse")).toHaveCount(0);
+    await expect
+      .poll(async () => column.evaluate((el) => el.scrollHeight - el.clientHeight), { message: `${what}: the column scrolls` })
+      .toBeLessThanOrEqual(1);
+  }
+
+  for (const [width, height] of [[1440, 900], [1280, 720], [1280, 600]]) {
+    test(`fits the window without scrolling at ${width}x${height}, with the last suggestion in view`, async ({ page }) => {
+      await page.setViewportSize({ width, height });
+      await mockBackend(page);
+      await openWorkspace(page);
+      await expectFits(page, "before any question");
+      const last = page.getByRole("button", { name: "Is it safe, and easy to get around?" });
+      await expect(last).toBeInViewport({ ratio: 1 });
+      const map = await page.locator("aside").first().locator("section").boundingBox();
+      expect(map!.height, "the map keeps a usable size").toBeGreaterThanOrEqual(180);
+    });
+  }
+
+  test("with many questions asked, only their own list scrolls: the column and the map keep their size", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
     await mockBackend(page);
     await openWorkspace(page);
+    for (let i = 1; i <= 6; i++) {
+      await page.getByPlaceholder("Would this be a good place for…?").fill(`Question number ${i}: is it a good place to visit?`);
+      await page.getByRole("button", { name: "Ask →" }).click();
+      await page.waitForFunction(() => window.__sse.started);
+      await finishRun(page, researchResult(`Q${i}`));
+      await expect(page.getByRole("button", { name: "Download report" })).toBeVisible();
+      await page.evaluate(() => { window.__sse.started = false; });
+    }
+    await expectFits(page, "six questions in");
     const column = page.locator("aside").first();
-    const last = page.getByRole("button", { name: "Is it safe, and easy to get around?" });
-    await last.scrollIntoViewIfNeeded();
-    await column.evaluate((el) => el.scrollTo(0, el.scrollHeight));
-    const columnBox = (await column.boundingBox())!;
-    const lastBox = (await last.boundingBox())!;
-    expect(columnBox.y + columnBox.height - (lastBox.y + lastBox.height), "space under the last suggestion").toBeGreaterThanOrEqual(16);
+    expect((await column.locator("section").boundingBox())!.height).toBeGreaterThanOrEqual(180);
+    const list = column.locator("div.overflow-y-auto");
+    expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight), "the list of questions scrolls on its own").toBe(true);
   });
 });
 
