@@ -141,7 +141,13 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     const path = new URL(request.url()).pathname;
     if (path.endsWith("/api/capabilities")) return json(route, CAPABILITIES);
     if (path.endsWith("/api/places/search")) {
-      return json(route, new URL(request.url()).searchParams.get("q")?.toLowerCase().includes("kendall") ? [KENDALL] : [PLACE]);
+      const q = new URL(request.url()).searchParams.get("q")?.toLowerCase() ?? "";
+      // Two entries for one country (Google's and OpenStreetMap's, at different points), as the real search once returned.
+      if (q.includes("germany")) {
+        const germany = { name: "Germany", display_name: "Germany", category: "country", city: null, region: null, country: "Germany", is_business: false, is_address: false };
+        return json(route, [{ ...germany, latitude: 51.0, longitude: 10.0 }, { ...germany, latitude: 51.164, longitude: 10.448 }, { ...PLACE, name: "Berlin", display_name: "Berlin, Germany", latitude: 52.52, longitude: 13.405 }]);
+      }
+      return json(route, q.includes("kendall") ? [KENDALL] : [PLACE]);
     }
     if (path.endsWith("/api/places/live-feed") || path.endsWith("/api/live-feed")) return json(route, options.feed ?? []);
     if (path.endsWith("/api/places/profile")) return json(route, { detail: "No match" }, 404);

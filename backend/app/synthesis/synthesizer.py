@@ -100,6 +100,7 @@ class Synthesizer(ABC):
         claims: list[Claim],
         evidence: list[Evidence],
         topics_with_evidence: set[str] | None = None,
+        questions: list[str] | None = None,
     ) -> SynthesisResult:
         raise NotImplementedError
 
@@ -125,6 +126,7 @@ class TemplateSynthesizer(Synthesizer):
         claims: list[Claim],
         evidence: list[Evidence],
         topics_with_evidence: set[str] | None = None,
+        questions: list[str] | None = None,
     ) -> SynthesisResult:
         evidence_by_topic: dict[str, list[Evidence]] = {}
         for item in evidence:

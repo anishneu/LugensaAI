@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Tab, TabGroup, TabList, TabPanel, TabPanels } from "@headlessui/react";
-import { ArrowDownTrayIcon, CheckCircleIcon, ClipboardDocumentIcon, ExclamationTriangleIcon, PrinterIcon, SparklesIcon } from "@heroicons/react/24/outline";
+import { ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ClipboardDocumentIcon, ExclamationTriangleIcon, PrinterIcon, SparklesIcon } from "@heroicons/react/24/outline";
 import { fetchCapabilities } from "../api";
 import type { Capabilities, QuerySession, ResearchResponse } from "../types";
 import { downloadText, printHtml } from "../download";
@@ -10,6 +10,7 @@ import { ClaimsList } from "./ClaimsList";
 import { CommunityVoices, isVoice } from "./CommunityVoices";
 import type { EvidenceSortMode } from "./EvidenceList";
 import { EvidenceList } from "./EvidenceList";
+import { IconButton } from "./IconButton";
 import { LiveSteps } from "./LiveSteps";
 import { ResearchTrace } from "./ResearchTrace";
 import { VerdictBanner } from "./VerdictBanner";
@@ -43,7 +44,7 @@ function ResearchProgress({ startedAt, capabilities }: { startedAt: string; capa
   const overEstimate = capabilities != null && elapsed > capabilities.estimated_seconds_max;
 
   return (
-    <div className="flex max-w-md flex-col items-center gap-2 text-center text-xs text-[var(--text-muted)]">
+    <div className="flex max-w-md flex-col items-center gap-1 text-center text-xs text-[var(--text-muted)]">
       <p className="m-0">
         <span className="font-semibold text-[var(--text)]">{formatDuration(elapsed)} elapsed</span>
         {capabilities && !overEstimate && (
@@ -54,22 +55,14 @@ function ResearchProgress({ startedAt, capabilities }: { startedAt: string; capa
         {overEstimate && " · taking longer than usual, still working"}
       </p>
       {capabilities?.first_run_warmup && (
-        <p className="m-0">First question since the server started: it also loads the local search model, a one-time cost.</p>
-      )}
-      {capabilities?.llm_provider === "ollama" && (
-        <p className="m-0">
-          Reasoning locally via Ollama ({capabilities.llm_model}). Speed depends on whether Ollama is using a GPU (a few
-          minutes) or only the CPU (much longer).
-        </p>
+        <p className="m-0">First question since the server started: it also loads the local search model once.</p>
       )}
     </div>
   );
 }
 
-const exportButton =
-  "flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--bg-alt)] px-3 py-1.5 text-xs font-medium text-[var(--text-h)] transition-colors hover:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none";
-
-/** The answer as a Markdown file, or on the clipboard. It is built in this page from the answer already shown: nothing is sent anywhere. */
+/** The answer as a printed page, a Markdown file, or on the clipboard: icon buttons with a tooltip, at the right of the tab row.
+ * Built in this page from the answer already shown; nothing is sent anywhere. */
 function ExportButtons({ response }: { response: ResearchResponse }) {
   const [copied, setCopied] = useState(false);
   async function copy() {
@@ -82,20 +75,17 @@ function ExportButtons({ response }: { response: ResearchResponse }) {
     }
   }
   return (
-    <div className="flex min-w-0 flex-wrap gap-2">
-      <button type="button" onClick={() => printHtml(buildReportHtml(response))} className={exportButton}>
-        <PrinterIcon className="h-3.5 w-3.5" aria-hidden="true" />
-        Print / Save as PDF
-      </button>
-      <button type="button" onClick={() => downloadText(reportFileName(response), buildReportMarkdown(response))} className={exportButton}>
-        <ArrowDownTrayIcon className="h-3.5 w-3.5" aria-hidden="true" />
-        Download report
-      </button>
-      <button type="button" onClick={copy} className={exportButton}>
-        <ClipboardDocumentIcon className="h-3.5 w-3.5" aria-hidden="true" />
-        {copied ? "Copied" : "Copy as Markdown"}
-      </button>
-    </div>
+    <>
+      <IconButton label="Print / Save as PDF" onClick={() => printHtml(buildReportHtml(response))}>
+        <PrinterIcon className="h-4 w-4" aria-hidden="true" />
+      </IconButton>
+      <IconButton label="Download report" onClick={() => downloadText(reportFileName(response), buildReportMarkdown(response))}>
+        <ArrowDownTrayIcon className="h-4 w-4" aria-hidden="true" />
+      </IconButton>
+      <IconButton label={copied ? "Copied" : "Copy as Markdown"} onClick={copy}>
+        {copied ? <CheckIcon className="h-4 w-4 text-[var(--supported)]" aria-hidden="true" /> : <ClipboardDocumentIcon className="h-4 w-4" aria-hidden="true" />}
+      </IconButton>
+    </>
   );
 }
 
@@ -216,21 +206,15 @@ export function ResponsePanel({ session }: ResponsePanelProps) {
 
   if (session.status === "loading") {
     return (
-      <div className={`${shell} flex flex-col items-center gap-5 rounded-2xl border border-[var(--border)] bg-[var(--bg-alt)] px-6 py-14 text-center`}>
-        <div className="h-11 w-11 animate-spin rounded-full border-[3px] border-[var(--border)] border-t-[var(--accent)]" />
-        <div className="flex flex-col gap-1">
-          <p className="m-0 text-[15px] font-medium text-[var(--text-h)]" dir="auto">
+      <div className={`${shell} flex flex-col items-center gap-4 rounded-2xl border border-[var(--border)] bg-[var(--bg-alt)] px-6 py-10 text-center`}>
+        <div className="h-9 w-9 animate-spin rounded-full border-[3px] border-[var(--border)] border-t-[var(--accent)]" />
+        <div className="flex max-w-xl flex-col gap-1.5">
+          <p className="m-0 line-clamp-2 text-[15px] font-medium text-[var(--text-h)]" dir="auto" title={session.question}>
             Researching “{session.question}”…
           </p>
-          {!session.steps?.length && (
-            <p className="m-0 text-xs text-[var(--text-muted)]">Planning topics, searching the web and communities, verifying claims.</p>
-          )}
-        </div>
-        <div className="h-1 w-56 overflow-hidden rounded-full bg-[var(--border)]">
-          <div className="h-full w-1/3 animate-[slide_1.6s_ease-in-out_infinite] rounded-full bg-[var(--accent)]" />
+          <ResearchProgress startedAt={session.askedAt} capabilities={capabilities} />
         </div>
         <LiveSteps steps={session.steps ?? []} />
-        <ResearchProgress startedAt={session.askedAt} capabilities={capabilities} />
       </div>
     );
   }
@@ -258,16 +242,14 @@ export function ResponsePanel({ session }: ResponsePanelProps) {
 
   return (
     <div className={shell}>
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <p className="m-0 text-[15px] text-[var(--text-muted)] italic" dir="auto">
-          “{response.question}”
-        </p>
-        <ExportButtons response={response} />
-      </div>
+      <p className="m-0 mb-4 text-[15px] text-[var(--text-muted)] italic" dir="auto">
+        “{response.question}”
+      </p>
 
       {/* Keyed by question, so each answer opens on Overview rather than on whatever tab the last one left. */}
       <TabGroup key={session.id}>
-        <TabList className="mb-5 flex gap-x-6 overflow-x-auto shadow-[inset_0_-1px_0_var(--border)]">
+        <div className="mb-5 flex items-end justify-between gap-3 shadow-[inset_0_-1px_0_var(--border)]">
+        <TabList className="flex min-w-0 gap-x-4 overflow-x-auto xl:gap-x-5">
           {tabs.map((tab) => (
             <Tab
               key={tab.id}
@@ -288,6 +270,10 @@ export function ResponsePanel({ session }: ResponsePanelProps) {
             </Tab>
           ))}
         </TabList>
+        <div className="mb-2 flex flex-shrink-0 gap-1.5">
+          <ExportButtons response={response} />
+        </div>
+        </div>
 
         <TabPanels>
           {[

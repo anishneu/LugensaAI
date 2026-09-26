@@ -1,115 +1,105 @@
-import { useEffect, useRef, useState } from "react";
-import { AttributionControl, Map as MapLibreMap } from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
-import { MAP_STYLE } from "../mapSetup";
+import { useEffect, useState } from "react";
+import type { CSSProperties } from "react";
 
-// The search page's backdrop: a live street map that drifts slowly up and down on its own. It carries no data and implies
-// no particular place, so it is a different world city each visit. (The landing page uses a still image instead: see
-// `assets/landing-map.webp`.)
-const BACKDROP_CITIES: [number, number][] = [
-  [139.7005, 35.6595], // Tokyo
-  [2.3488, 48.8534], // Paris
-  [31.2357, 30.0444], // Cairo
-  [36.8219, -1.2921], // Nairobi
-  [-46.6333, -23.5505], // Sao Paulo
-  [151.2093, -33.8688], // Sydney
-  [28.9784, 41.0082], // Istanbul
-  [72.8777, 19.076], // Mumbai
-  [13.405, 52.52], // Berlin
+// One street-level map per city, each drawn once from OpenFreeMap's tiles (OpenStreetMap data): see `assets/backdrops`. Only their
+// addresses are collected here (`?url`); a map is downloaded when it is about to be shown, one ahead.
+const CITIES = Object.values(
+  import.meta.glob<string>("../assets/backdrops/*.webp", { eager: true, query: "?url", import: "default" }),
+);
+
+/** How long one map stays before the next fades in: about half of one drift cycle (see `.map-drift`). */
+export const SLIDE_MS = 26_000;
+/** How long the fade takes: keep in step with `.map-fade-in` in index.css. */
+const FADE_MS = 2_500;
+
+interface Direction {
+  dx: number;
+  dy: number;
+}
+/** The four ways a map drifts: across, up and down, and along each diagonal. (`dy` is 1.6 where used, so a vertical drift covers about
+ * as much ground as a horizontal one on a wide screen.) */
+const DIRECTIONS: Direction[] = [
+  { dx: 1, dy: 0 },
+  { dx: 0, dy: 1.6 },
+  { dx: 1, dy: 1.6 },
+  { dx: 1, dy: -1.6 },
 ];
 
-// How far the map travels either side of its start, in degrees of latitude (about 140 px at the zoom used), and how long
-// one sweep takes. Slow enough to read as ambience, not as motion to follow.
-const DRIFT_DEGREES = 0.02;
-const DRIFT_SWEEP_MS = 26_000;
+function shuffled<T>(items: T[]): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
 
-/** A non-interactive map filling its parent. Renders nothing (the page's own background shows) if WebGL is missing. */
+interface Slide {
+  n: number;
+  src: string;
+  direction: Direction;
+}
+
+/**
+ * The search page's backdrop: street maps of different world cities, one after another, each fading into the next and drifting
+ * slowly, sometimes across, sometimes up and down, sometimes along a diagonal. They are images and not a live map on purpose: a live map
+ * waited on tile requests and WebGL and showed up seconds after the rest of the page, and changing cities meant waiting again. Here the
+ * first map is there with the page, and the next is fetched while the current one is on screen, so a change never waits.
+ * The order of the maps is shuffled once, and so is the order of the directions, and both are then gone through in turn: every map and
+ * every kind of movement comes round before any repeats, and two maps in a row never drift the same way.
+ * Someone who has asked for reduced motion gets one still map. The credit for the map data is in `SearchHero`.
+ */
 export default function MapBackdrop() {
-  const container = useRef<HTMLDivElement>(null);
-  const wrapper = useRef<HTMLDivElement>(null);
-  const [center] = useState(() => BACKDROP_CITIES[Math.floor(Math.random() * BACKDROP_CITIES.length)]);
-  // The map is shown once it has drawn its first complete frame. Before that it is only grey (its tiles take a few
-  // seconds on a slow connection), which reads as broken; the page's own dark background stands in meanwhile.
-  const [ready, setReady] = useState(false);
+  // Shuffled once, when the page opens (state, not a ref, so the shuffle is not redone on every render).
+  const [cities] = useState(() => shuffled(CITIES));
+  const [directions] = useState(() => shuffled(DIRECTIONS));
+  const slideAt = (n: number): Slide => ({ n, src: cities[n % cities.length], direction: directions[n % directions.length] });
+  const [current, setCurrent] = useState<Slide>(() => slideAt(0));
+  const [leaving, setLeaving] = useState<Slide | null>(null);
 
   useEffect(() => {
-    if (!container.current) return;
-    let map: MapLibreMap;
-    try {
-      map = new MapLibreMap({
-        container: container.current,
-        style: MAP_STYLE,
-        center,
-        zoom: 13,
-        interactive: false,
-        // A dimmed decoration does not need retina sharpness or fade-in blending, and a full-screen canvas at
-        // 1.25x-2x pixel density is the expensive part of drawing it.
-        pixelRatio: 1,
-        fadeDuration: 0,
-        attributionControl: false,
-      });
-      map.addControl(new AttributionControl({ compact: true }), "bottom-right");
-    } catch {
-      return; // no WebGL: the dark page background stands in
-    }
-    // The credit starts expanded, which on a phone spans the whole width; fold it to its "i" button (one click away).
-    map.once("load", () => {
-      setReady(true);
-      const credit = container.current?.querySelector(".maplibregl-ctrl-attrib");
-      credit?.classList.remove("maplibregl-compact-show");
-      credit?.removeAttribute("open");
-    });
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || cities.length < 2) return;
+    // Fetch the map that comes next while this one is showing.
+    new Image().src = cities[(current.n + 1) % cities.length];
+    const change = window.setTimeout(() => {
+      setLeaving(current);
+      setCurrent(slideAt(current.n + 1));
+    }, SLIDE_MS);
+    return () => window.clearTimeout(change);
+    // `slideAt` only reads the shuffled lists, which never change: the next map is wanted exactly when the current one does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current]);
 
-    // The drift: ease up, then down, then up again, for as long as the page is open. Eased at each turn so it never jerks.
-    // Not started for someone who has asked for reduced motion (the map then simply stays where it is); and it is a
-    // chain of single moves, each started when the last one ends, so removing the map ends it.
-    let direction = 1;
-    let removed = false;
-    const drift = () => {
-      if (removed) return;
-      map.easeTo({
-        center: [center[0], center[1] + direction * DRIFT_DEGREES],
-        duration: DRIFT_SWEEP_MS,
-        easing: (t) => -(Math.cos(Math.PI * t) - 1) / 2,
-        essential: true,
-      });
-      direction = -direction;
-    };
-    const canDrift = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (canDrift) {
-      map.once("load", () => {
-        map.on("moveend", drift);
-        drift();
-      });
-    }
-    return () => {
-      removed = true;
-      map.off("moveend", drift);
-      map.remove();
-    };
-  }, [center]);
-
-  // The map's own stylesheet gives its element `position: relative` (and, being unlayered, it beats Tailwind's
-  // utilities), so the element that fills the page is a wrapper and the map fills that.
-  // Off screen, take the map out of compositing altogether: it costs nothing to draw, but a WebGL layer under a
-  // scrolling page is still composited on every frame.
+  // Once the fade is over the map that left is taken away. (Its own effect: the one above re-runs, and cleans up, on every change.)
   useEffect(() => {
-    const el = wrapper.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(([entry]) => {
-      el.style.display = entry.isIntersecting ? "" : "none";
-    });
-    observer.observe(el.parentElement ?? el);
-    return () => observer.disconnect();
-  }, []);
+    if (!leaving) return;
+    const gone = window.setTimeout(() => setLeaving(null), FADE_MS + 200);
+    return () => window.clearTimeout(gone);
+  }, [leaving]);
+
+  const layer = (s: Slide, role: "current" | "leaving") => (
+    <div
+      key={s.n}
+      data-slide={role}
+      className={`absolute inset-0 ${role === "current" && s.n > 0 ? "map-fade-in" : ""}`}
+    >
+      <img
+        src={s.src}
+        alt=""
+        width={1600}
+        height={1000}
+        fetchPriority={s.n === 0 ? "high" : "auto"}
+        decoding="async"
+        style={{ "--dx": s.direction.dx, "--dy": s.direction.dy } as CSSProperties}
+        className="map-drift absolute -inset-[9%] h-[118%] w-[118%] max-w-none object-cover"
+      />
+    </div>
+  );
 
   return (
-    <div
-      ref={wrapper}
-      className={`pointer-events-none absolute inset-0 transition-opacity duration-1000 motion-reduce:transition-none ${ready ? "opacity-100" : "opacity-0"}`}
-      aria-hidden="true"
-    >
-      <div ref={container} className="h-full w-full" />
+    <div className="pointer-events-none absolute inset-0 overflow-hidden bg-[#0b0a14]" aria-hidden="true">
+      {leaving && layer(leaving, "leaving")}
+      {layer(current, "current")}
     </div>
   );
 }

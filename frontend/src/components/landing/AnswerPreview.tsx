@@ -1,3 +1,4 @@
+import { ArrowDownTrayIcon, ArrowPathIcon, ArrowTopRightOnSquareIcon, ClipboardDocumentIcon, PrinterIcon, ScaleIcon } from "@heroicons/react/24/outline";
 import {
   CheckCircleIcon,
   ExclamationTriangleIcon,
@@ -107,7 +108,7 @@ export function AnswerPreview() {
   return (
     <figure className="m-0 mx-auto w-full max-w-5xl">
       <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#0d0b1a] shadow-2xl shadow-violet-950/50">
-        {/* the app's top bar: title and place on the left, change-location on the right */}
+        {/* the app's top bar: title and place on the left; saved places, compare and change-location on the right */}
         <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-white/[0.03] px-4 py-2.5">
           <div className="flex min-w-0 items-center gap-3">
             <span className="flex flex-shrink-0 gap-1.5">
@@ -122,11 +123,19 @@ export function AnswerPreview() {
               <MapPinIcon className="h-3 w-3 flex-shrink-0" aria-hidden="true" /> <span className="truncate">A place</span>
             </span>
           </div>
-          <span className="flex-shrink-0 rounded-full border border-white/15 px-3 py-1 text-[10.5px] text-white/55">Change location</span>
+          <span className="flex flex-shrink-0 items-center gap-1.5 text-[10.5px] text-white/55">
+            <span className="hidden h-6 w-6 items-center justify-center rounded-full border border-amber-400/40 text-amber-300 sm:flex">
+              <StarIcon className="h-3 w-3" aria-hidden="true" />
+            </span>
+            <span className="hidden h-6 w-6 items-center justify-center rounded-full border border-white/15 sm:flex">
+              <ScaleIcon className="h-3 w-3" aria-hidden="true" />
+            </span>
+            <span className="rounded-full border border-white/15 px-3 py-1">Change location</span>
+          </span>
         </div>
 
         {/* Only the top of the workspace is shown, fading out, so the preview is a glimpse and not a full page of it. */}
-        <div className="relative max-h-[420px] overflow-hidden md:max-h-[400px]">
+        <div className="relative max-h-[470px] overflow-hidden md:max-h-[452px]">
         <div className="grid gap-px bg-white/10 md:grid-cols-[0.8fr_1.6fr_0.8fr]">
           {/* the zoomed-in map, and where you ask */}
           <div className="hidden flex-col gap-4 bg-[#0d0b1a] p-4 md:flex">
@@ -137,6 +146,14 @@ export function AnswerPreview() {
               <Bar w="55%" />
               <span className="mt-1 self-end rounded-full bg-violet-500/70 px-3 py-1 text-[10px] font-semibold text-white">Ask →</span>
             </div>
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[10px] font-medium text-white/45">Try asking:</span>
+              {["78%", "92%", "64%"].map((w, i) => (
+                <span key={i} className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2">
+                  <Bar w={w} className="h-1.5" />
+                </span>
+              ))}
+            </div>
           </div>
 
           {/* the answer */}
@@ -144,12 +161,22 @@ export function AnswerPreview() {
             <PreviewBrowserTabs />
 
             {/* the answer's own tabs are underlined */}
-            <div className="flex gap-5 border-b border-white/10 text-[11px] font-medium text-white/45">
-              {["Overview", "Community", "Claims", "Evidence"].map((tab, i) => (
-                <span key={tab} className={`-mb-px border-b-2 px-0.5 pb-2 ${i === 0 ? "border-violet-400 text-violet-300" : "border-transparent"}`}>
-                  {tab}
-                </span>
-              ))}
+            <div className="flex items-end justify-between gap-3 border-b border-white/10 text-[11px] font-medium text-white/45">
+              <div className="flex gap-4">
+                {["Overview", "Community", "Claims", "Evidence", "Details"].map((tab, i) => (
+                  <span key={tab} className={`-mb-px border-b-2 px-0.5 pb-2 ${i === 0 ? "border-violet-400 text-violet-300" : "border-transparent"}`}>
+                    {tab}
+                  </span>
+                ))}
+              </div>
+              {/* print, download and copy: icon buttons at the right of the tabs */}
+              <div className="mb-1.5 hidden gap-1 sm:flex" aria-hidden="true">
+                {[PrinterIcon, ArrowDownTrayIcon, ClipboardDocumentIcon].map((Icon, i) => (
+                  <span key={i} className="flex h-5 w-5 items-center justify-center rounded-full border border-white/15 text-white/55">
+                    <Icon className="h-2.5 w-2.5" />
+                  </span>
+                ))}
+              </div>
             </div>
 
             <div className="rounded-xl border border-emerald-400/25 bg-emerald-400/[0.07] p-4">
@@ -181,17 +208,31 @@ export function AnswerPreview() {
 
           {/* live feed */}
           <div className="hidden flex-col gap-3 bg-[#0d0b1a] p-4 md:flex">
-            <span className="flex items-center gap-1.5 text-[11px] font-semibold text-white/70">
-              <span className="relative flex h-2 w-2" aria-hidden="true">
-                <span className="absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-70 motion-safe:animate-ping" />
-                <span className="live-blink relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+            {/* as in the app: the title, then the red dot after it, and the refresh button at the far right */}
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-2 text-[11px] font-semibold text-white/70">
+                Live feed
+                <span className="relative flex h-2 w-2" aria-hidden="true">
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-70 motion-safe:animate-ping" />
+                  <span className="live-blink relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+                </span>
               </span>
-              Live feed
-            </span>
+              <span className="flex h-5 w-5 items-center justify-center rounded-full border border-white/15 text-white/55" aria-hidden="true">
+                <ArrowPathIcon className="h-2.5 w-2.5" />
+              </span>
+            </div>
+            {/* kinds, as filter chips, then the timeline */}
+            <div className="flex flex-wrap gap-1" aria-hidden="true">
+              {["All", "News", "Business", "Safety"].map((chip, i) => (
+                <span key={chip} className={`rounded-full border px-2 py-0.5 text-[9px] ${i === 0 ? "border-violet-400 bg-violet-500 text-white" : "border-white/15 text-white/55"}`}>
+                  {chip}
+                </span>
+              ))}
+            </div>
             {["Now", "Today"].map((heading, group) => (
               <div key={heading} className="flex flex-col gap-2">
                 <span className="text-[9.5px] font-semibold tracking-wide text-white/40 uppercase">{heading}</span>
-                {[0, 1].map((n) => (
+                {(group === 0 ? [0, 1] : [0]).map((n) => (
                   <div key={n} className="flex flex-col gap-1.5 rounded-xl border border-white/10 bg-white/[0.03] p-2.5">
                     <div className="flex gap-1.5">
                       <Bar w={group === 0 && n === 0 ? "34%" : "28%"} className="h-2.5 bg-violet-400/25" />
@@ -203,6 +244,13 @@ export function AnswerPreview() {
                 ))}
               </div>
             ))}
+            {/* as in the app: "Show more" centred under the last card, then the link to Google News' own results in the right-hand corner */}
+            <span className="self-center rounded-full border border-white/15 px-3 py-1 text-[10px] font-medium text-white/60" aria-hidden="true">
+              Show 8 more
+            </span>
+            <span className="flex items-center gap-1 self-end text-[10px] text-violet-300/80" aria-hidden="true">
+              See more on Google News <ArrowTopRightOnSquareIcon className="h-2.5 w-2.5" />
+            </span>
           </div>
         </div>
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-[#0d0b1a] to-transparent" aria-hidden="true" />

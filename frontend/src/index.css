@@ -169,6 +169,102 @@ body {
   background: radial-gradient(circle at 100% 0, transparent var(--tab-radius), var(--tab-active) calc(var(--tab-radius) + 0.5px));
 }
 
+/* The search page's backdrop maps drift on a sine path: it starts in the middle of a sweep, already moving, and slows only as it turns,
+   so it never sits still. `--dx` and `--dy` (set on each map) say which way: 1 and 0 is horizontal, 0 and 1.6 vertical, and both
+   together a diagonal (1.6 vertically so a vertical drift covers about the same distance as a horizontal one on a wide screen).
+   52 s a cycle is about 5 px a second, the pace the old live map had. Still for anyone who has asked for reduced motion. */
+@keyframes map-drift {
+  0% {
+    transform: translate3d(calc(var(--dx) * 0.0%), calc(var(--dy) * 0.0%), 0);
+  }
+  5% {
+    transform: translate3d(calc(var(--dx) * 1.24%), calc(var(--dy) * 1.24%), 0);
+  }
+  10% {
+    transform: translate3d(calc(var(--dx) * 2.35%), calc(var(--dy) * 2.35%), 0);
+  }
+  15% {
+    transform: translate3d(calc(var(--dx) * 3.24%), calc(var(--dy) * 3.24%), 0);
+  }
+  20% {
+    transform: translate3d(calc(var(--dx) * 3.8%), calc(var(--dy) * 3.8%), 0);
+  }
+  25% {
+    transform: translate3d(calc(var(--dx) * 4.0%), calc(var(--dy) * 4.0%), 0);
+  }
+  30% {
+    transform: translate3d(calc(var(--dx) * 3.8%), calc(var(--dy) * 3.8%), 0);
+  }
+  35% {
+    transform: translate3d(calc(var(--dx) * 3.24%), calc(var(--dy) * 3.24%), 0);
+  }
+  40% {
+    transform: translate3d(calc(var(--dx) * 2.35%), calc(var(--dy) * 2.35%), 0);
+  }
+  45% {
+    transform: translate3d(calc(var(--dx) * 1.24%), calc(var(--dy) * 1.24%), 0);
+  }
+  50% {
+    transform: translate3d(calc(var(--dx) * 0.0%), calc(var(--dy) * 0.0%), 0);
+  }
+  55% {
+    transform: translate3d(calc(var(--dx) * -1.24%), calc(var(--dy) * -1.24%), 0);
+  }
+  60% {
+    transform: translate3d(calc(var(--dx) * -2.35%), calc(var(--dy) * -2.35%), 0);
+  }
+  65% {
+    transform: translate3d(calc(var(--dx) * -3.24%), calc(var(--dy) * -3.24%), 0);
+  }
+  70% {
+    transform: translate3d(calc(var(--dx) * -3.8%), calc(var(--dy) * -3.8%), 0);
+  }
+  75% {
+    transform: translate3d(calc(var(--dx) * -4.0%), calc(var(--dy) * -4.0%), 0);
+  }
+  80% {
+    transform: translate3d(calc(var(--dx) * -3.8%), calc(var(--dy) * -3.8%), 0);
+  }
+  85% {
+    transform: translate3d(calc(var(--dx) * -3.24%), calc(var(--dy) * -3.24%), 0);
+  }
+  90% {
+    transform: translate3d(calc(var(--dx) * -2.35%), calc(var(--dy) * -2.35%), 0);
+  }
+  95% {
+    transform: translate3d(calc(var(--dx) * -1.24%), calc(var(--dy) * -1.24%), 0);
+  }
+  100% {
+    transform: translate3d(calc(var(--dx) * -0.0%), calc(var(--dy) * -0.0%), 0);
+  }
+}
+
+.map-drift {
+  animation: map-drift 52s linear infinite;
+  will-change: transform;
+}
+
+/* The next map fades in over the one leaving, which stays underneath until it is done, so the page is never without a map. */
+@keyframes map-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.map-fade-in {
+  animation: map-fade-in 2.5s ease-in-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-drift,
+  .map-fade-in {
+    animation: none;
+  }
+}
+
 /* The live feed's red dot: it blinks. Steady for anyone who has asked for reduced motion. */
 @keyframes live-blink {
   0%,

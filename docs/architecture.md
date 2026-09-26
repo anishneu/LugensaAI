@@ -532,7 +532,7 @@ All eight milestones from the original project plan are implemented, plus later 
   rendered once from OpenFreeMap's style of OpenStreetMap data (a one-off capture; the first attempt came out blank because it
   read the canvas before the tiles had loaded, the same failure in miniature), 254 KB, so the page has nothing moving or
   re-drawing. The workspace preview under the hero was cut to the top of the layout with a fade, since showing all of it made it
-  taller than the screen. The search page keeps a live map and now drifts up and down slowly on its own (26 s a sweep, eased
+  taller than the screen. (Superseded in Milestone 37: the search page's map is now an image.) The search page keeps a live map and now drifts up and down slowly on its own (26 s a sweep, eased
   at each turn, off for reduced motion) and fades in when its first frame is drawn, so the grey wait is not seen.
 - **Milestone 27:** four things from a review of the running product. (1) **Reddit had disappeared from the feed and the
   Community tab.** Measured against the live API (Erfurt): `include_domains=["reddit.com"]` at basic depth returns
@@ -680,3 +680,82 @@ All eight milestones from the original project plan are implemented, plus later 
   (no search key, so no credit spent), with the four-minute model wait time-lapsed 30 times; it is a truthful demo and a modest one, since
   with no web search the answer is thin, the one claim the model made was flagged insufficient because its wording was not in its cited
   source, and the Details tab lists what was not searched.
+- **Milestone 37:** a round of fixes from use. *Backdrops:* the landing map was Tokyo and the search page's a random world city;
+  both became an image of Midtown Manhattan (Milestone 38 gave the landing page its own close-up). The search page's map had been a live one that showed seconds after everything else
+  (it waited on tile requests and WebGL); it is now that image, present with the page and drifting on a diagonal by CSS. *Live feed:*
+  the news was already Google News' public RSS; it now links to Google News' own results, and the intro no longer says "No politics".
+  *Multiple questions in one prompt:* before, the whole prompt went through as one string, so the plan's topics covered every question
+  but nothing made the answer address each or say which one the evidence could not answer. `split_prompt` (plain rules, cautious: a
+  sentence typed with a question mark but starting like a statement, "I heard a great deal about it?", is context, not a question)
+  now finds the questions, the trace says how many, and the writer is told to answer each in a numbered paragraph and to say so for
+  any it cannot. Checked on the real model with a three-part prompt: it answered the two questions in numbered paragraphs and dealt
+  with the third, a mistyped statement, honestly ("Food expense levels were not addressed in the evidence"). This does not split the
+  *research* per question. *Saved places:* they were only listed on the search page, which is not where anyone looks after saving;
+  the star is now a menu with the list, a count and remove. *Export:* the three text buttons became icons with tooltips at the right of
+  the tab row, and the tab spacing was tightened because at 1280 px the tabs and icons no longer fit together. *Compare* is centred.
+  *The "what it is doing" panel* showed a growing step list, a bar, timing and two paragraphs at once; it now shows the timing and the
+  current step, with the rest behind a link. *The Hugging Face warning* ("unauthenticated requests to the HF Hub") came from checking
+  the Hub for the small search model on every start; a model already on the machine is now loaded from it, quietly and in 0.2 s, and
+  fetched only the first time. Tests: 561 backend, 42 frontend (23 in a browser, 19 plain unit tests).
+- **Milestone 38:** three things from looking at Milestone 37 in use. *Landing map:* a close-up of Midtown Manhattan (zoom 14.7,
+  rendered at 2x) with street names, transit stops and building shading; zoom 15.3 was tried first and was too heavy, with dark 3D
+  building sides everywhere. The search page keeps the wider image. *The drift:* the diagonal drift used CSS `ease-in-out` between two
+  ends of a sweep, so it crept for several seconds before it seemed to move, and at 48 s a sweep it was about half the pace of the old
+  live map, which is the pace that was liked. It is now a sine path traced in 21 keyframes, linear between them, that starts mid-sweep
+  and already moving (52 s a cycle, about 5 px a second); a test asserts it has moved more than 5 px on both axes within two seconds
+  of load. *"Box inside a box":* the agent panel was a card containing a bordered current-step box and a bordered step list; the
+  current step is now two plain lines and the history a timeline, so the card is the only container. Tests: 42 frontend, 561 backend.
+- **Milestone 39:** more from use. *Landing map:* zoom 14.7 was too close and dense, so it is now zoom 14.1 (street names and transit
+  stops, without every building shaded), re-encoded from 719 KB to 442 KB. *Landing preview card:* the drawn workspace on the landing
+  page was still the Milestone 22 layout; it now shows the top bar as it is (Saved, Compare, Change location), a Details tab, the
+  print, download and copy icons at the right of the tabs, and the feed's filter chips. *Search backdrop:* the wish was for what the
+  live map gave (a different city each visit, street level) without the wait it caused. So the live map is not back: eleven world
+  cities are drawn in advance as street-level images, one is picked at random per visit, and only that one is downloaded (about 175 KB;
+  the folder is read with `import.meta.glob` for addresses only). Tests: 43 frontend (24 in a browser, 19 plain unit), 561 backend.
+  The new backdrop test first counted Vite's per-file address modules as downloads in development and then timed out under load with
+  the other tests running; both were the test's fault, not the page's.
+- **Milestone 40:** four more fixes from use. *Landing map:* still "3D and messy" after two zoom changes, because the cause was not the
+  zoom: the map style draws buildings as extruded 3D shapes from about zoom 14, and their dark sides under the headline read as a
+  tilted mess. The image is now drawn with that layer removed (flat, 2D), at zoom 14.1, and is smaller (308 KB). *Search backdrop:*
+  one map per visit became a slideshow: the maps rotate by themselves every 26 s with a 2.5 s crossfade, the next one fetched while the
+  current shows so a change never waits, and the drift direction cycles through across, up and down, and both diagonals (vertical
+  scaled 1.6 so it covers about as much ground as horizontal). Writing the test found a real bug: the timer that removes the map that has
+  faded out was in the same effect as the slide timer, and that effect's cleanup cancelled it on every change, so the old layer would
+  have stayed underneath forever. *Top bar:* Saved places and Compare are icons only, with tooltips; the landing preview card matches.
+  *Duplicated location:* the line under a place's name repeated the city ("Chi-Joan How, Boston" over "Boston, Massachusetts, United
+  States"); it now leaves out what the name already says. (The report said "the country locations is duplicated" and its screenshot
+  did not arrive, so this is the repeat visible in earlier screenshots; if another is meant, it is not fixed.) Tests: 49 frontend (27 in
+  a browser, 22 plain unit), 561 backend.
+- **Milestone 41:** the "duplicated country" was in the search suggestions, not the top bar (Milestone 40 guessed the wrong one; the
+  top bar's repeated city was a real repeat too, and that fix stays). Typing "germany" listed Germany twice. Two causes, both found
+  with a live query: `/api/places/search` puts Google's results first and drops OpenStreetMap entries within 150 m of one, and Google's
+  "Germany" and OpenStreetMap's are hundreds of kilometres apart, so both survived; and OpenStreetMap alone returns "Paris, Ile-de-France,
+  Metropolitan France, France" three times (the city, the department, its boundary). The route now keeps each full name once, the first
+  (Google's) winning; places that share only a short name keep their own addresses, so every Starbucks is still there, and a different
+  Paris (Texas) is still offered. The box also filters rows that would look identical. The live feed's Google News link moved to the
+  right-hand corner. Tests: 563 backend, 50 frontend (28 in a browser, 22 plain unit).
+  *Landing preview card (later the same day):* about 30 px taller (452 px on desktop, was 400), with the suggested questions under the
+  question box and the feed ending in "See more on Google News" in its right-hand corner, so the drawing matches the workspace.
+- **Milestone 42:** three things noticed in use. *The pin map looked 3D:* nothing about it had changed (`MapPanel.tsx` was last edited on
+  20 September), but it uses the same OpenFreeMap "liberty" style as the landing map, which draws buildings as raised shapes from about
+  zoom 14, and the pin map's zoom is 16.2. It is now flattened the same way: `flattenMap` (`mapFlat.ts`) removes the style's
+  `fill-extrusion` layers when the style loads, and the flat outlines, streets, names and stops stay. Checked on the real map with real
+  tiles. *No space under the last suggested question:* the left column scrolls, and the sidebar box was allowed to shrink to fit it,
+  so its content spilled out of the box and its bottom padding was lost (the fix is `shrink-0`; a test scrolls the column to the end
+  and asserts at least 16 px under the last suggestion, and was checked to fail without the fix). *The landing card's feed ended
+  differently from the app's:* the app has the cards, then a centred "Show N more" button, then the Google News link in the right corner;
+  the card had the link without the button. It now has both, and "Try asking:" carries its colon as in the app. Tests: 563 backend, 53
+  frontend (29 in a browser, 24 plain unit).
+
+- **Milestone 43:** two things left over from the last round. *A tooltip showed behind the open Saved-places menu:* the star button's
+  "Saved places" label kept showing while its menu was open and peeked out from behind it; the label is now not rendered while the
+  menu is open (a test checks it is gone then and back after). *The landing card's live-feed header had the red dot on the wrong
+  side:* the app has "Live feed", then the dot, with the refresh button at the far right; the card had the dot first. It now matches
+  (a test checks the order in both places, and both new tests were checked to fail on the old code). Tests: 563 backend, 56 frontend
+  (32 in a browser, 24 plain unit).
+  A follow-up: the top bar's tooltips (Saved places, Compare) were lined up with their button's right edge, so on these small buttons
+  they hung off to the left; they are now centred under the button (a test checks it). Frontend is now 57 tests (33 in a browser).
+  *Images refreshed:* `docs/images/workspace.jpg` and `docs/images/demo.gif` were re-taken from a new real run (Harvard Square, "Is it a
+  good place to visit as a tourist?", free mode with no search or Google key, so no credit spent) so they show the current top bar, agent
+  panel and live feed. The answer is a thin, honest one for the same reason as before (no web search: mixed/partial evidence, 1 of 4
+  topics supported); the model wait is time-lapsed 30 times in the GIF (4.2 MB).

@@ -35,3 +35,12 @@ def test_a_listener_that_raises_does_not_stop_or_change_the_run():
 
     assert [s.description for s in with_listener.research_trace] == [s.description for s in without.research_trace]
     assert with_listener.summary == without.summary
+
+
+def test_a_prompt_with_several_questions_says_so_in_the_trace_and_a_single_question_does_not():
+    several = fixture_agent().run(PLACE, "Is it safe? I hear the nightlife is loud. How is the food?")
+    one = fixture_agent().run(PLACE, QUESTION)
+
+    step = next(s for s in several.research_trace if "questions, each to be answered on its own" in s.description)
+    assert "Is it safe? | How is the food?" in step.description
+    assert not any("questions, each to be answered" in s.description for s in one.research_trace)

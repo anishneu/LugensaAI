@@ -153,7 +153,8 @@ export function ComparePlaces({ open, onClose, place, defaultQuestion }: Compare
   return (
     <Dialog open={open} onClose={onClose} className="relative z-50">
       <DialogBackdrop transition className="fixed inset-0 bg-black/60 duration-150 data-[closed]:opacity-0" />
-      <div className="fixed inset-0 flex items-start justify-center overflow-y-auto p-4 sm:p-8">
+      <div className="fixed inset-0 overflow-y-auto">
+      <div className="flex min-h-full items-center justify-center p-4 sm:p-8">
         <DialogPanel
           transition
           className="w-full max-w-6xl rounded-3xl border border-[var(--border)] bg-[var(--bg)] p-5 shadow-2xl duration-150 data-[closed]:scale-95 data-[closed]:opacity-0 sm:p-7"
@@ -280,6 +281,7 @@ export function ComparePlaces({ open, onClose, place, defaultQuestion }: Compare
             </div>
           )}
         </DialogPanel>
+      </div>
       </div>
     </Dialog>
   );

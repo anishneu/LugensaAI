@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowPathIcon, ClockIcon, MapPinIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon, ArrowTopRightOnSquareIcon, ClockIcon, MapPinIcon } from "@heroicons/react/24/outline";
 import { fetchCapabilities, fetchLiveFeed, ResearchApiError } from "../api";
 import { absoluteTimeFrom, evidenceText, relativeTimeFrom } from "../textUtils";
 import { TranslationNote } from "./TranslationNote";
+import { googleNewsSearchUrl } from "../maps";
 import { SOURCE_TYPE_ICON } from "../sourceTypeIcon";
 import type { ActiveLocation, Evidence } from "../types";
 
@@ -247,7 +248,7 @@ export function LiveFeedSidebar({ location }: LiveFeedSidebarProps) {
         </div>
         <p className="m-0 text-xs leading-relaxed text-[var(--text-muted)]">
           New in the last 30 days: news, safety, accidents, business, events and community posts. Anything at or near the place comes
-          first, and the city only when there is nothing there. No politics.
+          first, and the city only when there is nothing there.
         </p>
         {lastUpdated && <p className="m-0 text-[10.5px] text-[var(--text-muted)]">{loading ? "Refreshing…" : `Updated ${relativeTimeFrom(lastUpdated)}`}</p>}
       </div>
@@ -295,6 +296,16 @@ export function LiveFeedSidebar({ location }: LiveFeedSidebarProps) {
           ) : (
             <Timeline key={`${active ?? "all"}-${feed.length}`} items={shown} nowMs={nowMs} />
           )}
+          <a
+            href={googleNewsSearchUrl(location)}
+            target="_blank"
+            rel="noreferrer"
+            className="flex w-fit items-center gap-1.5 self-end text-xs font-medium text-[var(--accent)] hover:underline"
+            title="The feed's news comes from Google News' public feed, which lists headlines. This opens Google News' own results for the place."
+          >
+            See more on Google News
+            <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" aria-hidden="true" />
+          </a>
         </>
       )}
     </div>

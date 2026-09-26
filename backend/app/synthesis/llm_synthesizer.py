@@ -126,6 +126,21 @@ def _format_claims(claims: list[Claim]) -> str:
     return "\n".join(lines) if lines else "(no claims were verified)"
 
 
+def _several_questions(questions: list[str] | None) -> str:
+    """The instruction added when one message holds more than one question, so none is skipped and none is quietly answered
+    with what the evidence does not say. Empty for the normal case of one question."""
+    if not questions or len(questions) < 2:
+        return ""
+    numbered = "\n".join(f"{i}. {q}" for i, q in enumerate(questions, start=1))
+    return (
+        f"The user asked {len(questions)} separate questions in this one message. Answer every one of them, in order:\n"
+        f"{numbered}\n"
+        'In "details", give each question its own paragraph that begins with its number ("1.", "2."). If the evidence cannot '
+        "answer one of them, say so for that question by number; never skip one and never fill the gap with a guess. "
+        "The summary should touch on all of them.\n\n"
+    )
+
+
 def _format_evidence(evidence: list[Evidence], question: str = "", place_name: str = "") -> str:
     terms = query_terms(question, place_name)
     by_topic: dict[str, list[Evidence]] = {}
@@ -177,10 +192,11 @@ class LLMSynthesizer(Synthesizer):
         claims: list[Claim],
         evidence: list[Evidence],
         topics_with_evidence: set[str] | None = None,
+        questions: list[str] | None = None,
     ) -> SynthesisResult:
         try:
             summary, key_findings, details, recommendation = self._draft_with_llm(
-                location, question, claims, evidence
+                location, question, claims, evidence, questions
             )
         except (LLMServiceError, ValueError) as exc:
             fallback_result = self._fallback.synthesize(location, question, plan, claims, evidence, topics_with_evidence)
@@ -200,12 +216,18 @@ class LLMSynthesizer(Synthesizer):
         )
 
     def _draft_with_llm(
-        self, location: Location, question: str, claims: list[Claim], evidence: list[Evidence]
+        self,
+        location: Location,
+        question: str,
+        claims: list[Claim],
+        evidence: list[Evidence],
+        questions: list[str] | None = None,
     ) -> tuple[str, list[str], str, str]:
         location_label = f"{location.name}, {location.city}, {location.region}".strip(", ")
         user_prompt = (
             f"Location: {location_label}\n"
             f'Question: "{question}"\n\n'
+            f"{_several_questions(questions)}"
             f"Verified claims:\n{_format_claims(claims)}\n\n"
             f"Raw evidence excerpts:\n{_format_evidence(evidence, question, location.name)}\n\n"
             f"Respond with JSON matching exactly this shape:\n{_RESPONSE_SHAPE}"

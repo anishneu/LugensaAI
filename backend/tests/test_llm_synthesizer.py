@@ -141,3 +141,31 @@ def test_strips_html_a_small_local_model_wraps_prose_in():
     assert result.summary == "Reviews are mixed."
     assert result.key_findings == ["Mixed reviews"]
     assert result.details == "First point.\n\nSecond & third point."
+
+
+# ---- several questions in one message
+
+_GOOD = json.dumps({"summary": "s", "key_findings": [], "details": "d", "recommendation": "r"})
+
+
+def test_several_questions_are_numbered_for_the_model_and_it_is_told_not_to_skip_one():
+    llm = ScriptedLLMService(responses=[_GOOD])
+    LLMSynthesizer(llm).synthesize(
+        _location(), "How is the university? How often do people get co-ops?", _plan(), [_claim()], _evidence(), {"housing"},
+        questions=["How is the university?", "How often do people get co-ops?"],
+    )
+
+    prompt = llm.calls[0][1]
+    assert "asked 2 separate questions" in prompt
+    assert "1. How is the university?" in prompt and "2. How often do people get co-ops?" in prompt
+    assert "never skip one" in prompt
+
+
+def test_one_question_is_asked_exactly_as_before():
+    llm = ScriptedLLMService(responses=[_GOOD, _GOOD])
+    synth = LLMSynthesizer(llm)
+    synth.synthesize(_location(), "Is it safe?", _plan(), [_claim()], _evidence(), {"housing"})
+    synth.synthesize(_location(), "Is it safe?", _plan(), [_claim()], _evidence(), {"housing"}, questions=["Is it safe?"])
+
+    for _, prompt in llm.calls:
+        assert "separate questions" not in prompt

@@ -532,8 +532,11 @@ Full reasoning for each choice is in [`docs/architecture.md`](docs/architecture.
   counts what each run found: sources, kinds of source, supported and contradicted claims, limitations. It deliberately says
   nothing about which place is better, because nothing in the sources decides that. "Download report" saves an answer, or the
   comparison, as Markdown built in the browser from what is on screen (claims with the sources they rest on, limitations, a
-  numbered source list); nothing is sent anywhere. The star saves a place in this browser only, and saved places wait on the
-  search page.
+  numbered source list); nothing is sent anywhere. The star opens a menu of saved places (kept in this browser only) to open or
+  remove them.
+- **More than one question at a time** — a prompt with several questions ("Is it safe? How is the food?") is split, the trace says
+  so, and the answer is asked to address each in its own numbered paragraph and to say which one the evidence could not answer. A
+  statement typed with a question mark is treated as context. The research itself is planned from the whole prompt.
 - **Honest degradation** — every fallback (no LLM, no live search, an API failure, an
   off-topic result filtered out) is recorded in the response's `limitations`, not hidden.
 - **A real evaluation, not just a plan** — [`docs/evaluation.md`](docs/evaluation.md) has actual
@@ -607,7 +610,7 @@ LugensaAI/
 │   │   │                  Reddit archive, Google News RSS, translation; plus live_feed.py and feed_topics.py
 │   │   └── verification/  deterministic claim verifier and contradiction check
 │   ├── evaluation/        the runnable benchmark from docs/evaluation.md
-│   └── tests/             offline, deterministic pytest suite (547 tests)
+│   └── tests/             offline, deterministic pytest suite (563 tests)
 ├── frontend/
 │   └── src/
 │       ├── pages/         LandingPage, ResearchWorkspace
@@ -622,10 +625,10 @@ See [`backend/README.md`](backend/README.md) for the backend's internal layout.
 
 ```bash
 cd backend
-pytest          # 547 tests
+pytest          # 563 tests
 cd ../frontend
 npm run lint && npx tsc -b && npm run build
-npm run test:e2e   # 33 tests: 16 in a browser, 17 plain unit tests (PW_CHANNEL=msedge uses an installed browser; otherwise `npx playwright install chromium`)
+npm run test:e2e   # 57 tests: 33 in a browser, 24 plain unit tests (PW_CHANNEL=msedge uses an installed browser; otherwise `npx playwright install chromium`)
 ```
 
 The backend suite is free, offline, and deterministic by construction (its invented sample sources live

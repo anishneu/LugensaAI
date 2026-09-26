@@ -175,8 +175,11 @@ export function ResearchWorkspace() {
           <TopNav
             location={location}
             onChangeLocation={() => setLocation(null)}
-            saved={saved.some((entry) => placeKey(entry.location) === placeKey(location))}
+            saved={saved}
+            isSaved={saved.some((entry) => placeKey(entry.location) === placeKey(location))}
             onToggleSaved={() => setSaved(toggleSavedPlace(location))}
+            onOpenSaved={selectLocation}
+            onRemoveSaved={(key) => setSaved(removeSavedPlace(key))}
             onCompare={() => setCompareOpen(true)}
           />
           <ComparePlaces
