@@ -10,8 +10,13 @@ test.describe("saved places", () => {
     await mockBackend(page);
     await openWorkspace(page);
 
+    // The star opens the saved-places menu: save this place from there, and see the list.
+    await page.getByRole("button", { name: /^Saved places/ }).click();
     await page.getByRole("button", { name: "Save this place" }).click();
-    await expect(page.getByRole("button", { name: "Remove from saved places" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: "Remove this place from saved" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: /^Saved places \(1\)/ })).toBeVisible();
+    await expect(page.getByRole("list").getByText("Harvard Square, Cambridge")).toBeVisible();
+    await page.keyboard.press("Escape");
 
     await page.getByRole("button", { name: "Change location" }).click();
     const saved = page.getByRole("region", { name: "Saved places" });
@@ -23,7 +28,9 @@ test.describe("saved places", () => {
 
     await page.getByRole("region", { name: "Saved places" }).getByRole("button", { name: "Harvard Square, Cambridge", exact: true }).click();
     await expect(page.getByPlaceholder(QUESTION_BOX)).toBeVisible();
-    await expect(page.getByRole("button", { name: "Remove from saved places" })).toBeVisible(); // still marked as saved
+    await page.getByRole("button", { name: /^Saved places/ }).click();
+    await expect(page.getByRole("button", { name: "Remove this place from saved" })).toBeVisible(); // still marked as saved
+    await page.keyboard.press("Escape");
 
     await page.getByRole("button", { name: "Change location" }).click();
     await page.getByRole("button", { name: "Remove Harvard Square, Cambridge from saved places" }).click();

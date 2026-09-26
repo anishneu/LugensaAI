@@ -169,6 +169,87 @@ body {
   background: radial-gradient(circle at 100% 0, transparent var(--tab-radius), var(--tab-active) calc(var(--tab-radius) + 0.5px));
 }
 
+/* The search page's backdrop map drifts along a diagonal, back and forth, on a sine path: it starts in the middle of a sweep,
+   already moving, and slows only as it turns, so it never sits still. 52 s a full cycle (about 5 px a second on average, the pace the
+   old live map had). The keyframes trace the sine by hand because CSS easing per segment would slow it to a stop at each end of a
+   step and, at the start, make it look frozen for several seconds. Still for anyone who has asked for reduced motion. */
+@keyframes map-drift {
+  0% {
+    transform: translate3d(0.0%, 0.0%, 0);
+  }
+  5% {
+    transform: translate3d(1.24%, 1.24%, 0);
+  }
+  10% {
+    transform: translate3d(2.35%, 2.35%, 0);
+  }
+  15% {
+    transform: translate3d(3.24%, 3.24%, 0);
+  }
+  20% {
+    transform: translate3d(3.8%, 3.8%, 0);
+  }
+  25% {
+    transform: translate3d(4.0%, 4.0%, 0);
+  }
+  30% {
+    transform: translate3d(3.8%, 3.8%, 0);
+  }
+  35% {
+    transform: translate3d(3.24%, 3.24%, 0);
+  }
+  40% {
+    transform: translate3d(2.35%, 2.35%, 0);
+  }
+  45% {
+    transform: translate3d(1.24%, 1.24%, 0);
+  }
+  50% {
+    transform: translate3d(0.0%, 0.0%, 0);
+  }
+  55% {
+    transform: translate3d(-1.24%, -1.24%, 0);
+  }
+  60% {
+    transform: translate3d(-2.35%, -2.35%, 0);
+  }
+  65% {
+    transform: translate3d(-3.24%, -3.24%, 0);
+  }
+  70% {
+    transform: translate3d(-3.8%, -3.8%, 0);
+  }
+  75% {
+    transform: translate3d(-4.0%, -4.0%, 0);
+  }
+  80% {
+    transform: translate3d(-3.8%, -3.8%, 0);
+  }
+  85% {
+    transform: translate3d(-3.24%, -3.24%, 0);
+  }
+  90% {
+    transform: translate3d(-2.35%, -2.35%, 0);
+  }
+  95% {
+    transform: translate3d(-1.24%, -1.24%, 0);
+  }
+  100% {
+    transform: translate3d(-0.0%, -0.0%, 0);
+  }
+}
+
+.map-drift {
+  animation: map-drift 52s linear infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-drift {
+    animation: none;
+  }
+}
+
 /* The live feed's red dot: it blinks. Steady for anyone who has asked for reduced motion. */
 @keyframes live-blink {
   0%,

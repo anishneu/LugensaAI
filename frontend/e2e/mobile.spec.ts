@@ -49,7 +49,7 @@ test("the place's name still shows on a phone, with save, compare and change all
   await mockBackend(page);
   await openWorkspace(page);
   await expect(page.getByText("Harvard Square, Cambridge").first()).toBeVisible();
-  for (const name of ["Save this place", "Compare with another place", "Change location"]) {
+  for (const name of [/^Saved places/, "Compare with another place", "Change location"]) {
     await expect(page.getByRole("button", { name })).toBeVisible();
   }
 });

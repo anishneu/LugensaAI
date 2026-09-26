@@ -17,8 +17,8 @@ needed anywhere: the map is MapLibre GL over free [OpenFreeMap](https://openfree
   rules would silently override text-colour utilities.
 - **Headless UI** for the interactive pieces that need real accessibility: `Tab` (the answer's underlined tabs and the browser-style place tabs), `Popover` (opening hours), `Dialog` (the "Around this pin" detail pop-up), `Disclosure` (the research trace). The place search
   box is hand-written (keyboard-navigable list). **Heroicons** for icons.
-- **MapLibre GL** for both maps (`MapPanel.tsx` for the pin, `MapBackdrop.tsx` behind the search box), each
-  lazy-loaded. They always use OpenFreeMap's light style, also in dark mode: its dark style rendered as
+- **MapLibre GL** for the map beside the question (`MapPanel.tsx`), lazy-loaded (the backdrops on the landing and search pages
+  are images, see below). They always use OpenFreeMap's light style, also in dark mode: its dark style rendered as
   near-black with unreadable labels, and a map is something to read. Vite needs the worker URL set explicitly
   (`mapSetup.ts`, `setWorkerUrl(... ?worker&url)`): left to itself MapLibre looks for its worker next to the
   bundled library, does not find it, and the map stays blank with no error. One more MapLibre trap: its
@@ -28,9 +28,8 @@ needed anywhere: the map is MapLibre GL over free [OpenFreeMap](https://openfree
 
 There is no animation library and no 3D library. Both were tried (framer-motion transitions, and a three.js
 globe on the search screen) and removed: the transitions added nothing a CSS `transition` doesn't, and the globe
-was decoration that cost about 130 KB gzipped. The search screen is back to a live street-map backdrop, a different
-world city each visit, under a dark overlay, drifting slowly up and down on its own (about 26 s a sweep, eased at each
-turn; not started for anyone with reduced motion set) and fading in once it has drawn its first frame. The landing page
+was decoration that cost about 130 KB gzipped. (The search screen's live-map backdrop, a different world city each visit, was later replaced by an image: see "Backdrop maps"
+below.) The landing page
 has no moving map at all. What else moves is a CSS `transition` on hover and focus, the spinner and the progress bar
 while a question runs.
 
@@ -49,7 +48,7 @@ local-dev setting, not a production policy.
 ## Pages
 
 - **Landing (`/`)** — a dark, single-page product page (`pages/LandingPage.tsx`, with `components/landing/`): a sticky
-  nav with the app button at the far right; a hero over a **still image** of a street map (`assets/landing-map.webp`, 254 KB, rendered once
+  nav with the app button at the far right; a hero over a **still image** of a street map (`assets/landing-map.webp`, Midtown Manhattan close up, 719 KB, rendered once
   from OpenFreeMap's style of OpenStreetMap data and dimmed under a gradient). It is an image because the live map beneath
   the landing page could come up blank on a refresh or a first visit, and it is decoration; the footer credits the map data
   in general terms (OpenStreetMap contributors), and every map inside the app keeps its own credit control. Two buttons, with no search box, because the app opens on one; a preview of the workspace's layout
@@ -66,7 +65,7 @@ local-dev setting, not a production policy.
 - **Workspace (`/app`)** — the search screen, then the research view. Arriving from the landing page it opens
   straight on the place chosen there (router state: `location`, or `submitQuery` for typed text, plus an optional
   `question` that is put in the question box and never run for you; the search screen says a question is waiting):
-  - A **search** screen (`SearchHero`) over a live, slowly drifting street-map backdrop (`MapBackdrop`) and a live place search (`LocationSearchInput`, from
+  - A **search** screen (`SearchHero`) over a slowly drifting street-map image (`MapBackdrop`) and a live place search (`LocationSearchInput`, from
     `GET /api/places/search`, debounced 350 ms, min 3 characters) — any real business or address, not just
     a neighborhood. Picking one exact result passes its coordinates straight through on every subsequent
     question, so the backend never has to re-resolve the name as text (see `../backend/README.md`'s POI
@@ -186,14 +185,35 @@ While a question runs, `runResearchStream` (`src/api.ts`) reads the server-sent 
 
 ## Compare, export and saved places
 
-- **Saved places** (`storage.ts`, `SearchHero.tsx`): the star in the top bar saves the open place in this browser (`localStorage`,
-  at most 12, keyed by coordinates so two spellings of one spot are one place). Saved places are listed on the search page, where
-  a place is picked; the landing page has no place picker, so they are not there. Nothing leaves the browser.
-- **Export** (`report.ts`, `download.ts`, `ExportButtons` in `ResponsePanel.tsx`): "Download report" and "Copy as Markdown" build a
+- **Saved places** (`storage.ts`, `TopNav.tsx`, `SearchHero.tsx`): the star in the top bar opens a menu with "Save this place" (or
+  "Remove this place from saved") and the list of saved places, each one click to open, with a remove button; a count shows on the
+  button. They are kept in this browser (`localStorage`, at most 12, keyed by coordinates so two spellings of one spot are one place),
+  and are also listed on the search page. The landing page has no place picker, so they are not there. Nothing leaves the browser.
+- **Export** (`report.ts`, `download.ts`, `ExportButtons` in `ResponsePanel.tsx`): icon buttons at the right of the answer's tab row
+  (print or save as PDF, download, copy as Markdown), each with a tooltip on hover or keyboard focus (`IconButton.tsx`). They build a
   report from the response on screen: the question, the summary, key findings, every claim with the sources it rests on, the
-  limitations and a numbered source list. `report.ts` is pure functions, unit-tested in Node (`e2e/report.spec.ts`). There is no PDF:
-  print the page, or convert the Markdown.
+  limitations and a numbered source list. `report.ts` is pure functions, unit-tested in Node (`e2e/report.spec.ts`). PDF comes from the browser's own print
+  dialog, on a print-styled page (`buildReportHtml`).
 - **Compare** (`ComparePlaces.tsx`): a dialog that takes the open place, a second place picked from the search suggestions (so both are
   exact) and one question, and runs `runResearchStream` for each in turn, with each run's live steps shown in its own column. When both
   finish it shows both answers and `compareRows`: counts of what each run found. It never says which place is better, and the
   downloaded comparison says so too. If one run fails the other still shows, and there is no table. Results are not persisted.
+
+## Backdrop maps, the live feed's news link, and the "what it is doing" panel
+
+- **Backdrop maps.** Two still images of Midtown Manhattan, drawn once from OpenFreeMap's tiles of OpenStreetMap data. The landing page
+  shows `assets/landing-map.webp` still: a close-up (zoom 14.7, retina, 2880 by 1800) with street names, transit stops and building
+  shading. The search page's `MapBackdrop` uses the wider `assets/search-map.webp` (2560 by 1600) and drifts it along a diagonal with a
+  CSS animation (`.map-drift`: a sine path traced in keyframes, 52 s a cycle, about 5 px a second, switched off for reduced motion),
+  and credits the map data in the corner. An earlier version used easing between two ends of the sweep and looked frozen for several
+  seconds before it moved, at half the old pace; the sine path starts mid-sweep, already moving. It replaced a live map because a live map waited on tile requests and WebGL and arrived seconds
+  after the rest of the page; an image is there with it, with no tile requests. Only the map beside the question is still live.
+- **Live feed.** The news in it already comes from Google News' public RSS feed (headlines with real publication dates, no key). Since
+  a headline list cannot show more, the feed ends with "See more on Google News", which opens Google News' own results for the place
+  over the last 30 days (`googleNewsSearchUrl` in `maps.ts`). The feed's intro no longer says "No politics"; politics is still left
+  out of the feed.
+- **What the agent is doing** (`LiveSteps.tsx`, the loading panel in `ResponsePanel.tsx`): one line for the run's timing, and the
+  agent's *current* step as two plain centred lines, with no box of their own: the panel is the only container. Earlier steps are
+  behind "Show all N steps" and open as a timeline (a thin line with dots), not a second bordered box; the sliding bar and the long
+  paragraph about the model's speed are gone.
+- **Compare** opens in the middle of the page (it used to hug the top).

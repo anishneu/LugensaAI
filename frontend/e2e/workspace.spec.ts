@@ -76,9 +76,14 @@ test.describe("research progress", () => {
     await expect(steps).toContainText("Resolved 'Harvard Square'");
 
     await page.evaluate((s) => window.__sse.send("step", s), step("Selected community search for 'community_sentiment'", "tool_selection"));
-    await expect(steps.getByRole("listitem")).toHaveCount(2);
+    // What shows is what it is doing now; the step before it is one click away, not on the screen.
     await expect(steps).toContainText("Selected community search");
-    await expect(steps).toContainText("Resolved 'Harvard Square'"); // the earlier step stays
+    await expect(steps).not.toContainText("Resolved 'Harvard Square'");
+    await steps.getByRole("button", { name: "Show all 2 steps" }).click();
+    await expect(steps.getByRole("listitem")).toHaveCount(2);
+    await expect(steps).toContainText("Resolved 'Harvard Square'");
+    await steps.getByRole("button", { name: "Hide the steps" }).click();
+    await expect(steps.getByRole("listitem")).toHaveCount(0);
 
     await page.evaluate((r) => window.__sse.send("result", r), researchResult("Is it a good place to visit as a tourist?"));
     await page.evaluate(() => window.__sse.close());

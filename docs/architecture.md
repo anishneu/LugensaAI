@@ -532,7 +532,7 @@ All eight milestones from the original project plan are implemented, plus later 
   rendered once from OpenFreeMap's style of OpenStreetMap data (a one-off capture; the first attempt came out blank because it
   read the canvas before the tiles had loaded, the same failure in miniature), 254 KB, so the page has nothing moving or
   re-drawing. The workspace preview under the hero was cut to the top of the layout with a fade, since showing all of it made it
-  taller than the screen. The search page keeps a live map and now drifts up and down slowly on its own (26 s a sweep, eased
+  taller than the screen. (Superseded in Milestone 37: the search page's map is now an image.) The search page keeps a live map and now drifts up and down slowly on its own (26 s a sweep, eased
   at each turn, off for reduced motion) and fades in when its first frame is drawn, so the grey wait is not seen.
 - **Milestone 27:** four things from a review of the running product. (1) **Reddit had disappeared from the feed and the
   Community tab.** Measured against the live API (Erfurt): `include_domains=["reddit.com"]` at basic depth returns
@@ -680,3 +680,28 @@ All eight milestones from the original project plan are implemented, plus later 
   (no search key, so no credit spent), with the four-minute model wait time-lapsed 30 times; it is a truthful demo and a modest one, since
   with no web search the answer is thin, the one claim the model made was flagged insufficient because its wording was not in its cited
   source, and the Details tab lists what was not searched.
+- **Milestone 37:** a round of fixes from use. *Backdrops:* the landing map was Tokyo and the search page's a random world city;
+  both became an image of Midtown Manhattan (Milestone 38 gave the landing page its own close-up). The search page's map had been a live one that showed seconds after everything else
+  (it waited on tile requests and WebGL); it is now that image, present with the page and drifting on a diagonal by CSS. *Live feed:*
+  the news was already Google News' public RSS; it now links to Google News' own results, and the intro no longer says "No politics".
+  *Multiple questions in one prompt:* before, the whole prompt went through as one string, so the plan's topics covered every question
+  but nothing made the answer address each or say which one the evidence could not answer. `split_prompt` (plain rules, cautious: a
+  sentence typed with a question mark but starting like a statement, "I heard a great deal about it?", is context, not a question)
+  now finds the questions, the trace says how many, and the writer is told to answer each in a numbered paragraph and to say so for
+  any it cannot. Checked on the real model with a three-part prompt: it answered the two questions in numbered paragraphs and dealt
+  with the third, a mistyped statement, honestly ("Food expense levels were not addressed in the evidence"). This does not split the
+  *research* per question. *Saved places:* they were only listed on the search page, which is not where anyone looks after saving;
+  the star is now a menu with the list, a count and remove. *Export:* the three text buttons became icons with tooltips at the right of
+  the tab row, and the tab spacing was tightened because at 1280 px the tabs and icons no longer fit together. *Compare* is centred.
+  *The "what it is doing" panel* showed a growing step list, a bar, timing and two paragraphs at once; it now shows the timing and the
+  current step, with the rest behind a link. *The Hugging Face warning* ("unauthenticated requests to the HF Hub") came from checking
+  the Hub for the small search model on every start; a model already on the machine is now loaded from it, quietly and in 0.2 s, and
+  fetched only the first time. Tests: 561 backend, 42 frontend (23 in a browser, 19 plain unit tests).
+- **Milestone 38:** three things from looking at Milestone 37 in use. *Landing map:* a close-up of Midtown Manhattan (zoom 14.7,
+  rendered at 2x) with street names, transit stops and building shading; zoom 15.3 was tried first and was too heavy, with dark 3D
+  building sides everywhere. The search page keeps the wider image. *The drift:* the diagonal drift used CSS `ease-in-out` between two
+  ends of a sweep, so it crept for several seconds before it seemed to move, and at 48 s a sweep it was about half the pace of the old
+  live map, which is the pace that was liked. It is now a sine path traced in 21 keyframes, linear between them, that starts mid-sweep
+  and already moving (52 s a cycle, about 5 px a second); a test asserts it has moved more than 5 px on both axes within two seconds
+  of load. *"Box inside a box":* the agent panel was a card containing a bordered current-step box and a bordered step list; the
+  current step is now two plain lines and the history a timeline, so the card is the only container. Tests: 42 frontend, 561 backend.

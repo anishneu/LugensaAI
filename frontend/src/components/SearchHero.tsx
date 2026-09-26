@@ -1,13 +1,10 @@
-import { lazy, Suspense } from "react";
 import { XMarkIcon } from "@heroicons/react/24/outline";
 import { StarIcon } from "@heroicons/react/24/solid";
 import { placeKey } from "../storage";
 import type { SavedPlace } from "../storage";
 import type { ActiveLocation } from "../types";
 import { LocationSearchInput } from "./LocationSearchInput";
-
-// The map library is large and the backdrop is decoration: load it after the page is usable, in its own chunk.
-const MapBackdrop = lazy(() => import("./MapBackdrop"));
+import MapBackdrop from "./MapBackdrop";
 
 interface SearchHeroProps {
   query: string;
@@ -24,11 +21,17 @@ interface SearchHeroProps {
 export function SearchHero({ query, onQueryChange, onSelect, onSubmit, pendingQuestion, saved = [], onRemoveSaved }: SearchHeroProps) {
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#0b0a14] px-6 py-12 text-white">
-      <Suspense fallback={null}>
-        <MapBackdrop />
-      </Suspense>
+      <MapBackdrop />
       {/* Dims the map so the text reads, and settles into the same dark tone the page starts with. */}
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#0b0a14]/80 via-[#0b0a14]/70 to-[#0b0a14]/90" />
+      <a
+        href="https://www.openstreetmap.org/copyright"
+        target="_blank"
+        rel="noreferrer"
+        className="absolute right-4 bottom-3 z-10 text-[11px] text-white/40 transition hover:text-white/70"
+      >
+        Map data © OpenStreetMap contributors
+      </a>
 
       <div className="relative flex w-full max-w-2xl flex-col gap-6 text-center">
         <p className="m-0 text-xs font-semibold tracking-[0.16em] text-violet-300 uppercase">Lugensa AI · location intelligence</p>

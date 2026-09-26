@@ -40,6 +40,7 @@ from app.models.place_profile import PlaceProfile
 from app.models.response import ResearchResponse
 from app.models.trace import ResearchTraceStep, TraceStage
 from app.planning.planner import ResearchPlanner
+from app.planning.questions import split_prompt
 from app.retrieval.base import EvidenceRetriever
 from app.synthesis.claim_extractor import ClaimExtractor
 from app.synthesis.synthesizer import Synthesizer
@@ -476,6 +477,15 @@ class LocationResearchAgent:
             TraceStage.QUESTION_UNDERSTANDING,
             f"Detected intent(s): {', '.join(plan.detected_intents) or 'none'}",
         )
+        # One message can hold several questions. The plan already covers them all (its topics come from the whole text); what
+        # this adds is that the answer is asked to address each in turn, and to say which one the evidence could not answer.
+        prompt_parts = split_prompt(question)
+        if prompt_parts.is_multi:
+            log(
+                TraceStage.QUESTION_UNDERSTANDING,
+                f"The prompt holds {len(prompt_parts.questions)} questions, each to be answered on its own: "
+                + " | ".join(prompt_parts.questions),
+            )
         log(
             TraceStage.RESEARCH_PLANNING,
             f"Planned {len(plan.topics)} topic(s): {', '.join(t.topic_id for t in plan.topics)}",
@@ -731,8 +741,9 @@ class LocationResearchAgent:
         )
 
         log(TraceStage.SYNTHESIS, "Writing the overview from the verified claims and evidence")
+        several = {"questions": prompt_parts.questions} if prompt_parts.is_multi else {}
         synthesis = self.synthesizer.synthesize(
-            location, question, plan, verified_claims, all_evidence, evidence_topic_ids
+            location, question, plan, verified_claims, all_evidence, evidence_topic_ids, **several
         )
         log(TraceStage.SYNTHESIS, "Generated summary and recommendation from verified claims and evidence")
 

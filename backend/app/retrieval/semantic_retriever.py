@@ -53,7 +53,18 @@ def _load_model(model_name: str) -> object:
     if model is None:
         from sentence_transformers import SentenceTransformer
 
-        model = SentenceTransformer(model_name)
+        try:  # a progress bar for a 0.2-second load is only noise in the server's log
+            from transformers.utils import logging as transformers_logging
+
+            transformers_logging.disable_progress_bar()
+        except Exception:  # noqa: BLE001 - cosmetic: never a reason to fail
+            pass
+        try:
+            # A model already on this machine is loaded from it, without contacting Hugging Face: no network check on every
+            # start, and none of the "unauthenticated requests to the HF Hub" warning that check prints.
+            model = SentenceTransformer(model_name, local_files_only=True)
+        except Exception:  # noqa: BLE001 - not downloaded yet (the first run ever): fetch it once
+            model = SentenceTransformer(model_name)
         _MODEL_CACHE[model_name] = model
     return model
 

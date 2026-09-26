@@ -1,3 +1,11 @@
+/** Google News' own search for a place over the last 30 days: the full results, which the live feed's headline-only list cannot show.
+ * The name is quoted so a street is matched as a phrase, and the city is added so a shared name means this one. */
+export function googleNewsSearchUrl(place: { displayName: string; city: string | null }): string {
+  const name = place.displayName.split(",")[0].trim();
+  const query = `"${name}" ${place.city ?? ""} when:30d`.replace(/\s+/g, " ").trim();
+  return `https://news.google.com/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`;
+}
+
 /** Where "open in a new window" goes: Google Maps at exact coordinates. No API key involved. */
 export function googleMapsUrl(latitude: number, longitude: number): string {
   return `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;

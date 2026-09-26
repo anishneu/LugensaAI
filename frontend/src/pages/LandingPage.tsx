@@ -98,8 +98,8 @@ export function LandingPage() {
           <img
             src={landingMap}
             alt=""
-            width={1440}
-            height={810}
+            width={2880}
+            height={1800}
             fetchPriority="high"
             decoding="async"
             className="pointer-events-none absolute inset-0 h-full w-full object-cover"
