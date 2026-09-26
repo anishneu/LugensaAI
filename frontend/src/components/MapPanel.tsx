@@ -78,7 +78,11 @@ export default function MapPanel({ location }: { location: ActiveLocation }) {
     map.getCanvas().style.cursor = "pointer";
     markerRef.current = new Marker({ element: createPin() }).setLngLat([longitude, latitude]).addTo(map);
     mapRef.current = map;
+    // The map's box changes size with the window and with the question box below it: keep the map drawn to fit.
+    const watcher = new ResizeObserver(() => map.resize());
+    watcher.observe(container.current);
     return () => {
+      watcher.disconnect();
       map.remove();
       mapRef.current = null;
       markerRef.current = null;
@@ -93,7 +97,7 @@ export default function MapPanel({ location }: { location: ActiveLocation }) {
 
   return (
     <section
-      className="group relative h-64 w-full flex-shrink-0 overflow-hidden border-b border-[var(--border)] bg-[var(--bg-alt)]"
+      className="group relative h-64 w-full flex-shrink-0 overflow-hidden lg:h-auto lg:min-h-[180px] lg:flex-1 border-b border-[var(--border)] bg-[var(--bg-alt)]"
       aria-label={`Map of ${location.displayName}`}
     >
       {hasCoords && !failed ? (

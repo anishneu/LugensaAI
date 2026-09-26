@@ -191,8 +191,8 @@ export function ResearchWorkspace() {
           />
           <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[264px_minmax(0,1fr)_288px] xl:grid-cols-[340px_minmax(0,1fr)_340px]">
             {/* Left: the pin on a zoomed-in map, and where you ask. */}
-            <aside className="flex min-h-0 flex-col border-b border-[var(--border)] bg-[var(--bg-alt)] lg:overflow-y-auto lg:border-r lg:border-b-0">
-              <Suspense fallback={<div className="h-64 w-full animate-pulse bg-[var(--bg)]" />}>
+            <aside className="flex min-h-0 flex-col border-b border-[var(--border)] bg-[var(--bg-alt)] lg:overflow-hidden lg:border-r lg:border-b-0">
+              <Suspense fallback={<div className="h-64 w-full animate-pulse bg-[var(--bg)] lg:h-auto lg:min-h-[180px] lg:flex-1" />}>
                 <MapPanel location={location} />
               </Suspense>
               <ChatSidebar

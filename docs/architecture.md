@@ -759,3 +759,18 @@ All eight milestones from the original project plan are implemented, plus later 
   good place to visit as a tourist?", free mode with no search or Google key, so no credit spent) so they show the current top bar, agent
   panel and live feed. The answer is a thin, honest one for the same reason as before (no web search: mixed/partial evidence, 1 of 4
   topics supported); the model wait is time-lapsed 30 times in the GIF (4.2 MB).
+  *CI catch:* the first push with the centred tooltips failed the UI tests on GitHub's Linux runner and passed here on Windows. Linux's
+  default sans font is wider than Windows', and the invisible "Compare with another place" tooltip, now centred, stuck out 7 px past the
+  right edge of a phone screen and made the page scroll sideways (327 px on a 320 px screen; 382 on 375). Fixed by centring the tooltip only
+  from the `sm` breakpoint up. The mobile tests now run in a wide font, so the same mistake fails on any machine (checked: they fail
+  against the old tooltip). One more test was flaky in CI, not broken: the left-sidebar test measured before the lazily loaded map had taken
+  its final height; it now waits for the map and measures until steady.
+- **Milestone 44:** *The left column (map, question box, suggestions) is now fixed to the window.* It used to scroll as a whole when the window
+  was short, which pushed the suggestions out of sight. On a desktop it is now exactly as tall as the window and never scrolls: the map
+  takes the space the rest leaves (never under 180 px; the map redraws itself to fit, via a `ResizeObserver`), the question box keeps its
+  size, and on short windows (under 760 px tall) the one-line explanation goes and the spacing tightens so everything still fits. Once
+  questions have been asked, only their own list scrolls. Phones keep the old stacked layout. Tests: the column has no scroll at 1440x900,
+  1280x720 and 1280x600 with the last suggestion fully in view and the map at least 180 px; with six questions asked only the list scrolls.
+  `workspace.jpg` and `demo.gif` were re-taken from a new real run (free mode, no credit spent) to show it. That run needed a longer
+  wait for the first step: the first request after the backend starts imports the search-model libraries, which took about 40 s on a busy
+  machine (the app already says so on screen). Tests: 563 backend, 60 frontend (36 in a browser, 24 plain unit).
