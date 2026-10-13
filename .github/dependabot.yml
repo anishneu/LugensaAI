@@ -1,14 +1,17 @@
 version: 2
 
-# Monthly, grouped update PRs, so dependencies don't quietly rot, even though the project itself is complete, and
-# the repository is not buried in them. Each ecosystem gets one grouped PR (minor and patch updates together), and at most
-# two are open at a time. Major-version bumps are not proposed automatically: they are decisions, not chores.
+# DISABLED: the project is complete, so Dependabot does not open update PRs on its own. Every ecosystem below has
+# `open-pull-requests-limit: 0`, which turns version updates off while keeping this file as it was. To run updates again, set each
+# limit back to its old value (2 for pip and npm, 1 for the workflows) and, if you like, change `interval`.
+#
+# When enabled: monthly, grouped update PRs (minor and patch together), no major-version bumps (those are decisions, not chores).
+
 updates:
   - package-ecosystem: pip
     directory: /backend
     schedule:
       interval: monthly
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 0
     groups:
       python-minor-and-patch:
         update-types: [minor, patch]
@@ -20,7 +23,7 @@ updates:
     directory: /frontend
     schedule:
       interval: monthly
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 0
     groups:
       npm-minor-and-patch:
         update-types: [minor, patch]
@@ -32,7 +35,7 @@ updates:
     directory: /
     schedule:
       interval: monthly
-    open-pull-requests-limit: 1
+    open-pull-requests-limit: 0
     groups:
       actions:
         patterns: ["*"]

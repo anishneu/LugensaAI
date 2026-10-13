@@ -616,7 +616,7 @@ LugensaAI/
 │       ├── pages/         LandingPage, ResearchWorkspace
 │       └── components/    workspace panels, live feed, map, place/ (Google Maps + Around this pin), landing/
 ├── docs/                  architecture.md, research-workflow.md, evaluation.md, images/
-└── .github/               workflows (ci, codeql, secret-scan, dependency-audit, release), scripts, dependabot.yml
+└── .github/               workflows (ci, codeql, secret-scan, dependency-audit, release), scripts, dependabot.yml (off)
 ```
 
 See [`backend/README.md`](backend/README.md) for the backend's internal layout.
@@ -656,7 +656,7 @@ so CI is free, offline and deterministic just like a local `pytest`.
 | [`secret-scan.yml`](.github/workflows/secret-scan.yml) | every push and PR | Gitleaks over the full history, because a key committed once and deleted later is still leaked. |
 | [`dependency-audit.yml`](.github/workflows/dependency-audit.yml) | PRs, weekly, manual | Dependency review on PRs (blocks newly introduced high-severity issues), plus `pip-audit` and `npm audit` on what is actually installed. |
 | [`release.yml`](.github/workflows/release.yml) | pushing a `v*` tag | Re-runs tests, lint and build from that exact commit, then publishes a GitHub Release with generated notes and the frontend bundle attached. Never releases untested code. |
-| [`dependabot.yml`](.github/dependabot.yml) | monthly | Grouped update PRs for pip, npm and the workflows themselves. |
+| [`dependabot.yml`](.github/dependabot.yml) | disabled | Grouped update PRs for pip, npm and the workflows, switched off (`open-pull-requests-limit: 0`) now the project is complete; set the limits back to turn it on. |
 
 **Why CodeQL failed on a private repository, and what was changed.** It failed twice, for two different reasons, both
 after a clean analysis (every file was scanned). First: "Resource not accessible by integration ... get-a-workflow-run",
@@ -672,8 +672,10 @@ its read-only token, so the job skips Dependabot's PRs (the push and weekly scan
 why the dependency review no longer posts a PR comment, and why the secret scan asks for `pull-requests: read`. The
 dependency review has the same gate as the CodeQL upload, since on a private repo it needs the dependency graph.
 
-Dependabot opens at most one grouped, minor-and-patch PR per ecosystem a month (two for pip and npm at a time) and no
-major-version bumps; its PRs are ordinary PRs, safe to close (`@dependabot close`) or merge once CI is green.
+Dependabot's automatic update PRs are switched off now that the project is complete: `.github/dependabot.yml` is kept, with every
+ecosystem's `open-pull-requests-limit` set to `0`, so nothing opens a pull request on its own unless someone turns it back on. The
+weekly `pip-audit` and `npm audit` runs remain: they report a newly published advisory against the pinned versions, and
+`npm audit fix` (or a version bump in `requirements.txt`) is how to answer one.
 
 These have been validated with `actionlint` and their commands run locally, but a workflow only
 proves itself on GitHub — the first run of each is the real test.

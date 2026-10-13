@@ -34,7 +34,7 @@ search or forum returns something unpleasant about a place.
 - Error text from an unexpected failure is logged on the server and not returned to the caller.
 - Text from sources is escaped in the printable report and rendered as text, not markup, in the app; the XML feed parser refuses
   documents that declare a DOCTYPE or entities.
-- CodeQL, `pip-audit`, `npm audit` and dependency review run in CI, and Dependabot opens grouped update pull requests.
+- CodeQL, `pip-audit`, `npm audit` and dependency review run in CI; Dependabot is configured but its automatic update pull requests are switched off, as the project is complete.
 
 ## Supported versions
 
