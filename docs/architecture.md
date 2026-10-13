@@ -269,7 +269,7 @@ response's `limitations` field rather than hidden.
 
 ## Milestone status
 
-All eight milestones from the original project plan are implemented, plus later additions
+The project is complete: all eight milestones from the original project plan are implemented, plus later additions
 (9 onward, below); what's opt-in vs. free by default is summarized in the interface table above.
 
 - **Milestone 1:** the deterministic pipeline, first built and tested against invented fixture
