@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/anishneu/LugensaAI/actions/workflows/ci.yml/badge.svg)](https://github.com/anishneu/LugensaAI/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Status](https://img.shields.io/badge/status-in--progress-orange)
+![Status](https://img.shields.io/badge/status-completed-brightgreen)
 ![Cost](https://img.shields.io/badge/runs-free%20%2F%20local-brightgreen)
 
 <img src="docs/images/landing.jpg" alt="The Lugensa AI landing page: 'Ask about any place. Get an answer you can check.'" width="100%">
@@ -28,7 +28,7 @@ the project**, and it never invents data: with nothing configured it says so ins
 
 **Author:** Anish Kuila
 
-**Status:** Working Progress
+**Status:** Completed
 
 ## Table of contents
 

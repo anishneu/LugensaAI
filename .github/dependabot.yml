@@ -1,7 +1,7 @@
 version: 2
 
-# Monthly, grouped update PRs, so dependencies don't quietly rot but a repository that is still being built
-# is not buried in them. Each ecosystem gets one grouped PR (minor and patch updates together), and at most
+# Monthly, grouped update PRs, so dependencies don't quietly rot, even though the project itself is complete, and
+# the repository is not buried in them. Each ecosystem gets one grouped PR (minor and patch updates together), and at most
 # two are open at a time. Major-version bumps are not proposed automatically: they are decisions, not chores.
 updates:
   - package-ecosystem: pip
