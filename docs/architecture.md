@@ -774,3 +774,11 @@ The project is complete: all eight milestones from the original project plan are
   `workspace.jpg` and `demo.gif` were re-taken from a new real run (free mode, no credit spent) to show it. That run needed a longer
   wait for the first step: the first request after the backend starts imports the search-model libraries, which took about 40 s on a busy
   machine (the app already says so on screen). Tests: 563 backend, 60 frontend (36 in a browser, 24 plain unit).
+- **Milestone 45:** closing the project down. *Dependabot's automatic update PRs were switched off* (`.github/dependabot.yml` kept, every `open-pull-requests-limit` set to 0, so it can be turned back on): the
+  project is complete and each merge pulled in a new round of version bumps. The weekly `pip-audit` / `npm audit` runs stay, so a
+  newly published advisory is still reported. *The "npm audit (frontend)" check failing on pull requests* was a real finding and not a
+  flaky job: a high-severity advisory (GHSA-68fv-2mgg-jv7q, event-loop denial of service) was published against `source-map-js` 1.2.1, a
+  build-time dependency pulled in through Vite and PostCSS (it never ships in the app). Every PR ran the audit and failed on it; the fix
+  is `npm audit fix`, which moves the lockfile to `source-map-js` 1.2.2 and nothing else (3 lines), and the audit now reports 0
+  vulnerabilities. (That the check "passed after merging" is unverified: the audit does not run on a push to `main`, only on pull
+  requests and weekly, so a merge was never actually re-audited.)
